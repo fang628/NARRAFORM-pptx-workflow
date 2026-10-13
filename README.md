@@ -9,8 +9,8 @@
 需要 Node.js 20+、Python 3.10+。完整 PPTX 渲染与对照需要 **Windows 和已安装的 Microsoft PowerPoint**。
 
 ```powershell
-git clone https://github.com/fang628/ppt-agent.git
-cd ppt-agent
+git clone https://github.com/fang628/pptx-agent.git
+cd pptx-agent
 .\start.cmd
 ```
 
