@@ -4,7 +4,7 @@ import {themeAssetDialogs,themeDirectionOptions,themePromptReview} from './theme
 import {apiTypes,createAPIAutosave,apiPersistenceMessage} from './api-config.js';
 import {taskProgress,imageTaskChoices,imageTaskDialog,imageTaskOptions,taskChoicePayload,bindImageTaskSorting,projectResultKey,captureLiveView,restoreLiveView} from './task-progress.js';
 import {initMaterialCropEditor,originalMaterialCount,imageOrigin,materialImageDialog,imageLibrary,extractionButtons,extractionReport} from './material-images.js';
-import {visualConcepts,visualPreview,visualDelivery,visualDialogs,previewApprovalDialogContent,previewImageURL,layoutPreviewGrid} from './visual-ui.js';
+import {visualConcepts,visualPreview,visualDelivery,visualDialogs,previewApprovalDialogContent,previewImageURL,layoutPreviewGrid,bindRebuildMentions,rebuildFeedbackRequest} from './visual-ui.js';
 import {initialElements} from '/elements-model.js';
 import {pageDesignPanel,rememberDesignFeedback,markPageDesignDirty,reconstructionPanel,rememberDesignExpansion,saveAndConfirmPageDesigns,batchDesignResult} from './page-design.js';
 import {elementEditor,collectElementSlide,syncCaptionFields,mutateElements,bindTreeInteractions,moveElementBranch,syncLegacy} from './element-editor.js';
@@ -48,7 +48,7 @@ const hasQueuedImages=()=>p?.imageTaskQueue?.some(t=>t.status==='queued');
 const imageActions=new Set(['image','concepts','generateConceptPage','generateFullPreview','generateThemeAsset']);
 const designActions=new Set(['content','designPage','revisePageDesign','draftPageDesigns']);
 const imageAction=(action,extra)=>imageActions.has(action)||(action==='generateThemeAssets'&&Array.isArray(extra?.prompts))||(p?.designTaskQueueEnabled&&designActions.has(action));
-const canAddWhileBusy=e=>e.matches("[data-rebuild-asset-instruction],[data-rebuild-element-instruction],[data-suggest-remove-asset]")||p?.imageTaskQueueEnabled&&(e.matches('[data-generate-page],[data-retry-concept],[data-visual-prompt],[data-image-prompt],[data-theme-asset-prompt],[data-theme-assets-batch],[data-action=concepts],[data-action=generateFullPreview]')||(p.designTaskQueueEnabled&&e.matches('[data-action=content],[data-action=draftPageDesigns],[data-page-design-action=designPage],[data-page-design-action=revisePageDesign],[data-design-feedback]')));
+const canAddWhileBusy=e=>e.matches("[data-rebuild-asset-instruction],[data-suggest-remove-asset]")||p?.imageTaskQueueEnabled&&(e.matches('[data-generate-page],[data-retry-concept],[data-visual-prompt],[data-image-prompt],[data-theme-asset-prompt],[data-theme-assets-batch],[data-action=concepts],[data-action=generateFullPreview]')||(p.designTaskQueueEnabled&&e.matches('[data-action=content],[data-action=draftPageDesigns],[data-page-design-action=designPage],[data-page-design-action=revisePageDesign],[data-design-feedback]')));
 const preview=(i=0,theme='')=>previewImageURL(p,i,theme);
 function empty(title,text){return `<div class="panel empty"><span class="eyebrow">ONE STEP AT A TIME</span><h2>${h(title)}</h2><p>${h(text)}</p><button class="secondary" data-nav="${Math.max(tab-1,0)}">返回上一步 ←</button></div>`;}
 let progressSnapshot='',queueSorting=false;
@@ -76,7 +76,7 @@ ${p?materialPanel(p,icon,sendQueue,materialDraft,selectionSummary):''}<form id="
 function content(){if(!p?.approvals.requirements)return empty('先把需求准备好','回到第一步，确认主题、受众与材料。');return heading('02 / CONTENT STUDIO','构建内容结构。','AI 先完成文案、内容树与单页设计稿，你可以直接修改并逐页确认。',`<div class="actions content-studio-actions"><button class="secondary" data-action="content">${p.slides.length?'重新生成 AI 初稿':'AI 生成内容与设计'} ↗</button>${p.slides.length?'<button class="secondary" data-action="draftPageDesigns">补齐 AI 设计稿 ↗</button><button class="primary" id="saveApprove">保存并确认内容与设计 →</button>':''}</div>`)+`<div class="notice">${p.demo?'当前是固定示例内容，没有调用 AI。':(p.analysisCurrent&&p.analysis?.approvedAt?'已结合确认后的材料理解；请继续核对事实与配图。':'发送材料后，请回到第一步识别并确认材料理解。')} ${p.approvals.content===p.version?'当前版本内容已确认。':'当前版本等待确认。'}</div>`+batchDesignResult(p)+(p.slides.length?`<form id="slidesForm">${p.slides.map((s,i)=>`<section class="panel slide-editor" data-slide="${i}"><div class="slide-summary"><div class="slide-number">SLIDE ${String(i+1).padStart(2,'0')} / ${p.slides.length}</div>${p.pageDesigns?.[i]?.layoutCurrent?'<span class="tag content-confirmed-state">✓ 本页内容已确认</span>':''}<p class="subtle">${s.sources.length?'来源：'+s.sources.map(id=>h(p.materials.find(m=>m.id===id)?.name||id)).join('、'):'来源：用户说明／待核实'}</p></div><div class="editor-fields">${elementEditor(p,s,i)}${pageDesignPanel(p,i)}<div class="form-grid"><label>页型<select data-field="kind">${[['cover','封面 / 标题页'],['toc','目录'],['content','内容'],['section','章节']].map(([k,n])=>`<option value="${k}" ${k==='toc'&&p.executionConcurrency===undefined?'disabled':''} ${s.kind===k?'selected':''}>${n}</option>`).join('')}</select></label><label>演讲备注<textarea data-field="notes" rows="2">${h(s.notes)}</textarea></label></div>${sourcePanel(p,s,i)}<div class="editor-toolbar"><button type="button" class="text-button" data-revise="${i}">${icon('spark')} 用 AI 修改此页</button><button type="button" class="text-button" data-move="${i},-1" ${i===0?'disabled':''}>↑ 上移</button><button type="button" class="text-button" data-move="${i},1" ${i===p.slides.length-1?'disabled':''}>↓ 下移</button><button type="button" class="text-button danger" data-delete="${i}">删除</button></div></div></section>`).join('')}<div class="actions"><button class="secondary" type="submit">保存内容</button><button class="secondary" type="button" id="addSlide">＋ 添加一页</button></div></form>`:`<div class="panel empty"><h2>内容工作台已经准备好了</h2><p>连接文字 API，让模型围绕你的目标生成逐页内容。</p><button class="primary" data-action="content">生成逐页内容 ↗</button></div>`);}
 function concepts(){return visualConcepts(p,heading,empty);}
 function fullPreview(){return visualPreview(p,heading,empty,sourcePanel);}
-function delivery(){return visualDelivery(p,empty,icon);}
+function delivery(){return visualDelivery(p,empty,icon,heading);}
 function render({keepView=false}={}){
   const changed=renderedTab!==tab||renderedProject!==(p?.id||null),main=$('#main');
   const view=keepView&&!changed?captureLiveView(main):null,scroll=view?{x:window.scrollX,y:window.scrollY}:null;
@@ -104,7 +104,7 @@ function render({keepView=false}={}){
     if(liveDraftRecovery.length)main.insertAdjacentHTML('beforeend',`<details data-live-recovery class="notice"><summary>保留的未提交编辑 · ${liveDraftRecovery.length} 项</summary><p>AI 更新了原字段结构，以下修改保留供你复制使用。</p>${liveDraftRecovery.map(d=>`<label>${h(d.label)}<textarea readonly rows="2">${h(d.check?String(d.checked):d.value)}</textarea></label>`).join('')}</details>`);
   }
   layoutMaterialReports(main);
-  layoutPreviewGrid(main);
+  layoutPreviewGrid(main);bindRebuildMentions(main,()=>p);
   bindForms();syncSinglePageOptions();aiImageEditor.refresh();syncPromptUI();syncTreeUndo();syncAPIStatus();syncImageLibrary();
   if(changed){window.scrollTo(0,0);void main.offsetWidth;main.classList.add('page-enter');}
   if(restored){restored.focus();window.scrollTo(scroll.x,scroll.y);}
@@ -354,7 +354,7 @@ document.addEventListener('click',e=>safe(async()=>{
   if(b.dataset.reviewPreview!==undefined){await act('reviewPreviewPage',{index:Number(b.dataset.reviewPreview),checked:true},3);toast('本页预览已检查');return;}
   if(b.dataset.visualPrompt!==undefined){if(p.aiImageEditModes){aiImageEditor.open({targetType:'visual',index:Number(b.dataset.visualPrompt),kind:b.dataset.visualKind||'full',theme:b.dataset.visualTheme});return;}visualEdit={index:Number(b.dataset.visualPrompt),kind:b.dataset.visualKind,theme:b.dataset.visualTheme};const page=visualEdit.kind==='concept'?p.concepts.find(c=>c.id===visualEdit.theme).representatives.find(r=>r.index===visualEdit.index):p.visualPages[visualEdit.index];$('#visualPromptTitle').textContent='S'+String(visualEdit.index+1).padStart(2,'0')+' · 整页生图提示词';setPromptInput($('#visualPromptText'),page.promptDraft||page.redrawPrompt||page.prompt,{reset:true,onChange:()=>$('#visualPromptConsent').checked=false});$('#visualPromptInstruction').value='';$('#visualPromptConsent').checked=false;$('#visualPromptState').textContent='生成模型：'+page.model;$('#visualPromptDialog').showModal();return;}
   if(['saveVisualPrompt','rewriteVisualPrompt','generateVisualPrompt'].includes(b.id)){if(!visualEdit)throw Error('请重新打开提示词');const payload={...visualEdit,prompt:$('#visualPromptText').value,instruction:$('#visualPromptInstruction').value};if(b.id==='generateVisualPrompt'){if(!$('#visualPromptConsent').checked)throw Error('请确认发送提示词并重新生图');await act(visualEdit.kind==='concept'?'generateConceptPage':'generateFullPreview',{...payload,force:true});$('#visualPromptDialog').close();}else{await act(b.id==='saveVisualPrompt'?'saveVisualPrompt':'rewriteVisualPrompt',payload);$('#visualPromptState').textContent=b.id==='saveVisualPrompt'?'草稿已保存':'正在改写，完成后请核对草稿';}return;}
-  if(b.dataset.reviewRelease!==undefined){const i=Number(b.dataset.reviewRelease),panel=$(`[data-release-page="${i}"]`),checks=Object.fromEntries([...panel.querySelectorAll('[data-release-check]')].map(e=>[e.dataset.releaseCheck,e.checked]));await act('reviewReleasePage',{index:i,checks,notes:panel.querySelector('[data-release-notes]').value,acceptDeviations:!!panel.querySelector('[data-accept-deviations]')?.checked},4);toast('本页对照复核已保存');return;}
+
   if(b.dataset.testApi){if(!$('#apiForm').reportValidity())return;await persistAPIConfiguration();await act('testAPI',{type:b.dataset.testApi});syncAPIStatus();return;}
 
 
@@ -417,13 +417,14 @@ document.addEventListener('click',e=>safe(async()=>{
   if(b.id==='saveImagePrompt'){assertPromptEditor();await act('saveImagePrompt',promptPayload());$('#imagePromptState').textContent='草稿已保存；当前图片使用的提示词保持在上方记录中。';return;}
   if(b.id==='rewriteImagePrompt'){assertPromptEditor();if(!p.apiReady){openAPI();toast('自然语言改写需要连接文字模型');return;}const body=promptPayload();if(!body.instruction.trim())throw Error('请填写自然语言修改要求');await act('rewriteImagePrompt',body);return;}
   if(b.id==='cancelPromptTask'){await act('cancel');return;}
+  if(b.dataset.undoRebuildPage!==undefined){await act('undoRebuildEdit',{index:Number(b.dataset.undoRebuildPage)});return;}
   if(b.dataset.extractRebuildRegion!==undefined){rebuildRegionEditor.open(Number(b.dataset.extractRebuildRegion));return;}
-  if(b.dataset.reviseRebuildElement!==undefined){const index=Number(b.dataset.elementPage),key=b.dataset.reviseRebuildElement,field=$(`[data-rebuild-element-instruction="${key}"][data-element-page="${index}"]`),instruction=field?.value.trim();if(!instruction)throw Error('请填写此元素的修改要求');await act('reviseRebuildElement',{index,key,targetStamp:b.dataset.targetStamp,instruction});return;}
+
   if(b.dataset.suggestRemoveAsset!==undefined){
     const field=$(`[data-rebuild-asset-instruction="${Number(b.dataset.assetPage)}"]`),line='删除非事实元素「'+b.dataset.suggestRemoveAsset+'」。';if(field){field.value=[field.value.trim(),line].filter(Boolean).join('\n');field.focus();field.dispatchEvent(new Event('input',{bubbles:true}));}return;
   }
   if(b.dataset.reviseRebuildAssets!==undefined){
-    const index=Number(b.dataset.reviseRebuildAssets),instruction=$(`[data-rebuild-asset-instruction="${index}"]`)?.value.trim();if(!instruction)throw Error('请填写素材增删与调整意见');await act('reviseRebuildAssets',{index,instruction});return;
+    const index=Number(b.dataset.reviseRebuildAssets),request=rebuildFeedbackRequest(p,index,$(`[data-rebuild-asset-instruction="${index}"]`)?.value);await act(request.action,request.payload);return;
   }
   if(b.dataset.nav!==undefined){if(tab===1&&$('#slidesForm')&&JSON.stringify(collectSlides())!==JSON.stringify(p.slides))await saveSlides();tab=Number(b.dataset.nav);render();if(b.dataset.intakeSection)document.getElementById(b.dataset.intakeSection)?.scrollIntoView({behavior:'smooth',block:'start'});return;}
   if(b.dataset.action==='reuseDownstream'){
@@ -431,7 +432,7 @@ document.addEventListener('click',e=>safe(async()=>{
     await flushSlideEdits();const form=$('#briefForm');if(form&&!sameBrief(readBrief(form))){if(!form.reportValidity())return;await act('requirements',{brief:readBrief(form)});}
     await act('reuseDownstream');toast('已沿用原布局与图片，新文案已同步到后续设计');return;
   }
-  if(b.dataset.action){if(['content','concepts','draftPageDesigns'].includes(b.dataset.action)&&!p.apiReady){openAPI();toast('先连接文字模型，再执行生成');return;}if(['concepts','generateFullPreview'].includes(b.dataset.action)&&!p.imageReady){openAPI();toast('请配置通用生图 API');return;}if(['build','reconstructPreview'].includes(b.dataset.action)&&!p.rebuildReady){openAPI();toast('请配置支持视觉输入的主模型，或选填独立高性能视觉模型');return;}if(b.dataset.action==='draftPageDesigns')await flushSlideEdits();const next={approvePreview:4,generateFullPreview:3}[b.dataset.action],extra=['build','reconstructPreview'].includes(b.dataset.action)?{instruction:$('#rebuildInstructions')?.value||''}:{};await act(b.dataset.action,extra,next);return;}
+  if(b.dataset.action){if(['content','concepts','draftPageDesigns'].includes(b.dataset.action)&&!p.apiReady){openAPI();toast('先连接文字模型，再执行生成');return;}if(['concepts','generateFullPreview'].includes(b.dataset.action)&&!p.imageReady){openAPI();toast('请配置通用生图 API');return;}if(['build','reconstructPreview'].includes(b.dataset.action)&&!p.rebuildReady){openAPI();toast('请配置支持视觉输入的主模型，或选填独立高性能视觉模型');return;}if(b.dataset.action==='draftPageDesigns')await flushSlideEdits();const next={approvePreview:4,generateFullPreview:3}[b.dataset.action],extra={};await act(b.dataset.action,extra,next);return;}
   if(b.dataset.theme){await act('selectTheme',{id:b.dataset.theme},3);return;}
   if(b.id==='demo'){await create({title:'示例项目',pages:5,progress:true},true);return;}
   if(b.id==='addSlide'){const slides=collectSlides();slides.push({kind:'content',title:'新的页面',subtitle:'',body:[],notes:'',sources:[],imageId:null});await act('saveContent',{slides});return;}

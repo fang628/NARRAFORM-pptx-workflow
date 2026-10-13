@@ -65,3 +65,10 @@ test('纠正不能替换登记原件或越界，并保持页顶导航检查',asy
   await assert.rejects(auditedElements({slide,images:[image],request:async()=>{calls++;return {text:JSON.stringify({elements:bad})};}}),/登记原件/);assert.equal(calls,3);
   const raw=make();raw[0].w=1700;assert.throws(()=>validateAudit(raw,slide,[]),/画布/);
 });
+
+test('小标题和正文合并返回时在审计结束前纠正为两个独立原生文本框',async()=>{
+  const s={title:'标题',body:[],sources:[],elements:[{id:'title',type:'text',role:'title',text:'标题',parentId:null},{id:'heading',type:'group',label:'研究方法',parentId:'title'},{id:'body',type:'text',role:'body',text:'比较两组实验结果。',parentId:'heading'}]};
+  const nodes=canonicalTexts(s),separate=nodes.map((n,i)=>({...n,key:n.nodeId,type:'text',x:80,y:100+i*100,w:700,h:80,size:n.role==='heading'?32:24,color:'272727'}));let calls=0;const prompts=[];
+  const result=await auditedElements({slide:s,images:[],request:async prompt=>{prompts.push(prompt);calls++;return {text:JSON.stringify({elements:calls===1?[separate[0],{...separate[2],text:'研究方法\n比较两组实验结果。'}]:separate})};}});
+  assert.equal(calls,2);assert.match(prompts[1],/小标题与其下正文必须是两个独立/);assert.equal(result.audit.find(e=>e.nodeId==='heading').text,'研究方法');assert.equal(result.audit.find(e=>e.nodeId==='body').text,'比较两组实验结果。');assert.notEqual(result.audit[1].key,result.audit[2].key);
+});

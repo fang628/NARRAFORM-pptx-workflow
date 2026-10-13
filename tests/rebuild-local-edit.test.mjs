@@ -7,7 +7,7 @@ import {rebuildReviewLoop} from '../lib/rebuild-review-loop.mjs';
 import {visualStamp,validateAudit} from '../lib/visual-model.mjs';
 import {expectedRebuildText,splitHeadingNumber} from '../lib/rebuild-text-parts.mjs';
 import {regionFromPoints,logicalRegionPoint} from '../public/visual-ui.js';
-import {rebuildAssetsPanel,visualDelivery} from '../public/visual-ui.js';
+import {rebuildAssetsPanel,visualDelivery,rebuildFeedbackRequest} from '../public/visual-ui.js';
 
 const text=(key,nodeId,value,y)=>({key,type:'text',nodeId,text:value,x:50,y,w:800,h:70,size:30,bold:false,color:'272727',align:'left'});
 const slide={title:'准确标题',body:['准确正文'],sources:[]};
@@ -39,9 +39,10 @@ test('局部修改的后续纠正不会扩散至其他页面或丢失目标范�
 
 test('撤回恢复原始对象、候选PPT、图片和交付状态；版本变更后拒绝旧撤回',()=>{
   const p=project();p.candidate={id:'original'};p.output={file:'deck.pptx'};p.rebuildLive={revision:7};const original=structuredClone(p.reconstruction);
-  rememberRebuildEdit(p,'修改图标');p.reconstruction.slides[0].elements[2].id='new';p.candidate={id:'new'};p.output=null;p.rebuildLive.revision=8;
-  assert.equal(rebuildUndoState(p).available,true);undoRebuildEdit(p);assert.deepEqual(p.reconstruction,original);assert.equal(p.candidate.id,'original');assert.equal(p.output.file,'deck.pptx');assert.equal(p.rebuildLive.revision,7);
-  rememberRebuildEdit(p,'再次修改');p.version++;assert.equal(rebuildUndoState(p).available,false);assert.throws(()=>undoRebuildEdit(p),/版本/);
+  rememberRebuildEdit(p,'修改图标',0);p.reconstruction.slides[0].elements[2].id='new';p.candidate={id:'new'};p.output=null;p.rebuildLive.revision=8;
+  assert.equal(rebuildUndoState(p,0).available,true);undoRebuildEdit(p,0);assert.deepEqual(p.reconstruction,original);assert.equal(p.candidate.id,'original');assert.equal(p.output.file,'deck.pptx');assert.equal(p.rebuildLive.revision,7);
+  p.candidate=null;rememberRebuildEdit(p,'未有旧导出时修改',0);p.reconstruction.slides[0].elements[0].x=110;assert.equal(undoRebuildEdit(p,0).requiresRender,true,'没有可复用旧导出时仍需更新导出');
+  rememberRebuildEdit(p,'再次修改',0);p.version++;assert.equal(rebuildUndoState(p,0).available,false);assert.throws(()=>undoRebuildEdit(p,0),/版本/);
 });
 
 test('编号与小标题/目录文字必须独立，分拆不改变准确文案，正文年份不误拆',()=>{
@@ -53,6 +54,22 @@ test('编号与小标题/目录文字必须独立，分拆不改变准确文案�
 });
 
 test('05按页分框、元素滚动、黄色问题可收起，修改只有原对比位置且可撤回',()=>{
-  const p=project();p.visualMode='ai';p.fullPreviewPages=[true];p.rebuildAssets=[{index:0,elements:[{key:'icon',description:'<图标>',targetStamp:'stamp',type:'image',implementation:'svg'}],textStyles:[]}];p.visualReconstructionCurrent=true;p.singleElementEditing=true;p.regionExtraction=true;p.rebuildUndo={available:true};p.candidate={id:'candidate',structure:{passed:true},designStandards:{passed:false,issues:[]},review:{pages:[{index:0,passed:false,issues:['<字号过小>'],deviations:[],notes:''}]}};
-  const html=visualDelivery(p,()=>'',()=>''),assets=rebuildAssetsPanel(p,0);assert.match(html,/data-release-page="0"/);assert.match(html,/rebuild-assets-scroll/);assert.match(html,/<details class="release-issue-panel"><summary>检查问题/);assert.match(html,/&lt;字号过小&gt;/);assert(!html.includes('rebuild-live-grid'));assert.match(html,/undoRebuildEdit/);assert.match(assets,/data-revise-rebuild-element="icon"/);assert.match(html,/data-extract-rebuild-region="0"/);
+  const p=project();p.visualMode='ai';p.fullPreviewPages=[true];p.rebuildAssets=[{index:0,elements:[{key:'icon',description:'<图标>',targetStamp:'stamp',type:'image',implementation:'svg'}],textStyles:[]}];p.visualReconstructionCurrent=true;p.singleElementEditing=true;p.regionExtraction=true;p.rebuildUndo={pages:{0:{available:true}}};p.candidate={id:'candidate',structure:{passed:true},designStandards:{passed:false,issues:[]},review:{pages:[{index:0,passed:false,issues:['<字号过小>'],deviations:[],notes:''}]}};
+  const html=visualDelivery(p,()=>'',()=>''),assets=rebuildAssetsPanel(p,0);assert.match(html,/data-release-page="0"/);assert.match(html,/rebuild-assets-scroll/);assert.match(html,/<details class="release-issue-panel"><summary>检查问题/);assert.match(html,/&lt;字号过小&gt;/);assert(!html.includes('rebuild-live-grid'));assert.match(html,/data-undo-rebuild-page="0"/);assert(!html.includes('class="rebuild-header panel"'));assert(!assets.includes('data-revise-rebuild-element'));assert.match(assets,/data-rebuild-mention-key="icon"/);assert(!assets.includes('role="listbox"'));assert(!html.includes('本页交付复核'));assert(!html.includes('data-action="release"'));assert.match(html,/data-extract-rebuild-region="0"/);
+});
+
+test('@单元素与整页修改分流，禁止未知或多目标；传递当前元素身份而不覆盖同页其他元素',()=>{
+  const p={rebuildAssets:[{index:0,elements:[{key:'icon-1',description:'图标',targetStamp:'current'}],textStyles:[{key:'title',text:'标题',targetStamp:'text-stamp'}]}]};
+  assert.deepEqual(rebuildFeedbackRequest(p,0,'@icon-1 放大一点'),{action:'reviseRebuildElement',payload:{index:0,key:'icon-1',targetStamp:'current',instruction:'放大一点'}});
+  assert.equal(rebuildFeedbackRequest(p,0,'@title 增大字号').payload.key,'title');assert.equal(rebuildFeedbackRequest(p,0,'新增一条分隔线').action,'reviseRebuildAssets');
+  for(const value of ['@unknown 放大','@title @icon-1 放大','@title','@标题 放大'])assert.throws(()=>rebuildFeedbackRequest(p,0,value));
+});
+
+test('多页交错修改后可分别撤回，各页历史独立，不能用整体旧文件覆盖另一页',()=>{
+  const p=project();p.slides.push(structuredClone(slide));p.visualPages.push({images:[],previewHash:'second'});p.reconstruction.slides.push({index:1,elements:elements()});p.reconstruction.stamp=visualStamp(p);p.rebuildAssetFeedback={0:{instruction:'旧0'},1:{instruction:'旧1'}};
+  const original=structuredClone(p.reconstruction.slides);rememberRebuildEdit(p,'第 1 页修改',0);p.reconstruction.slides[0].elements[0].x=100;p.rebuildAssetFeedback[0]={instruction:'新0'};
+  rememberRebuildEdit(p,'第 2 页修改',1);p.reconstruction.slides[1].elements[0].x=200;p.rebuildAssetFeedback[1]={instruction:'新1'};p.candidate={id:'both-modified'};const second=structuredClone(p.reconstruction.slides[1]);
+  assert.equal(rebuildUndoState(p).pages[0].available,true);assert.equal(rebuildUndoState(p).pages[1].available,true);assert.throws(()=>undoRebuildEdit(p),/指定/);
+  const undone=undoRebuildEdit(p,0);assert.equal(undone.requiresRender,true);assert.deepEqual(p.reconstruction.slides[0],original[0]);assert.deepEqual(p.reconstruction.slides[1],second);assert.equal(p.rebuildAssetFeedback[1].instruction,'新1');assert.equal(p.candidate,null,'不能提供包含另一页旧内容的整体导出');assert.equal(rebuildUndoState(p,1).available,true);
+  undoRebuildEdit(p,1);assert.deepEqual(p.reconstruction.slides,original);assert.equal(rebuildUndoState(p,0).available,false);assert.equal(rebuildUndoState(p,1).available,false);
 });

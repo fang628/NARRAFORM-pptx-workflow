@@ -29,8 +29,8 @@ test('05实时视图和下载清楚区分修改中场景与最终待验收文件
   const html=rebuildLivePanel(p);assert.match(html,/修改中 · 场景预览/);assert.match(html,/&lt;准确标题&gt;/);assert.match(html,/v=3/);
   p.rebuildLive.pages[0].source='powerpoint';assert.match(rebuildLivePanel(p),/实际 PPT 渲染/);
   p.task.status='done';assert.equal(rebuildLivePanel(p),'');p.candidate={id:'last'};p.candidateDownload={available:true};
-  const download=candidateDownloadPanel(p);assert.match(download,/未通过完整验收/);for(const type of ['pptx','pdf','report'])assert(download.includes('type='+type));assert(!download.includes('运行 release'));
-  p.releaseCurrent=true;assert.equal(candidateDownloadPanel(p),'');
+  const download=candidateDownloadPanel(p);assert.match(download,/下载 PPTX/);assert(download.includes('type=pptx'));assert(!download.includes('type=pdf'));assert(!download.includes('type=report'));assert(!download.includes('运行 release'));
+  p.releaseCurrent=true;assert.match(candidateDownloadPanel(p),/href="\/api\/projects\/p\/download"/);
 });
 
 test('重建完成前可查看每页素材、原生图形缩略图，意见字段在执行中仍可展示',t=>{
