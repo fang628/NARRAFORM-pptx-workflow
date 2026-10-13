@@ -1,4 +1,5 @@
 import {materialLimits,pageLimits} from './material-images.js';
+import {rebuildRegionDialog,initRebuildRegionEditor} from './visual-ui.js';
 import {themeAssetDialogs,themeDirectionOptions,themePromptReview} from './theme-assets.js';
 import {apiTypes,createAPIAutosave,apiPersistenceMessage} from './api-config.js';
 import {taskProgress,imageTaskChoices,imageTaskDialog,imageTaskOptions,taskChoicePayload,bindImageTaskSorting,projectResultKey,captureLiveView,restoreLiveView} from './task-progress.js';
@@ -27,7 +28,8 @@ async function loadDocumentFormat(m){
 }
 const sameBrief=b=>!!p&&Object.keys(p.brief).every(k=>p.brief[k]===b[k])&&(p.brief.cover!==false)===(b.cover!==false);
 let sourceEditor=null,promptEditor=null,promptEditMode='direct';
-document.body.insertAdjacentHTML('beforeend',provenanceDialogs+visualDialogs+materialImageDialog+themeAssetDialogs+imageTaskDialog);
+document.body.insertAdjacentHTML('beforeend',provenanceDialogs+visualDialogs+materialImageDialog+themeAssetDialogs+imageTaskDialog+rebuildRegionDialog);
+const rebuildRegionEditor=initRebuildRegionEditor({getProject:()=>p,busy:()=>p?.task?.status==='running',act,onError:toast});
 document.addEventListener('toggle',e=>{rememberMaterialReportExpansion(e.target);rememberSourceExpansion(e.target);rememberDesignExpansion(e.target);},true);
 let previewApprovalContext=null;
 let visualEdit=null,imageLibraryEditor=null,themeAssetEdit=null,themeDirectionEdit=null;
@@ -46,7 +48,7 @@ const hasQueuedImages=()=>p?.imageTaskQueue?.some(t=>t.status==='queued');
 const imageActions=new Set(['image','concepts','generateConceptPage','generateFullPreview','generateThemeAsset']);
 const designActions=new Set(['content','designPage','revisePageDesign','draftPageDesigns']);
 const imageAction=(action,extra)=>imageActions.has(action)||(action==='generateThemeAssets'&&Array.isArray(extra?.prompts))||(p?.designTaskQueueEnabled&&designActions.has(action));
-const canAddWhileBusy=e=>e.matches("[data-rebuild-asset-instruction],[data-suggest-remove-asset]")||p?.imageTaskQueueEnabled&&(e.matches('[data-generate-page],[data-retry-concept],[data-visual-prompt],[data-image-prompt],[data-theme-asset-prompt],[data-theme-assets-batch],[data-action=concepts],[data-action=generateFullPreview]')||(p.designTaskQueueEnabled&&e.matches('[data-action=content],[data-action=draftPageDesigns],[data-page-design-action=designPage],[data-page-design-action=revisePageDesign],[data-design-feedback]')));
+const canAddWhileBusy=e=>e.matches("[data-rebuild-asset-instruction],[data-rebuild-element-instruction],[data-suggest-remove-asset]")||p?.imageTaskQueueEnabled&&(e.matches('[data-generate-page],[data-retry-concept],[data-visual-prompt],[data-image-prompt],[data-theme-asset-prompt],[data-theme-assets-batch],[data-action=concepts],[data-action=generateFullPreview]')||(p.designTaskQueueEnabled&&e.matches('[data-action=content],[data-action=draftPageDesigns],[data-page-design-action=designPage],[data-page-design-action=revisePageDesign],[data-design-feedback]')));
 const preview=(i=0,theme='')=>previewImageURL(p,i,theme);
 function empty(title,text){return `<div class="panel empty"><span class="eyebrow">ONE STEP AT A TIME</span><h2>${h(title)}</h2><p>${h(text)}</p><button class="secondary" data-nav="${Math.max(tab-1,0)}">返回上一步 ←</button></div>`;}
 let progressSnapshot='',queueSorting=false;
@@ -111,7 +113,7 @@ function render({keepView=false}={}){
 }
 async function refreshProjects(){const [list,archived]=await Promise.all([api('/api/projects'),api('/api/projects?archived=true')]);$('#projects').innerHTML='<option value="">选择项目</option>'+list.map(x=>`<option value="${x.id}" ${x.id===p?.id?'selected':''}>${h(x.demo?'[示例] '+x.title:x.title)}</option>`).join('');$('#archiveCount').textContent=archived.length;$('#projectArchiveList').innerHTML=archived.length?archived.map(x=>`<article class="archived-project"><div><h3>${h(x.demo?'[示例] '+x.title:x.title)}</h3><p>${x.pages} 页 · ${x.materials} 份材料 · ${h(new Date(x.archivedAt).toLocaleDateString('zh-CN'))} 归档</p></div><div class="archived-project-actions"><button type="button" class="secondary" data-restore-project="${h(x.id)}">恢复项目 ↗</button><button type="button" class="text-button archive-delete" data-delete-project="${h(x.id)}" data-project-title="${h(x.title)}" aria-label="删除归档项目：${h(x.title)}">删除</button></div></article>`).join(''):'<div class="archive-empty">暂无归档项目</div>';syncArchiveButton();}
 function syncArchiveButton(){const button=$('#archiveProject');button.disabled=!p||busy()||sending||collectingMaterials||archivePending||designBatchPending;button.title=busy()?'任务执行中，请完成或取消后归档':'归档后可在「已归档」中恢复';}
-async function load(id){projectRequestRevision++;activeTaskOrigin=null;aiImageEditor.close();materialCropEditor.close();$('#addImageTaskDialog').close();$('#themePromptReviewDialog').close();$('#themeAssetPromptDialog').close();$('#themeDirectionDialog').close();themeAssetEdit=null;themeDirectionEdit=null;$('#materialImageDialog').close();$('#materialReader').close();$('#imagePromptDialog').close();$('#sourceDialog').close();sendQueue=[];selectionSummary=null;materialDraft='';p=await api('/api/projects/'+id);if(p.archivedAt){p=null;throw Error('此项目已归档，请在「已归档」中恢复');}localStorage.setItem('ppt-agent-project',id);tab=p.stage>=6?4:p.stage>=5?3:p.stage>=4?2:p.stage>=1?1:0;render();await refreshProjects();}
+async function load(id){rebuildRegionEditor.close();projectRequestRevision++;activeTaskOrigin=null;aiImageEditor.close();materialCropEditor.close();$('#addImageTaskDialog').close();$('#themePromptReviewDialog').close();$('#themeAssetPromptDialog').close();$('#themeDirectionDialog').close();themeAssetEdit=null;themeDirectionEdit=null;$('#materialImageDialog').close();$('#materialReader').close();$('#imagePromptDialog').close();$('#sourceDialog').close();sendQueue=[];selectionSummary=null;materialDraft='';p=await api('/api/projects/'+id);if(p.archivedAt){p=null;throw Error('此项目已归档，请在「已归档」中恢复');}localStorage.setItem('ppt-agent-project',id);tab=p.stage>=6?4:p.stage>=5?3:p.stage>=4?2:p.stage>=1?1:0;render();await refreshProjects();}
 async function act(action,extra={},next){if(!p)throw Error('请先创建项目');const queued=busy()&&imageAction(action,extra);projectRequestRevision++;p=await api(`/api/projects/${p.id}/action`,{action,...extra});if(next!==undefined)tab=next;if(p.task?.status==='running'&&activeTaskOrigin?.id!==p.task.id)activeTaskOrigin={id:p.task.id,tab};render();if(queued)toast('已加入任务列表，等待当前批次完成');return p;}
 async function safe(fn){try{await fn();}catch(e){toast(e.message);}}
 function schedulePoll(){
@@ -415,6 +417,8 @@ document.addEventListener('click',e=>safe(async()=>{
   if(b.id==='saveImagePrompt'){assertPromptEditor();await act('saveImagePrompt',promptPayload());$('#imagePromptState').textContent='草稿已保存；当前图片使用的提示词保持在上方记录中。';return;}
   if(b.id==='rewriteImagePrompt'){assertPromptEditor();if(!p.apiReady){openAPI();toast('自然语言改写需要连接文字模型');return;}const body=promptPayload();if(!body.instruction.trim())throw Error('请填写自然语言修改要求');await act('rewriteImagePrompt',body);return;}
   if(b.id==='cancelPromptTask'){await act('cancel');return;}
+  if(b.dataset.extractRebuildRegion!==undefined){rebuildRegionEditor.open(Number(b.dataset.extractRebuildRegion));return;}
+  if(b.dataset.reviseRebuildElement!==undefined){const index=Number(b.dataset.elementPage),key=b.dataset.reviseRebuildElement,field=$(`[data-rebuild-element-instruction="${key}"][data-element-page="${index}"]`),instruction=field?.value.trim();if(!instruction)throw Error('请填写此元素的修改要求');await act('reviseRebuildElement',{index,key,targetStamp:b.dataset.targetStamp,instruction});return;}
   if(b.dataset.suggestRemoveAsset!==undefined){
     const field=$(`[data-rebuild-asset-instruction="${Number(b.dataset.assetPage)}"]`),line='删除非事实元素「'+b.dataset.suggestRemoveAsset+'」。';if(field){field.value=[field.value.trim(),line].filter(Boolean).join('\n');field.focus();field.dispatchEvent(new Event('input',{bubbles:true}));}return;
   }
@@ -586,7 +590,7 @@ $('#deleteArchiveForm').onsubmit=e=>{e.preventDefault();safe(async()=>{
   }finally{deleteArchivePending=false;button.disabled=false;cancelButton.disabled=false;button.textContent='永久删除';}
 });};
 $('#deleteArchiveDialog').addEventListener('cancel',e=>{if(deleteArchivePending)e.preventDefault();});
-$('#newProject').onclick=()=>safe(async()=>{aiImageEditor.close();materialCropEditor.close();if(designBatchPending)throw Error('正在确认所有页设计，请稍候');if(sending)throw Error('正在发送材料，请等待完成');$('#imagePromptDialog').close();$('#sourceDialog').close();sendQueue=[];selectionSummary=null;materialDraft='';if(tab===1&&$('#slidesForm')&&JSON.stringify(collectSlides())!==JSON.stringify(p.slides))await saveSlides();$('#materialImageDialog').close();$('#materialReader').close();p=null;tab=0;localStorage.removeItem('ppt-agent-project');render();await refreshProjects();});
+$('#newProject').onclick=()=>safe(async()=>{rebuildRegionEditor.close();aiImageEditor.close();materialCropEditor.close();if(designBatchPending)throw Error('正在确认所有页设计，请稍候');if(sending)throw Error('正在发送材料，请等待完成');$('#imagePromptDialog').close();$('#sourceDialog').close();sendQueue=[];selectionSummary=null;materialDraft='';if(tab===1&&$('#slidesForm')&&JSON.stringify(collectSlides())!==JSON.stringify(p.slides))await saveSlides();$('#materialImageDialog').close();$('#materialReader').close();p=null;tab=0;localStorage.removeItem('ppt-agent-project');render();await refreshProjects();});
 $('#projects').onchange=e=>safe(async()=>{if(sending){e.target.value=p?.id||'';throw Error('正在发送材料，请等待完成');}if(e.target.value)await load(e.target.value);});
 await safe(async()=>{const health=await api('/api/health');titlePageOptionAvailable=!!health.titlePageOption;materialStreamingAvailable=!!health.materialStreaming;const id=localStorage.getItem('ppt-agent-project');if(id){try{await load(id);return;}catch{localStorage.removeItem('ppt-agent-project');}}render();await refreshProjects();});
 

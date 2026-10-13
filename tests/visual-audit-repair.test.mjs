@@ -30,7 +30,7 @@ test('审计支持局部图生图抠图，仍禁止捕获文字或登记原图�
 test('新审计不直接裁图或文生图重画复杂画面，纠正为SVG/图生图抠图',async()=>{
   let calls=0;const prompts=[];
   const result=await auditedElements({slide,images:[],request:async prompt=>{prompts.push(prompt);calls++;return {text:JSON.stringify({elements:[...make(),...(calls===1?[{key:'old-method',type:'generate',x:1000,y:700,w:100,h:100,prompt:'生成全新装饰主体替换参考图中的主体',nonFactual:true}]:[{key:'native',type:'rect',x:1000,y:700,w:100,h:100,fill:'EEEEEE'}])]})};}});
-  assert.equal(calls,2);assert.match(prompts[1],/简单色块与线条使用PPTX原生图形/);assert.match(prompts[1],/复杂形状或图标使用SVG重绘/);assert.equal(result.audit.at(-1).type,'rect');
+  assert.equal(calls,2);assert.match(prompts[1],/简单色块与线条使用PPTX原生图形/);assert.match(prompts[1],/简单平面的图标使用SVG重绘/);assert.equal(result.audit.at(-1).type,'rect');
 });
 
 test('按明确节点身份回填原文，唯一原文恢复ID，重复和互换映射仍拒绝',()=>{

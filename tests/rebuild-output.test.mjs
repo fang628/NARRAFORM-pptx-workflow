@@ -37,5 +37,5 @@ test('重建完成前可查看每页素材、原生图形缩略图，意见字�
   const data=fs.mkdtempSync(path.join(os.tmpdir(),'rebuild-assets-'));t.after(()=>fs.rmSync(data,{recursive:true,force:true}));const p=project(),env={data,save:()=>{}};
   publishRebuildAssets(p,env,0,[{key:'carrier',type:'shape',shape:'roundRect',x:50,y:100,w:500,h:200,fill:'EEEEEE',color:'333333'},{key:'title',type:'text',text:'准确标题',fontFace:'SimSun',size:40,bold:true}],[]);
   const inventory=rebuildAssetInventory(p);assert.equal(inventory[0].elements.length,1);assert.equal(inventory[0].textStyles[0].fontFace,'SimSun');assert(rebuildAssetImage(p,env,0,'carrier').length>100);
-  p.rebuildAssets=inventory;p.slides=[{title:'<标题>'}];const html=rebuildAssetsPanel(p);assert.match(html,/建议删除/);assert.match(html,/data-rebuild-asset-instruction="0"/);assert.match(html,/SimSun · 24.0 pt/);assert.match(html,/&lt;标题&gt;/);assert.match(html,/data-revise-rebuild-assets="0" disabled/);
+  p.rebuildAssets=inventory;p.slides=[{title:'<标题>'}];const html=rebuildAssetsPanel(p);assert.match(html,/建议删除/);assert.match(html,/data-rebuild-asset-instruction="0"/);assert.match(html,/SimSun · 24.0 pt/);assert.match(html,/rebuild-assets-scroll/);assert.match(html,/data-revise-rebuild-assets="0" disabled/);
 });

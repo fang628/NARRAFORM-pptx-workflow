@@ -1,4 +1,4 @@
-export const apiTypes=['text','image','elementImage','rebuild'];
+export const apiTypes=['text','image','rebuild','elementImage'];
 export function apiPersistenceMessage(project){
   if(project.apiPersistenceWarning)return project.apiPersistenceWarning;
   return project.apiPersistence==='windows-dpapi'

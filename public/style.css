@@ -607,16 +607,16 @@ footer::before{width:145px;height:8px;background:var(--line-array)}
 @media(max-width:1000px){:root{--contour-content-left:205px}}
 @media(max-width:700px){:root{--contour-content-left:0px}.world-fog::after{height:60vh}}
 /* Opaque paper and explicit text hierarchy for every image prompt editor. */
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog){background:#f0f0ee;color:#262626;border-color:#afada1;backdrop-filter:none;color-scheme:light}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog) :is(h2,h3,h4,label,.panel-heading .text-button){color:#313131}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog) :is(.modal-heading,.panel-heading) :is(h2,h3){color:#313131}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog) :is(.subtle,.eyebrow,.close){color:#626050;font-size:13px}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog) label{font-size:13px;line-height:1.8}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog) :is(textarea,select){color:#262626;background:#fcfcf8;border:1px solid #b5b3a4;font-size:14px;line-height:1.85;opacity:1;padding:13px 15px}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog) textarea::placeholder{color:#737162;font-size:13px;opacity:1}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog) :is(textarea,select):focus{background:#fffef7;border-color:#605e4f;outline:2px solid #9b9885;outline-offset:2px}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog) :is(.secondary,.text-button){color:#3d3d3d}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog) .secondary{background:#e6e6e2;border-color:#aba898;font-size:13px}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog){background:#f0f0ee;color:#262626;border-color:#afada1;backdrop-filter:none;color-scheme:light}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog) :is(h2,h3,h4,label,.panel-heading .text-button){color:#313131}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog) :is(.modal-heading,.panel-heading) :is(h2,h3){color:#313131}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog) :is(.subtle,.eyebrow,.close){color:#626050;font-size:13px}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog) label{font-size:13px;line-height:1.8}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog) :is(textarea,select){color:#262626;background:#fcfcf8;border:1px solid #b5b3a4;font-size:14px;line-height:1.85;opacity:1;padding:13px 15px}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog) textarea::placeholder{color:#737162;font-size:13px;opacity:1}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog) :is(textarea,select):focus{background:#fffef7;border-color:#605e4f;outline:2px solid #9b9885;outline-offset:2px}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog) :is(.secondary,.text-button){color:#3d3d3d}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog) .secondary{background:#e6e6e2;border-color:#aba898;font-size:13px}
 :is(#aiImageEditDialog,#imagePromptDialog) .prompt-modes{gap:8px;display:flex;flex-wrap:wrap;padding:5px;background:#e1e0dc;border:1px solid #c5c3ba}
 :is(#aiImageEditDialog,#imagePromptDialog) .prompt-modes button{color:#474747;background:transparent;border:1px solid transparent;font-size:13px;padding:10px 16px;min-height:42px}
 :is(#aiImageEditDialog,#imagePromptDialog) .prompt-modes button[aria-pressed=true]{background:#fff238;color:#262626;border-color:#7c7966;font-weight:650}
@@ -630,14 +630,14 @@ footer::before{width:145px;height:8px;background:var(--line-array)}
 @media(max-width:600px){#aiImageEditDialog{padding:24px 20px}#aiImageEditDialog .modal-actions{bottom:-24px}#aiImageEditDialog .modal-actions button{width:100%}}
 /* The editing sheet uses the same charcoal, grey paper and yellow accents as the workspace. */
 :root{--editor-paper:#deded8;--editor-paper-edge:#b8b8af;--editor-ink:#2d2d2a;--editor-muted:#62625b;--editor-field:#efefe9;--editor-accent:#a69d52}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#previewApprovalDialog,#editDialog){background-color:var(--editor-paper);background-image:var(--paper-grain),linear-gradient(145deg,#e3e3dd,#d8d8d2);background-size:180px 180px,100% 100%;border:1px solid var(--editor-paper-edge);box-shadow:inset 0 1px 0 #ffffff55,0 24px 80px #0006;color:var(--editor-ink);color-scheme:light}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#previewApprovalDialog,#editDialog)::before{width:96px;height:4px;background:var(--caution-stripes)}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#previewApprovalDialog,#editDialog) :is(.modal-heading,.panel-heading){padding-bottom:14px;margin-bottom:20px;border-bottom:1px solid #bcbcb3}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#previewApprovalDialog,#editDialog) :is(.modal-heading,.panel-heading) :is(h2,h3){color:var(--editor-ink)}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#previewApprovalDialog,#editDialog) :is(label,.checkbox){color:#41413b;font-size:13px;line-height:1.8}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#previewApprovalDialog,#editDialog) :is(.eyebrow,.subtle,.close){color:var(--editor-muted)}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#previewApprovalDialog,#editDialog) :is(textarea,select){background:var(--editor-field);color:var(--editor-ink);border-color:var(--editor-paper-edge);font-size:14px;line-height:1.85}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#previewApprovalDialog,#editDialog) textarea:focus{background:#f5f5ef;outline-color:#afa565;border-color:#8e8645}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog){background-color:var(--editor-paper);background-image:var(--paper-grain),linear-gradient(145deg,#e3e3dd,#d8d8d2);background-size:180px 180px,100% 100%;border:1px solid var(--editor-paper-edge);box-shadow:inset 0 1px 0 #ffffff55,0 24px 80px #0006;color:var(--editor-ink);color-scheme:light}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog)::before{width:96px;height:4px;background:var(--caution-stripes)}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog) :is(.modal-heading,.panel-heading){padding-bottom:14px;margin-bottom:20px;border-bottom:1px solid #bcbcb3}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog) :is(.modal-heading,.panel-heading) :is(h2,h3){color:var(--editor-ink)}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog) :is(label,.checkbox){color:#41413b;font-size:13px;line-height:1.8}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog) :is(.eyebrow,.subtle,.close){color:var(--editor-muted)}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog) :is(textarea,select){background:var(--editor-field);color:var(--editor-ink);border-color:var(--editor-paper-edge);font-size:14px;line-height:1.85}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog) textarea:focus{background:#f5f5ef;outline-color:#afa565;border-color:#8e8645}
 :is(#aiImageEditDialog,#imagePromptDialog) .prompt-modes{background:#cacac2;border-color:#b7b7ad}
 :is(#aiImageEditDialog,#imagePromptDialog) .prompt-modes button{color:#494940}
 :is(#aiImageEditDialog,#imagePromptDialog) .prompt-modes button[aria-pressed=true]{background:#e2ddba;border-color:#aaa26b;color:#34332a;box-shadow:inset 0 -2px 0 #9b923f}
@@ -779,6 +779,36 @@ html{scroll-padding-top:90px}
 .rebuild-live-grid figcaption span{font-size:11px;color:#666254}
 .candidate-download .download-grid{margin-bottom:0}
 .rebuild-assets{margin:25px 0;text-align:left}
+.rebuild-assets-scroll{max-height:min(620px,65vh);min-height:150px;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:10px}
+.rebuild-delivery{max-width:none;padding:0;background:transparent!important;border:0;box-shadow:none!important;text-align:left}
+.rebuild-delivery:before,.rebuild-delivery:after,.rebuild-delivery>.surface-footmark{display:none}
+.rebuild-header{padding:28px}
+.rebuild-header h1{font-size:30px;margin:18px 0}
+.rebuild-header>.actions{justify-content:flex-start;flex-wrap:wrap;margin:18px 0}
+.rebuild-delivery .release-review{margin:0 0 24px;padding:25px 29px}
+.rebuild-delivery .release-review>.dossier-strip{display:flex}
+.rebuild-delivery .release-review h3{font-size:20px;margin:8px 0 0}
+.rebuild-delivery .release-review .panel-heading{padding-top:12px}
+.rebuild-delivery .rebuild-assets{margin:20px 0;padding:18px 0;border-top:1px solid #b9b7aa}
+.rebuild-delivery .rebuild-assets h4{font-size:13px;margin:0 0 12px}
+.rebuild-delivery .rebuild-assets-scroll{max-height:360px}
+.rebuild-compare-state,.rebuild-review-notes,.release-manual,.rebuild-rounds{font-size:12px;color:#666254;line-height:1.8}
+.rebuild-compare-empty{display:grid;place-items:center;min-height:140px;background:#d1d0c9;font-size:12px;color:#77746a;margin:18px 0}
+.rebuild-element-editor{font-size:11px;min-width:0}
+.rebuild-element-editor>summary{cursor:pointer;font-weight:600;padding:8px 0;color:#554f35}
+.rebuild-element-editor textarea{font-size:12px;min-height:75px}
+.rebuild-element-editor .secondary{font-size:11px;padding:7px 10px;min-height:32px}
+.rebuild-element-editor small{display:block;margin-top:7px;color:#68614b}
+.rebuild-region-dialog{width:min(1050px,94vw)}
+.rebuild-region-board{position:relative;width:min(100%,calc(46vh * 16 / 9));user-select:none;touch-action:none;cursor:crosshair;margin:15px auto;background:#cbc9c1}
+.rebuild-region-board img{display:block;width:100%;height:auto;pointer-events:none}
+#rebuildRegionSelection{position:absolute;border:2px solid #fff137;box-shadow:0 0 0 1px #413f30;background:#fff13728;pointer-events:none}
+@media(max-width:700px){.rebuild-delivery .release-review,.rebuild-header{padding:18px}.rebuild-header h1{font-size:24px}.rebuild-delivery .rebuild-assets-scroll{max-height:300px}}
+.rebuild-assets-scroll:focus-visible{outline:2px solid var(--yellow);outline-offset:3px}
+.audit-element-list{max-height:320px;overflow:auto;overscroll-behavior:contain}
+.release-issue-panel{margin:16px 0;background:#eee7bb;color:#5f5635;font-size:12px}
+.release-issue-panel>summary{padding:13px 15px;cursor:pointer;font-weight:600}
+.release-issue-panel>.release-issues{margin:0;padding-top:0;max-height:280px;overflow:auto}
 .rebuild-assets-page{padding:14px 0;border-top:1px solid #b9b7aa}
 .rebuild-assets-page>summary{cursor:pointer;font-size:14px;font-weight:600}
 .rebuild-assets-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin:16px 0}

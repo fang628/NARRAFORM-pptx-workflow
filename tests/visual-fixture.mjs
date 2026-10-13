@@ -1,6 +1,7 @@
 const designChecks={related_visual:true,semantic_layout:true,independent_text:true,title_hierarchy:true,readability:true,restrained_decoration:true,image_integrity:true,top_progress:true,academic_fill:true,special_split:true,split_kind:'custom',reason:'合成设计规范响应，只验证闸门协议，不代表实际审美判断'};
 import {Resvg} from '@resvg/resvg-js';
 import crypto from 'node:crypto';
+import {splitHeadingNumber} from '../lib/rebuild-text-parts.mjs';
 export async function fixtureRequest(req){
   const chunks=[];for await(const chunk of req)chunks.push(chunk);const bytes=Buffer.concat(chunks);
   if(!req.headers['content-type']?.startsWith('multipart/'))return JSON.parse(bytes.toString('utf8'));
@@ -41,6 +42,7 @@ export function fixtureReply(b,options={}){
   else if(prompt.startsWith('自由元素审计：')){
     const texts=JSON.parse(prompt.split('准确文字：')[1].split('\n登记原图计划：')[0]),images=JSON.parse(prompt.split('登记原图计划：')[1].split('\n设计稿：')[0]);
     result={elements:[{key:'background',type:'rect',x:0,y:0,w:1600,h:900,fill:'e9ece1'},{key:'gradient',type:'svg',x:1100,y:0,w:500,h:900,description:'右侧独立渐变',svg:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 900"><defs><linearGradient id="g"><stop stop-color="#eeeece"/><stop offset="1" stop-color="#dbdfcc"/></linearGradient></defs><rect width="500" height="900" fill="url(#g)"/></svg>'},{key:'dot',type:'ellipse',x:1395,y:675,w:110,h:110,fill:'fff238'},...texts.map((n,i)=>({key:'text-'+i,type:'text',nodeId:n.nodeId,text:n.text,x:n.role==='navigation'?90+texts.filter(t=>t.role==='navigation').findIndex(t=>t.nodeId===n.nodeId)*370:90,y:n.role==='navigation'?15:100+i*92,w:n.role==='navigation'?350:980,h:n.role==='navigation'?55:75,size:n.role==='navigation'?20:i?28:40,color:'272727',bold:i===0,align:'left'})),...images.map((n,i)=>({...n,key:'image-'+i,type:'image'}))],notes:'合成审计新增独立渐变 SVG 和圆形，与原生文字和登记原件分别保存。'};
+    result.elements=result.elements.flatMap(e=>{const n=texts.find(n=>n.nodeId===e.nodeId),split=n?.role==='heading'?splitHeadingNumber(n.text):null;return e.type==='text'&&split?[{...e,key:e.key+'-number',part:'number',text:split.number,w:80},{...e,key:e.key+'-label',part:'label',text:split.label,x:e.x+90,w:e.w-90}]:[e];});
     if(prompt.includes('固定页面背景：')){result.elements=result.elements.filter(e=>!['background','gradient','dot'].includes(e.key));result.elements.unshift({key:'content-icon',type:'svg',x:1040,y:700,w:60,h:60,description:'新增的独立内容图标',svg:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60"><path d="M10 30h40M30 10v40" fill="none" stroke="#556677" stroke-width="2"/></svg>'});}
     if(options.badAudit)result.elements=result.elements.filter(e=>e.key!=='text-0');
     if(options.extraAssets)result.elements.push({key:"extra-icon",type:"svg",x:1400,y:800,w:100,h:70,svg:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 70"><path d="M5 5L95 5L80 65L20 65Z" fill="#fff238"/></svg>',description:"SVG独立图标"},{key:"cutout",type:"cutout",x:1200,y:700,w:150,h:120,sourceBox:{x:1400,y:800,w:100,h:70},prompt:"保留局部非事实装饰的纹理和轮廓，移除背景",nonFactual:true,description:"图生图抠图的独立装饰"});

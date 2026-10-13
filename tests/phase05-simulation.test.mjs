@@ -14,20 +14,23 @@ test('05五页故障模拟：异常样式、文案改写、ID遗漏、节点遗�
   let persistReviewFailure=false;
   const mock=http.createServer(async(req,res)=>{
     try{
-      const body=await fixtureRequest(req),content=body.messages?.at(-1)?.content,prompt=typeof content==='string'?content:content?.[0]?.text||'';requests.push({prompt:body.prompt||prompt,image:!!body.prompt,referenceCount:body.referenceImages?.length||0});
+      const body=await fixtureRequest(req),content=body.messages?.at(-1)?.content,prompt=typeof content==='string'?content:content?.[0]?.text||'';requests.push({prompt:body.prompt||prompt,image:!!body.prompt,referenceCount:body.referenceImages?.length||0,referenceHashes:body.referenceImages?.map(r=>r.sha256)||[]});
       let reply=fixtureReply(body,{customDirections:true});
       if(body.tools){
         toolModels.push(body.model);
         const first=body.messages.find(m=>m.role==='user')?.content?.[0]?.text||'',page=Number(first.match(/第(\d+)页/)?.[1]),round=Number(first.match(/第(\d+)轮/)?.[1]);
         if(body.messages.some(m=>m.role==='tool'))reply={choices:[{message:{content:'{"done":true,"summary":"已调用原生图形、SVG、生图和抠图工具，等待真实PowerPoint渲染复查"}'}}]};
         else{
-          const scene=JSON.parse(first.split('当前场景：')[1].split('\n准确文案与层级：')[0]),commands=[
+          const scene=JSON.parse(first.split('当前场景：')[1].split('\n准确文案与层级：')[0]);let commands=[
             ['inspect_page',{}],
             ['apply_page_patch',{edits:scene.elements.filter(e=>e.type==='text'&&e.nodeId!=='title'&&!e.nodeId.startsWith('navigation-')).map(e=>({key:e.key,properties:{size:30,color:'272727'}})),remove:scene.elements.filter(e=>/^(native|vector|generated|cutout)-r/.test(e.key)||(first.includes('用户素材增删意见：删除非事实元素「audit-cutout」')&&e.key==='audit-cutout')).map(e=>e.key),add:[{key:'native-r'+round,type:'shape',shape:'hexagon',x:200,y:650,w:250,h:70,fill:'EEEEEE',color:'BBBBBB',strokeWidth:1},...(first.includes('用户素材增删意见：删除非事实元素「audit-cutout」')?[{key:'feedback-line',type:'line',x:200,y:600,w:250,h:1,color:'555555',strokeWidth:2}]:[])]}],
             ['create_visual_asset',{method:'svg',key:'vector-r'+round,x:700,y:650,w:60,h:60,svg:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60"><path d="M5 5L55 5L55 55L5 55Z" fill="#eeeeee" stroke="#556677"/></svg>',description:'独立矢量几何'}],
             ['create_visual_asset',{method:'cutout',key:'cutout-r'+round,x:900,y:650,w:80,h:80,sourceBox:{x:700,y:750,w:100,h:80},prompt:'抠取随附局部的独立装饰主体，保持细节，移除背景',description:'AI透明抠图'}],
             ['render_page',{}]
-          ];reply={choices:[{message:{content:null,tool_calls:commands.map(([name,args],i)=>({id:`p${page}-r${round}-${i}`,type:'function',function:{name,arguments:JSON.stringify(args)}}))}}]};
+          ];
+          if(first.includes('单元素修改范围：')){const target=JSON.parse(first.split('目标元素：')[1].split('\n仅本元素的修改要求：')[0]);commands=[['inspect_page',{}],['create_visual_asset',{method:'cutout',key:target.key,x:target.x,y:target.y,w:target.w,h:target.h,prompt:'仅将当前独立主体调整为浅黄色，保留轮廓与透明背景',description:'单独修改后的主体'}],['render_page',{}]];}
+          if(first.includes('区域补拆范围：'))commands=[['inspect_page',{}],['apply_page_patch',{add:[{key:'region-block',type:'shape',shape:'hexagon',x:600,y:780,w:100,h:60,fill:'EEEEEE',color:'333333'}]}],['create_visual_asset',{method:'svg',key:'region-flat-icon',x:750,y:770,w:60,h:60,svg:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60"><path d="M10 10L50 30L10 50Z" fill="#bbb"/></svg>',description:'补拆的平面图标'}],['create_visual_asset',{method:'cutout',key:'region-real-icon',x:1000,y:760,w:90,h:90,sourceBox:{x:700,y:750,w:100,h:80},prompt:'抠取完整的写实装饰主体，保留轮廓材质，移除背景',description:'补拆的写实图标'}],['render_page',{}]];
+          reply={choices:[{message:{content:null,tool_calls:commands.map(([name,args],i)=>({id:`p${page}-r${round}-${i}`,type:'function',function:{name,arguments:JSON.stringify(args)}}))}}]};
         }
       }
       if(body.prompt&&(body.prompt.includes('仅独立非事实视觉元素')||body.prompt.includes('对随附局部装饰用图生图抠图')))reply={data:[{b64_json:new Resvg('<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080"><circle cx="960" cy="540" r="250" fill="#fff238"/></svg>').render().asPng().toString('base64')}]};
@@ -75,7 +78,7 @@ test('05五页故障模拟：异常样式、文案改写、ID遗漏、节点遗�
   project=await call(prefix+'/materials',{name:'模拟材料原图.png',base64:png.toString('base64')});const imageId=project.materials[0].id;
   await act('requirements',{brief:project.brief});await act('analyzeMaterials',{includeImages:true});await wait();await act('approveAnalysis');
   const slides=[{kind:'cover',title:'01 封面',body:[],sources:[]},{kind:'toc',title:'02 目录',body:['研究目标','实施过程','研究结论'],sources:[]},{kind:'content',title:'03 精确文字',body:['第一行\n第二行','第一行第二行','保留空格 与 标点。'],sources:[],imageId},
-    {kind:'content',title:'04 多层内容',body:[],sources:[],elements:[{id:'title',type:'text',role:'title',text:'04 多层内容',parentId:null},{id:'subtitle',type:'text',role:'subtitle',text:'副标题必须保留',parentId:'title'},{id:'group',type:'group',label:'研究发现',parentId:'title'},{id:'detail',type:'text',role:'body',text:'原文依据与关系必须保留。',parentId:'group'},{id:'photo',type:'image',materialId:imageId,parentId:'group'},{id:'caption',type:'text',role:'caption',text:'图1：登记的原始配图。',parentId:'photo'}]},
+    {kind:'content',title:'04 多层内容',body:[],sources:[],elements:[{id:'title',type:'text',role:'title',text:'04 多层内容',parentId:null},{id:'subtitle',type:'text',role:'subtitle',text:'副标题必须保留',parentId:'title'},{id:'group',type:'group',label:'01 研究发现',parentId:'title'},{id:'detail',type:'text',role:'body',text:'原文依据与关系必须保留。',parentId:'group'},{id:'photo',type:'image',materialId:imageId,parentId:'group'},{id:'caption',type:'text',role:'caption',text:'图1：登记的原始配图。',parentId:'photo'}]},
     {kind:'content',title:'05 结论',body:['要点一','要点二'],sources:[]}];
   await act('saveContent',{slides});await act('generateThemeAssets');await wait();await act('generateThemeAssets',{confirmed:true,prompts:project.themeAssetPrompts});await wait();await act('approveContent');
   for(let i=0;i<5;i++){await act('confirmPageLayout',{index:i});await act('designPage',{index:i});await wait();await act('approvePageDesign',{index:i});}
@@ -95,7 +98,7 @@ test('05五页故障模拟：异常样式、文案改写、ID遗漏、节点遗�
   assert.ok(project.reconstruction.slides[3].elements.some(e=>e.type==='shape'&&e.shape==='hexagon'));assert.ok(project.materials.some(m=>m.origin==='ai-cutout'&&m.alpha.hasTransparency));assert.ok(!project.materials.some(m=>m.origin==='generated-rebuild'),'复杂画面只用图生图抠图，不文生图重画');
   assert.equal(project.reconstruction.slides[3].auditValidation.attempts,1);assert.equal(project.reconstruction.slides[4].auditValidation.attempts,2);
   for(const [i,page] of project.reconstruction.slides.entries()){
-    assert.deepEqual(page.elements.filter(e=>e.type==='text').map(e=>({nodeId:e.nodeId,text:e.text})),canonicalTexts(project.slides[i],project,i).map(({nodeId,text})=>({nodeId,text})));
+    for(const n of canonicalTexts(project.slides[i],project,i)){const objects=page.elements.filter(e=>e.type==='text'&&e.nodeId===n.nodeId);if(objects.some(e=>e.part)){assert.equal(objects.length,2);assert.deepEqual(new Set(objects.map(e=>e.part)),new Set(['number','label']));assert(objects.every(e=>e.sourceText===n.text));}else{assert.equal(objects.length,1);assert.equal(objects[0].text,n.text);}}
     for(const record of page.auditValidation.records)assert.ok(fs.existsSync(path.join(dir,project.id,record)));
   }
   assert.ok(project.task.jobs.flatMap(j=>j.entries||[]).some(e=>e.message.includes('元素审计自动纠正')),'任务分组保留初始纠正记录，公共进度只展示最近100条');
@@ -107,6 +110,7 @@ test('05五页故障模拟：异常样式、文案改写、ID遗漏、节点遗�
   const titlePage=await zip.file('ppt/slides/slide1.xml').async('string');assert.match(titlePage,/typeface="SimSun"/,'识别字体写入可编辑PPT文字');assert.match(titlePage,/sz="2400"/,'40逻辑字号转换为24pt');
   assert.match(await zip.file('ppt/slides/slide3.xml').async('string'),/<a:prstGeom prst="roundRect"/,'独立文本承载形状写入PPT，而非遗漏或烘焙成图');
   const imagePage=await zip.file('ppt/slides/slide4.xml').async('string'),photo=(imagePage.match(/<p:pic>[\s\S]*?<\/p:pic>/g)||[]).find(e=>e.includes('name="image-0"')),photoSize=photo?.match(/<a:ext cx="(\d+)" cy="(\d+)"/);assert.ok(photoSize,'登记图片仍为独立原生图片对象');assert.ok(Math.abs(Number(photoSize[1])/Number(photoSize[2])-1.5)<.00001,'图片维持原图600×400比例，而非占位区域比例');assert.match(imagePage,/<a:prstGeom prst="hexagon"/,'原生图形真实写入PPTX');
+  assert(imagePage.includes('name="text-2-number"'));assert(imagePage.includes('name="text-2-label"'),'小标题编号和文字为两个独立PPT对象');
   const rasterCheck='from PIL import Image;import sys,json;im=Image.open(sys.argv[1]).convert("RGB");points=[(x,y) for y in range(140,380) for x in range(1320,1800) if (lambda c:c[0]>245 and c[1]>235 and c[2]<100)(im.getpixel((x,y)))];print(json.dumps([max(x for x,y in points)-min(x for x,y in points)+1,max(y for x,y in points)-min(y for x,y in points)+1]))';
   const circle=JSON.parse(execFileSync(path.resolve('.venv/Scripts/python.exe'),['-c',rasterCheck,path.join(dir,project.id,project.candidate.dir,'S04.png')],{encoding:'utf8',windowsHide:true}));assert.ok(Math.abs(circle[0]-circle[1])<=2,'实际PowerPoint渲染中的原图圆形仍为圆形');
   const pdf=await fetch(base+prefix+'/download?type=pdf');assert.equal(pdf.status,200);assert.ok(Buffer.from(await pdf.arrayBuffer()).subarray(0,5).equals(Buffer.from('%PDF-')));
@@ -116,6 +120,16 @@ test('05五页故障模拟：异常样式、文案改写、ID遗漏、节点遗�
   const materialThumb=await fetch(base+prefix+'/rebuild-asset-image?index=0&key=audit-cutout');assert.equal(materialThumb.status,200);assert(Buffer.from(await materialThumb.arrayBuffer()).length>100);
   await act('reviseRebuildAssets',{index:0,instruction:'删除非事实元素「audit-cutout」。新增一条连接线。'});await wait();
   assert.equal(project.rebuildAssetFeedback[0].status,'applied');assert.equal(project.candidate.visualRepair.rounds,1);assert(!project.reconstruction.slides[0].elements.some(e=>e.key==='audit-cutout'));assert(project.reconstruction.slides[0].elements.some(e=>e.key==='feedback-line'));assert(!project.rebuildAssets[0].elements.some(e=>e.key==='audit-cutout'));releasedEvidence.assetFeedbackApplied=true;
+  const beforeLocal=structuredClone(project.reconstruction),beforeLocalCandidate=project.candidate.id,target=project.reconstruction.slides[0].elements.find(e=>e.key==='cutout-r1'),targetMaterial=project.materials.find(m=>m.id===target.id),startRequests=requests.length;
+  await act('reviseRebuildElement',{index:0,key:target.key,targetStamp:'outdated',instruction:'只调整本图标'},400);
+  await act('reviseRebuildElement',{index:0,key:target.key,targetStamp:project.rebuildAssets[0].elements.find(e=>e.key===target.key).targetStamp,instruction:'只将这个独立主体调整为浅黄色'});await wait();
+  assert.notEqual(project.reconstruction.slides[0].elements.find(e=>e.key===target.key).id,target.id);assert.deepEqual(project.reconstruction.slides[0].elements.filter(e=>e.key!==target.key),beforeLocal.slides[0].elements.filter(e=>e.key!==target.key));assert.deepEqual(project.reconstruction.slides.slice(1),beforeLocal.slides.slice(1));
+  assert(requests.slice(startRequests).some(r=>r.image&&r.referenceHashes.includes(targetMaterial.sha256)),'单元素图生图使用当前素材而不是旧整页');assert.equal(project.rebuildUndo.available,true);
+  project=await act('undoRebuildEdit');assert.deepEqual(project.reconstruction,beforeLocal);assert.equal(project.candidate.id,beforeLocalCandidate);
+  await act('extractRebuildRegion',{index:0,previewHash:'outdated',region:{x:1400,y:800,w:25,h:25},instruction:'补拆遗漏的蜂窝色块、平面图标和写实主体'},400);
+  await act('extractRebuildRegion',{index:0,previewHash:project.visualPages[0].previewHash,region:{x:1400,y:800,w:25,h:25},instruction:'补拆遗漏的蜂窝色块、平面图标和写实主体'});await wait();
+  assert.deepEqual(project.reconstruction.slides[0].elements.slice(0,beforeLocal.slides[0].elements.length),beforeLocal.slides[0].elements);for(const key of ['region-block','region-flat-icon','region-real-icon'])assert(project.reconstruction.slides[0].elements.some(e=>e.key===key));assert(project.reconstruction.slides[0].elements.find(e=>e.key==='region-block').x<1400,'区域只是提示，精确元素允许超出');
+  project=await act('undoRebuildEdit');assert.deepEqual(project.reconstruction,beforeLocal);assert.equal(project.candidate.id,beforeLocalCandidate);releasedEvidence.localEditAndRegionUndo=true;
   persistReviewFailure=true;await act('build');await wait();
   assert.equal(project.candidate.visualRepair.rounds,4);assert.equal(project.candidate.visualRepair.status,'exhausted');assert.equal(project.candidate.status,'failed');assert.equal(project.candidateDownload.available,true);assert.equal(project.releaseCurrent,false);
   assert.equal(project.rebuildLive.status,'done');assert(project.rebuildLive.pages.every(p=>p.source==='powerpoint'&&p.round===4),'保留第四轮实际PPT结果');
