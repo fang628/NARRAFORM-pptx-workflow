@@ -1,0 +1,52 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import {spawn} from 'node:child_process';
+import {fixtureRequest,fixtureReply} from './visual-fixture.mjs';
+
+test('底图先确认提示词，AI/手工稿原样文生图，检查不触发自动生图',async t=>{
+  const requests=[];let rejectReview=false;
+  const rewritten='AI 完整新稿：分子修饰研究，右下使用简化肽链轮廓，浅蓝底，中央留白，16:9 横版，无文字。';
+  const mock=http.createServer(async(req,res)=>{
+    const body=await fixtureRequest(req);requests.push({...body,endpoint:req.url});
+    const user=body.messages?.at(-1)?.content,text=typeof user==='string'?user:user?.[0]?.text||'';
+    let reply=fixtureReply(body);
+    if(text.startsWith('按自然语言修改无字主题底图提示词'))reply={choices:[{message:{content:JSON.stringify({prompt:rewritten})}}]};
+    if(text.startsWith('检查三方向底图：')&&rejectReview)reply={choices:[{message:{content:JSON.stringify({passed:false,issues:['主题元素缺失'],notes:'需要主题对象'})}}]};
+    res.setHeader('content-type','application/json');res.end(JSON.stringify(reply));
+  });await new Promise(r=>mock.listen(0,'127.0.0.1',r));t.after(()=>mock.close());
+  const socket=http.createServer();await new Promise(r=>socket.listen(0,'127.0.0.1',r));const port=socket.address().port;await new Promise(r=>socket.close(r));
+  const data=path.resolve('work','theme-confirmation-'+Date.now());
+  const app=spawn(process.execPath,['server.mjs'],{env:{...process.env,PORT:String(port),PPT_AGENT_DATA:data,PPT_AGENT_TEST:'1'},stdio:'ignore',windowsHide:true});t.after(()=>app.kill());
+  const base='http://127.0.0.1:'+port;
+  for(let i=0;i<100;i++){try{if((await fetch(base+'/api/health')).ok)break;}catch{}await new Promise(r=>setTimeout(r,30));}
+  const call=async(url,body,status=200)=>{const response=await fetch(base+url,body?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{}),value=await response.json();assert.equal(response.status,status,JSON.stringify(value));return value;};
+  let p=await call('/api/projects',{brief:{title:'分子修饰研究',cover:false,toc:false,pages:3}},201);
+  const prefix='/api/projects/'+p.id,act=(action,extra={},status=200)=>call(prefix+'/action',{action,...extra},status);
+  const wait=async()=>{for(let i=0;i<600;i++){p=await call(prefix);if(p.task?.status!=='running')return p;await new Promise(r=>setTimeout(r,25));}throw Error('task timeout');};
+  const config={baseURL:'http://127.0.0.1:'+mock.address().port+'/v1',key:'synthetic-confirmation',model:'mock'};
+  await act('configure',{text:config});await act('generateThemeAssets',{},400);await act('saveContent',{slides:[{kind:'content',title:'已完成逐页内容',body:['分子修饰研究'],sources:[]}]});await act('generateThemeAssets');await wait();
+  assert.equal(p.task.status,'done',p.task.message);assert.equal(p.themeAssets.status,'awaiting_confirmation');assert.equal(p.themeAssetPrompts.length,3);assert.equal(requests.filter(r=>r.prompt).length,0,'规划只调用文本模型');
+  const initial=p.themeAssetPrompts[0];
+  await act('generateThemeAssets',{prompts:[initial]},400);
+  await act('generateThemeAsset',{theme:initial.theme,use:initial.use,prompt:initial.prompt,revision:initial.revision},400);
+  await act('rewriteThemeAssetPrompt',{...initial,instruction:'把主体放右下，减淡颜色'});await wait();
+  assert.equal(p.task.status,'done',p.task.message);assert.equal(requests.filter(r=>r.prompt).length,0,'自然语言修改不调用生图');
+  const rewriteInput=requests.find(r=>r.messages?.at(-1)?.content?.startsWith?.('按自然语言修改无字主题底图提示词')).messages.at(-1).content;
+  assert.match(rewriteInput,/主体描述用一个短语，通常10–25字/);assert.match(rewriteInput,/不要扩写微观结构/);assert.match(rewriteInput,/用户明确要求的细节保留/);
+  const draft=p.themeAssetPrompts.find(r=>r.theme===initial.theme);assert.equal(draft.prompt,rewritten);assert.equal(draft.revision,initial.revision+1);
+  await act('configure',{image:config});
+  await act('generateThemeAssets',{confirmed:true,prompts:[initial]},400);
+  await act('generateThemeAssets',{confirmed:true,prompts:[draft]});await wait();assert.equal(p.task.status,'done',p.task.message);
+  const first=requests.filter(r=>r.prompt);assert.equal(first.length,1);assert.equal(first[0].prompt,rewritten);assert.ok(first[0].endpoint.endsWith('/images/generations'));assert.ok(!first[0].referenceImages?.length);
+  assert.equal(p.themeAssets.directions[0].assets['content-background'].reference,null);
+  const manual='人工完整新稿：保留分子主题，简化聚合物链条与节点，改为右侧构图、米白底，正文区留白。';
+  const latest=p.themeAssetPrompts.find(r=>r.theme===initial.theme);
+  rejectReview=true;await act('generateThemeAssets',{confirmed:true,prompts:[{...latest,prompt:manual}]});await wait();assert.equal(p.task.status,'done',p.task.message);
+  const images=requests.filter(r=>r.prompt);assert.equal(images.length,2,'轻量检查不自动修图');assert.equal(images[1].prompt,manual);assert.ok(images.every(r=>r.endpoint.endsWith('/images/generations')&&!r.referenceImages?.length));
+  assert.equal(p.themeAssets.status,'awaiting_confirmation');assert.equal(p.themeAssets.directions[0].assets['content-background'].previewReview.status,'needs_revision');assert.equal(p.themeAssets.directions[0].assets['content-background'].repairHistory.length,1);
+  await act('regenerateThemeDirection',{theme:'a'});await wait();assert.equal(p.task.status,'done',p.task.message);assert.equal(requests.filter(r=>r.prompt).length,2,'同风格重生先等待确认');
+  const saved=JSON.parse(fs.readFileSync(path.join(data,p.id,'project.json'),'utf8'));assert.equal(saved.themeAssets.directions[0].promptDrafts['content-background'].prompt,manual);
+});

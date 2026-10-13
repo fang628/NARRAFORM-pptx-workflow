@@ -1,0 +1,61 @@
+# Local project data: uploaded materials, prompts, generated slides and API vaults
+/data/
+/work/
+
+# Dependencies and Python environments
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.npm/
+
+# Credentials and machine-specific settings; keep safe templates trackable
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+.api-credentials.dpapi
+.api-credentials.dpapi.*
+.npmrc
+.pypirc
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Build, test and export output (source assets in workflow-library stay tracked)
+/dist/
+/build/
+/coverage/
+/htmlcov/
+/.coverage
+/.coverage.*
+/test-results/
+/playwright-report/
+/exports/
+/tmp/
+/temp/
+*.log
+*.pid
+*.pid.lock
+*.tmp
+*.temp
+*.bak
+~$*
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~

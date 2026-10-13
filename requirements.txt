@@ -1,0 +1,7 @@
+pypdf>=5,<7
+PyMuPDF>=1.26,<2
+Pillow>=11,<13
+markdown-it-py>=3,<5
+mdit-py-plugins>=0.4,<1
+latex2mathml>=3,<4
+reportlab>=4,<6
