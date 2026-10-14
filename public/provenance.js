@@ -219,7 +219,7 @@ export function initAIImageEditor({getProject,act,busy,openAPI,onError}){
   $('#aiEditInstruction').addEventListener('input',()=>{textHistory?.record($('#aiEditInstruction').value);$('#aiEditConsent').checked=false;refresh();});
   $('#aiImageEditForm').addEventListener('submit',e=>{e.preventDefault();e.stopPropagation();run(async()=>{
     const p=getProject();if(p?.id!==ctx.projectId)throw Error('项目已变化，请重新打开图片修改');
-    const element=ctx.image.purpose==='element'||ctx.target.elementId;if(!(element?p.elementImageReady:p.imageReady)){openAPI();return;}
+    const element=['element','supplement','scientific'].includes(ctx.image.purpose)||ctx.target.elementId;if(!(element?p.elementImageReady:p.imageReady)){openAPI();return;}
     if(!$('#aiEditConsent').checked)throw Error('请确认发送本次指令');
     if(pending)throw Error('请等待 AI 整理完成');
     if(!$('#aiEditInstruction').value.trim())throw Error(mode==='adjust'?'请填写修改意见':'请填写完整的重绘提示词');

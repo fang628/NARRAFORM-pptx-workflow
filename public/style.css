@@ -630,14 +630,14 @@ footer::before{width:145px;height:8px;background:var(--line-array)}
 @media(max-width:600px){#aiImageEditDialog{padding:24px 20px}#aiImageEditDialog .modal-actions{bottom:-24px}#aiImageEditDialog .modal-actions button{width:100%}}
 /* The editing sheet uses the same charcoal, grey paper and yellow accents as the workspace. */
 :root{--editor-paper:#deded8;--editor-paper-edge:#b8b8af;--editor-ink:#2d2d2a;--editor-muted:#62625b;--editor-field:#efefe9;--editor-accent:#a69d52}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog){background-color:var(--editor-paper);background-image:var(--paper-grain),linear-gradient(145deg,#e3e3dd,#d8d8d2);background-size:180px 180px,100% 100%;border:1px solid var(--editor-paper-edge);box-shadow:inset 0 1px 0 #ffffff55,0 24px 80px #0006;color:var(--editor-ink);color-scheme:light}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog)::before{width:96px;height:4px;background:var(--caution-stripes)}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog) :is(.modal-heading,.panel-heading){padding-bottom:14px;margin-bottom:20px;border-bottom:1px solid #bcbcb3}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog) :is(.modal-heading,.panel-heading) :is(h2,h3){color:var(--editor-ink)}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog) :is(label,.checkbox){color:#41413b;font-size:13px;line-height:1.8}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog) :is(.eyebrow,.subtle,.close){color:var(--editor-muted)}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog) :is(textarea,select){background:var(--editor-field);color:var(--editor-ink);border-color:var(--editor-paper-edge);font-size:14px;line-height:1.85}
-:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog) textarea:focus{background:#f5f5ef;outline-color:#afa565;border-color:#8e8645}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog,#supplementImageDialog){background-color:var(--editor-paper);background-image:var(--paper-grain),linear-gradient(145deg,#e3e3dd,#d8d8d2);background-size:180px 180px,100% 100%;border:1px solid var(--editor-paper-edge);box-shadow:inset 0 1px 0 #ffffff55,0 24px 80px #0006;color:var(--editor-ink);color-scheme:light}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog,#supplementImageDialog)::before{width:96px;height:4px;background:var(--caution-stripes)}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog,#supplementImageDialog) :is(.modal-heading,.panel-heading){padding-bottom:14px;margin-bottom:20px;border-bottom:1px solid #bcbcb3}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog,#supplementImageDialog) :is(.modal-heading,.panel-heading) :is(h2,h3){color:var(--editor-ink)}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog,#supplementImageDialog) :is(label,.checkbox){color:#41413b;font-size:13px;line-height:1.8}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog,#supplementImageDialog) :is(.eyebrow,.subtle,.close){color:var(--editor-muted)}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog,#supplementImageDialog) :is(textarea,select){background:var(--editor-field);color:var(--editor-ink);border-color:var(--editor-paper-edge);font-size:14px;line-height:1.85}
+:is(#aiImageEditDialog,#imagePromptDialog,#visualPromptDialog,#themeAssetPromptDialog,#themePromptReviewDialog,#themeDirectionDialog,#rebuildRegionDialog,#previewApprovalDialog,#editDialog,#supplementImageDialog) textarea:focus{background:#f5f5ef;outline-color:#afa565;border-color:#8e8645}
 :is(#aiImageEditDialog,#imagePromptDialog) .prompt-modes{background:#cacac2;border-color:#b7b7ad}
 :is(#aiImageEditDialog,#imagePromptDialog) .prompt-modes button{color:#494940}
 :is(#aiImageEditDialog,#imagePromptDialog) .prompt-modes button[aria-pressed=true]{background:#e2ddba;border-color:#aaa26b;color:#34332a;box-shadow:inset 0 -2px 0 #9b923f}
@@ -930,3 +930,19 @@ html{scroll-padding-top:90px}
 .delivery-workflow-actions>button{white-space:normal}
 .rebuild-assets-heading>[data-undo-rebuild-page]{margin-left:auto}
 @media(max-width:600px){.page-head>.delivery-workflow-actions{display:grid;grid-template-columns:minmax(0,1fr)}.rebuild-assets-heading>[data-undo-rebuild-page]{margin-left:0}}
+
+/* Supplementary images share the content editor's paper and yellow accents. */
+#supplementImageDialog{width:min(740px,94vw);padding:24px 30px}
+#supplementImageDialog .modal-heading{align-items:center;margin-bottom:12px;padding-bottom:12px}
+#supplementImageDialog .modal-heading h2{font-size:24px;line-height:1.35;margin:4px 0 0}
+#supplementImageDialog form>.subtle{margin:8px 0;font-size:12px;line-height:1.65}
+#supplementImageDialog form>label:not(.checkbox){margin-bottom:12px}
+#supplementImageDialog textarea{min-height:92px;padding:10px 12px}
+#supplementImageDialog input:not([type=checkbox]){background:var(--editor-field);color:var(--editor-ink);border-color:var(--editor-paper-edge);font-size:14px}
+#supplementImageDialog .supplement-image-types{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 12px;border:1px solid var(--editor-paper-edge);padding:12px;margin:12px 0;min-width:0;background:#eeeee733}
+#supplementImageDialog .supplement-image-types legend{padding:0 8px;color:var(--editor-muted);font-size:12px}
+#supplementImageDialog .supplement-image-types .checkbox{margin:0;gap:8px}
+#supplementImageDialog .supplement-academic{background:#e9e4c8;padding:10px 14px;border-left:3px solid #d7c34b;margin-bottom:18px}
+#supplementImageDialog .actions{margin-top:16px}
+#supplementImageState:empty{display:none}
+@media(max-width:540px){#supplementImageDialog .supplement-image-types{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}}

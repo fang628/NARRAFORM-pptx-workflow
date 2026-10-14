@@ -44,6 +44,7 @@ export function imageTaskChoices(p){
       if(d?.markdown)choices.push({key:'design:revise:'+index,label:'修改单页设计 / 第 '+(index+1)+' 页',type:'design',input:'instruction',required:true,request:{action:'revisePageDesign',index,markdown:d.markdown}});
     }
   }
+  if(p.supplementImagesEnabled&&p.analysisCurrent&&p.apiReady&&p.elementImageReady)choices.push({key:'supplement',label:'补充图片 / 主题配图',type:'image',input:'instruction',required:true,request:{action:'supplementImage',imageType:'illustration',academicStyle:false,allowUpload:true}});
   if(p.imageReady&&p.themeAssetsCurrent)for(const entry of p.themeAssetPrompts||[])choices.push({key:'theme:'+entry.theme+':'+entry.use,label:entry.theme.toUpperCase()+' / '+names[entry.use],prompt:entry.prompt,required:true,request:{action:'generateThemeAssets',confirmed:true,prompts:[{theme:entry.theme,use:entry.use,revision:entry.revision,prompt:entry.prompt}]}});
   if(p.imageReady)for(const index of p.confirmedVisualPages||[]){
     if(p.selectedTheme)choices.push({key:'full:'+index,label:'全篇预览 / 第 '+(index+1)+' 页',prompt:p.visualPages?.[index]?.promptDraft||p.visualPages?.[index]?.prompt||'',request:{action:'generateFullPreview',index,force:true}});

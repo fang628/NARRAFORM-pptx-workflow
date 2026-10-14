@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {selectMaterialFiles,droppedMaterialFiles} from '../public/materials.js';
+import {selectMaterialFiles,droppedMaterialFiles,materialPanel} from '../public/materials.js';
 import {materialLimits} from '../public/material-images.js';
 import {scene,themes,validateSlides} from '../lib/scene.mjs';
 
@@ -27,4 +27,27 @@ test('旧格式与结构化页面的进度条均位于页顶，关闭时移除',
     assert.equal(has.length,1);assert.equal(has[0].y,16);assert.equal(has[0].w,710);
     assert.equal(scene(s,t,1,4,{progress:false}).filter(e=>e.type==='rect'&&e.h===4).length,0);assert.equal(scene({...s,kind:'cover'},t,0,4,{progress:true}).filter(e=>e.type==='rect'&&e.h===4).length,0);assert.equal(scene(s,t,1,4,{progress:true,toc:true}).filter(e=>e.type==='rect'&&e.h===4).length,0);
   }
+});
+
+test('已收到材料保留原始、编辑裁片和AI补充图，隐藏重建素材且不修改登记',()=>{
+  const p={id:'inbox-project',materials:[
+    {id:'original',name:'原始报告.pdf',kind:'document',file:'original.pdf',text:'材料正文'},
+    {id:'crop',name:'人工裁切图片.png',kind:'image',file:'crop.png',extracted:true,extractionMethod:'manual-crop',sourceMaterialName:'原始图片'},
+    {id:'embedded',name:'文档提取图片.png',kind:'image',file:'embedded.png',extracted:true,sourceMaterialName:'原始报告.pdf',sourceLocations:[{page:1}]},
+    {id:'supplement',name:'AI补充图片.png',kind:'image',file:'supplement.png',generated:true,purpose:'element'},
+    {id:'edited',name:'修改后的补充图片.png',kind:'image',file:'edited.png',generated:true,parentImageId:'supplement',purpose:'illustration'},
+    {id:'rebuild-svg',name:'重建SVG图形',kind:'image',file:'vector.svg',generated:true,reconstructed:true,purpose:'reconstruction'},
+    {id:'rebuild-flag',name:'旧重建图片',kind:'image',file:'legacy.png',generated:true,reconstructed:true},
+    {id:'rebuild-purpose',name:'重建抠图',kind:'image',file:'cutout.png',generated:true,purpose:'reconstruction'},
+    {id:'foundation',name:'方向底图',kind:'image',file:'background.png',generated:true,purpose:'workflow-background'}
+  ]};
+  const before=structuredClone(p.materials),html=materialPanel(p,()=>'',[],'');
+  assert.deepEqual([...html.matchAll(/data-read-material="([^"]+)"/g)].map(m=>m[1]),['original','crop','embedded','supplement','edited']);
+  assert(!html.includes('data-remove-material="rebuild-svg"'));assert(!html.includes('data-remove-material="rebuild-purpose"'));
+  assert.deepEqual(p.materials,before,'过滤仅作用于收件列表，原始登记和05素材引用仍保留');
+});
+
+test('仅有重建素材或底图时不显示空的已收到材料列表',()=>{
+  const p={id:'internal-only',materials:[{id:'asset',name:'内部素材',kind:'image',file:'asset.png',generated:true,reconstructed:true,purpose:'reconstruction'},{id:'background',name:'内部底图',kind:'image',file:'background.png',generated:true,purpose:'workflow-background'}]};
+  const html=materialPanel(p,()=>'',[],'');assert(!html.includes('已收到的材料'));assert(!html.includes('received-material'));
 });
