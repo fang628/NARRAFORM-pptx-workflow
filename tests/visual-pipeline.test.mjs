@@ -115,7 +115,12 @@ test('按页确认、生图、自由重建、实际 PowerPoint 渲染及 release
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir,p.id,p.candidate.dir,'style-registry.json'),'utf8')),p.styleRegistry,'交付证据保留风格登记');
   p=await act('configure',{rebuild:{...cfg,model:'synthetic-rebuild'}});assert.equal(p.rebuildConfigured,true);
   badReview=false;extraAssets=false;await act('build');p=await wait();assert.equal(p.task.status,'done',p.task.message);assert.equal(p.candidate.status,'awaiting_review');assert.equal(p.candidate.review.pages.length,3);assert.equal(p.reconstruction.model,'synthetic-rebuild');assert.equal(p.candidate.review.model,'synthetic-rebuild');
-  assert.ok(requests.filter(b=>b.messages?.at(-1)?.content?.[0]?.text?.startsWith('渲染对照验收：')).every(b=>b.messages.at(-1).content.filter(c=>c.type==='image_url').length===3));
+  assert.ok(requests.filter(b=>b.messages?.at(-1)?.content?.[0]?.text?.startsWith('渲染对照验收：')).every(b=>b.messages.at(-1).content.filter(c=>c.type==='image_url').length===4));
+  assert.ok(p.candidate.review.pages.every(r=>r.diagnostics.status==='available'));
+  assert.ok(p.reconstruction.slides.every(s=>s.geometry.status==='available'));
+  assert.equal((await fetch(base+prefix+'/review-image?index=0&kind=difference&candidate='+p.candidate.id)).status,200);
+  const textLayout=JSON.parse(fs.readFileSync(path.join(dir,p.id,p.candidate.dir,'text-layout.json'),'utf8'));
+  assert.ok(textLayout.some(page=>page.measured>0),'真实PowerPoint文字尺寸已反馈到局部排版搜索');
   await act('reviewReleasePage',{index:0,checks:{visual:true},notes:'不完整复核'},400);const checks={visual:true,content:true,photos:true,editability:true,preview_match:true};
   for(let i=0;i<3;i++)await act('reviewReleasePage',{index:i,checks,notes:'合成测试复核：所有工件与实际 PowerPoint 渲染已生成，核对下载闸门。',acceptDeviations:true});
   p=await act('release');assert.equal(p.releaseCurrent,true);assert.equal(p.output.release.passed,true);const download=await fetch(base+prefix+'/download');assert.equal(download.status,200);const zip=await JSZip.loadAsync(await download.arrayBuffer());const xml=await zip.file('ppt/slides/slide2.xml').async('string');assert.match(xml,/编辑未确认页面/);assert.match(xml,/<p:pic>/);assert.ok(Object.keys(zip.files).some(n=>n.endsWith('.svg')));const pdf=await fetch(base+prefix+'/download?type=pdf');assert.equal(pdf.status,200);
