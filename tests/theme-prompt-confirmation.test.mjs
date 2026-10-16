@@ -6,7 +6,7 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fixtureRequest,fixtureReply} from './visual-fixture.mjs';
 
-test('底图先确认提示词，AI/手工稿原样文生图，检查不触发自动生图',async t=>{
+test('底图先确认提示词，AI/手工稿原样文生图，生成后不检查或自动修正',async t=>{
   const requests=[];let rejectReview=false;
   const rewritten='AI 完整新稿：分子修饰研究，右下使用简化肽链轮廓，浅蓝底，中央留白，16:9 横版，无文字。';
   const mock=http.createServer(async(req,res)=>{
@@ -36,6 +36,7 @@ test('底图先确认提示词，AI/手工稿原样文生图，检查不触发�
   assert.equal(p.task.status,'done',p.task.message);assert.equal(requests.filter(r=>r.prompt).length,0,'自然语言修改不调用生图');
   const rewriteInput=requests.find(r=>r.messages?.at(-1)?.content?.startsWith?.('按自然语言修改无字主题底图提示词')).messages.at(-1).content;
   assert.match(rewriteInput,/主体描述用一个短语，通常10–25字/);assert.match(rewriteInput,/不要扩写微观结构/);assert.match(rewriteInput,/用户明确要求的细节保留/);
+  assert.match(rewriteInput,/单段通常100–220字，不设凑字数下限/);assert.doesNotMatch(rewriteInput,/250–400字|简约要求：/);
   const draft=p.themeAssetPrompts.find(r=>r.theme===initial.theme);assert.equal(draft.prompt,rewritten);assert.equal(draft.revision,initial.revision+1);
   await act('configure',{image:config});
   await act('generateThemeAssets',{confirmed:true,prompts:[initial]},400);
@@ -45,8 +46,9 @@ test('底图先确认提示词，AI/手工稿原样文生图，检查不触发�
   const manual='人工完整新稿：保留分子主题，简化聚合物链条与节点，改为右侧构图、米白底，正文区留白。';
   const latest=p.themeAssetPrompts.find(r=>r.theme===initial.theme);
   rejectReview=true;await act('generateThemeAssets',{confirmed:true,prompts:[{...latest,prompt:manual}]});await wait();assert.equal(p.task.status,'done',p.task.message);
-  const images=requests.filter(r=>r.prompt);assert.equal(images.length,2,'轻量检查不自动修图');assert.equal(images[1].prompt,manual);assert.ok(images.every(r=>r.endpoint.endsWith('/images/generations')&&!r.referenceImages?.length));
-  assert.equal(p.themeAssets.status,'awaiting_confirmation');assert.equal(p.themeAssets.directions[0].assets['content-background'].previewReview.status,'needs_revision');assert.equal(p.themeAssets.directions[0].assets['content-background'].repairHistory.length,1);
+  const images=requests.filter(r=>r.prompt);assert.equal(images.length,2,'每次提交仅生成一次，不自动修图');assert.equal(images[1].prompt,manual);assert.ok(images.every(r=>r.endpoint.endsWith('/images/generations')&&!r.referenceImages?.length));
+  assert.equal(p.themeAssets.directions[0].assets['content-background'].previewReview.status,'not_required');assert.equal(p.themeAssets.directions[0].assets['content-background'].repairHistory.length,1);
+  assert.equal(requests.some(r=>r.messages?.at(-1)?.content?.[0]?.text?.startsWith('检查三方向底图：')),false);
   await act('regenerateThemeDirection',{theme:'a'});await wait();assert.equal(p.task.status,'done',p.task.message);assert.equal(requests.filter(r=>r.prompt).length,2,'同风格重生先等待确认');
   const saved=JSON.parse(fs.readFileSync(path.join(data,p.id,'project.json'),'utf8'));assert.equal(saved.themeAssets.directions[0].promptDrafts['content-background'].prompt,manual);
 });

@@ -34,11 +34,12 @@ test('只修正一次非法证据，修正成功回填原文，持续失败给�
 });
 
 test('批量失败保留已读材料，重试复用；材料或需求变化使断点失效',async t=>{
-  let active=0,peak=0,fail=true,counts={first:0,second:0,repair:0};
+  let active=0,peak=0,fail=true,counts={first:0,second:0,repair:0,synthesisRepair:0};
   const mock=http.createServer(async(req,res)=>{let raw='';for await(const c of req)raw+=c;const prompt=JSON.parse(raw).messages.at(-1).content;let value;
     if(prompt.includes('修正材料分析中的证据引用')){counts.repair++;value=reading([{claim:'结论',excerptId:'INVALID'}]);}
     else if(prompt.includes('识别与理解单份材料')){active++;peak=Math.max(peak,active);await new Promise(r=>setTimeout(r,60));active--;const second=prompt.includes('second.txt');counts[second?'second':'first']++;value=reading([{claim:second?'第二份结论':'第一份结论',excerptId:second&&fail?'INVALID':'E0001'}]);}
-    else {const inputs=JSON.parse(prompt.split('材料理解：')[1]);value={summary:'综合理解',outline:[{title:'主要结论',sourceIds:inputs.map(r=>r.id)}],questions:[]};}
+    else if(prompt.includes('只修正下列主题的材料引用')){counts.synthesisRepair++;value={references:[{index:1,sourceIds:['M1','M2']}]};}
+    else {const inputs=JSON.parse(prompt.split('材料理解：')[1]);value={summary:'综合理解',outline:[{title:'主要结论',sourceIds:[...inputs.map(r=>r.id),'模型编造的引用']}],questions:[]};}
     res.end(JSON.stringify({choices:[{message:{content:JSON.stringify(value)}}]}));
   });await new Promise(r=>mock.listen(0,'127.0.0.1',r));
   const dir=path.resolve('work','evidence-test-'+Date.now()),port=4369,base=`http://127.0.0.1:${port}`;
@@ -54,6 +55,7 @@ test('批量失败保留已读材料，重试复用；材料或需求变化使�
   const ui=materialPanel(p,()=>'',[],'');assert.match(ui,/继续识别材料/);assert.match(ui,/已保存 1 份已读材料/);
   fs.writeFileSync(path.join(dir,'failure-checkpoint.json'),JSON.stringify(p,null,2));
   fail=false;await act('analyzeMaterials');await wait();assert.equal(p.task.status,'done',p.task.message);assert.equal(counts.first,1);assert.equal(counts.second,2);assert.equal(p.analysisDraft,null);assert.ok(p.task.progress.some(e=>e.message.includes('已复用')));
+  assert.equal(counts.synthesisRepair,1);assert.equal(p.analysis.summary,'综合理解');assert.equal(p.analysis.outline[0].title,'主要结论');assert.deepEqual(new Set(p.analysis.outline[0].sourceIds),new Set(p.materials.map(m=>m.id)));assert.ok(p.task.progress.some(e=>e.message.includes('自动修复')));
   fail=true;peak=0;await act('setConcurrency',{limit:1});await act('analyzeMaterials');await wait();assert.equal(p.task.status,'failed');assert.equal(peak,1);const before=counts.first;
   await act('requirements',{brief:{...p.brief,title:'修改需求'}});assert.equal((await call(prefix)).analysisDraft,null);
   fail=false;await act('analyzeMaterials');await wait();assert.equal(p.task.status,'done',p.task.message);assert.equal(counts.first,before+1);

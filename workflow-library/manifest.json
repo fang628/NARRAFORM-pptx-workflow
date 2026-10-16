@@ -15,8 +15,8 @@
     },
     {
       "file": "shared/content-density-and-text-color.md",
-      "sha256": "232b867e171775fa974e74142f88d0437c608901414547a39c212482bae7c992",
-      "bytes": 4275
+      "sha256": "be1e8771e872d7b6ca4aacb7c794c3f895399f749bb233f86342203707e1fac9",
+      "bytes": 6075
     },
     {
       "file": "shared/context-loading.md",
@@ -25,8 +25,8 @@
     },
     {
       "file": "shared/design-principles.md",
-      "sha256": "89fe5e75e95b1f1caa3a60c00717e0b28f86ba4aff90ce4c3734721b5ce844a1",
-      "bytes": 14790
+      "sha256": "b1ef5e228bf9351b75b1f142af4eba4462f2e204bba6cbafa53620313f616716",
+      "bytes": 15297
     },
     {
       "file": "shared/image-generation.md",
@@ -310,8 +310,8 @@
     },
     {
       "file": "stages/13-design/references/gen-prompt-scope.md",
-      "sha256": "c92929cf1426ed669c567b79ea20f7ce17e3d844a9b23af3a56f5a1fa23f66c3",
-      "bytes": 32393
+      "sha256": "749f8ee8695e5677052dbfca82f78db24173f594deea88d7240a215f90f34d8e",
+      "bytes": 34702
     },
     {
       "file": "stages/13-design/references/layout-guide.md",

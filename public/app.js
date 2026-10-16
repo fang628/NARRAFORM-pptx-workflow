@@ -9,7 +9,7 @@ import {initialElements,setImageCaption} from '/elements-model.js';
 import {pageDesignPanel,rememberDesignFeedback,markPageDesignDirty,reconstructionPanel,rememberDesignExpansion,saveAndConfirmPageDesigns,batchDesignResult} from './page-design.js';
 import {elementEditor,collectElementSlide,syncCaptionFields,mutateElements,bindTreeInteractions,moveElementBranch,syncLegacy} from './element-editor.js';
 import {initAIImageEditor,setPromptInput,sourcePanel,slideImage,promptButton,conceptPrompts,targetLabel,provenanceDialogs,rememberSourceExpansion,sourceTextView} from './provenance.js';
-import {materialPanel,queueRows,selectMaterialFiles,droppedMaterialFiles,uploadMaterialFile,selectionReport,rememberMaterialReportExpansion,layoutMaterialReports} from './materials.js';
+import {materialPanel,queueRows,selectMaterialFiles,droppedMaterialFiles,bindMaterialPickers,uploadMaterialFile,selectionReport,rememberMaterialReportExpansion,layoutMaterialReports} from './materials.js';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let p=null,tab=0,renderedTab=-1,renderedProject=null,editMode='revise',editIndex=0,pollTimer=null,toastTimer=null;
@@ -122,6 +122,8 @@ function render({keepView=false}={}){
   });
   if(busy()||sending)$$('#main button,#main input,#main textarea,#main select').forEach(e=>{if(sending||!canAddWhileBusy(e))e.disabled=true;});
   $$('#themeAssetPromptDialog textarea,#themeAssetPromptDialog button:not([data-close]),#themePromptReviewDialog textarea,#themePromptReviewDialog button:not([data-close]),#themeDirectionDialog textarea,#themeDirectionDialog select,#themeDirectionDialog button:not([data-close])').forEach(el=>el.disabled=busy()&&!(p?.imageTaskQueueEnabled&&el.matches('#themeAssetPromptText,#themeAssetInstruction,#regenerateThemeAsset,#confirmThemePrompts,[data-theme-review-prompt],[data-theme-review-instruction]')));
+  $('#themePromptReviewDialog [data-theme-prompts-regenerate]').disabled=busy()||!p?.themePromptRegeneration||!p?.themeAssetsCurrent;
+  if(busy()&&p.task.label==='重新规划三种风格与提示词')$$('#themePromptReviewDialog textarea,#themePromptReviewDialog button:not([data-close])').forEach(el=>el.disabled=true);
   const restored=view?restoreLiveView(main,view):null;
   if(restored){liveDraftRecovery=restored.missing;for(const field of restored.restored){const slide=field.closest('[data-slide]');if(slide&&field.matches('[data-node-field],[data-field],[data-image-caption]')){markPageDesignDirty(slide);const state=slide.querySelector('.element-save-state');if(state)state.textContent='已保留未保存修改，点击「保存字段内容」应用。';}}
     if(liveDraftRecovery.length)main.insertAdjacentHTML('beforeend',`<details data-live-recovery class="notice"><summary>保留的未提交编辑 · ${liveDraftRecovery.length} 项</summary><p>AI 更新了原字段结构，以下修改保留供你复制使用。</p>${liveDraftRecovery.map(d=>`<label>${h(d.label)}<textarea readonly rows="2">${h(d.check?String(d.checked):d.value)}</textarea></label>`).join('')}</details>`);
@@ -153,16 +155,18 @@ function schedulePoll(){
           if(page){setPromptInput($('#visualPromptText'),page.promptDraft);$('#visualPromptState').textContent='草稿已改写，请核对后重新生图。';}
         }
         if(themeAssetEdit&&p.task.label==='改写底图提示词')finishThemePromptRewrite();
+        if(p.task.label==='重新规划三种风格与提示词'&&p.task.status!=='done'&&$('#themePromptReviewDialog').open)$('#themePromptReviewState').textContent='重生成未完成：'+p.task.message;
         if(readerMaterialId&&$('#materialReader').open&&p.task.resultMaterialId===readerMaterialId)readMaterial(readerMaterialId);
         toast(p.task.message);
         if(p.task.status==='done'&&activeTaskOrigin?.id===p.task.id&&tab===activeTaskOrigin.tab){
           if(p.task.label==='识别与理解材料')tab=0;
-          else if(['生成三方向主题底图','改写底图提示词','更换方向底图风格','按当前风格重新生成底图','规划三方向底图提示词','准备底图重生提示词'].includes(p.task.label))tab=2;
+          else if(['生成三方向主题底图','改写底图提示词','更换方向底图风格','按当前风格重新生成底图','规划三方向底图提示词','准备底图重生提示词','重新规划三种风格与提示词'].includes(p.task.label))tab=2;
           else if(p.task.label==='提取元素并重组全篇')tab=3;
           else if(p.stage===2)tab=1;else if(p.stage===4)tab=2;else if(p.stage===7)tab=4;
         }
       }
       if(changed||ended)render({keepView:true});else{nav();syncImageLibrary();}
+      if(ended&&p.task.label==='重新规划三种风格与提示词'&&p.task.status==='done'&&tab===2&&activeTaskOrigin?.id===p.task.id)openThemePromptReview();
     }catch(e){toast('同步结果暂时失败，将自动重试：'+e.message);}
     finally{if(p?.id===id)schedulePoll();}
   },busy()||hasQueuedImages()?1100:3000);
@@ -171,7 +175,7 @@ async function create(brief,demo=false){projectRequestRevision++;activeTaskOrigi
 function openThemePromptReview(){
   const pending=p.themeAssetPrompts.filter(e=>e.status!=='generated');
   $('#themePromptReviewBody').innerHTML=themePromptReview(p,pending.length?pending:p.themeAssetPrompts);
-  $$('[data-theme-review-prompt]').forEach(input=>setPromptInput(input,input.value,{reset:true}));
+  $$('[data-theme-review-prompt]').forEach(input=>{const entry=p.themeAssetPrompts.find(e=>e.theme===input.dataset.theme&&e.use===input.dataset.use),value=input.value;setPromptInput(input,entry?.previousPrompt||value,{reset:true});if(entry?.previousPrompt)setPromptInput(input,value);});
   $('#themePromptReviewState').textContent='';$('#themePromptReviewDialog').showModal();
 }
 function finishThemePromptRewrite(){
@@ -234,10 +238,10 @@ function bindForms(){
     s.sourceLinks=(s.sourceLinks||[]).map(l=>({...l,stale:l.boundText!==undefined&&l.boundText!==slideTarget(s,l.target)}));
     el.querySelector('.source-relations').outerHTML=sourcePanel(p,s,i);
   };}
-  const input=$('#fileInput');if(input)input.onchange=()=>{queueFiles(input.files);input.value='';};
+  const selectionProjectId=p?.id;
+  bindMaterialPickers($('#main'),{enqueue:queueFiles,canSelect:()=>selectionProjectId===p?.id&&!busy()&&!sending&&!collectingMaterials});
   const draft=$('#pasteText');if(draft)draft.oninput=()=>materialDraft=draft.value;
   const analysis=$('#materialAnalysis');if(analysis)analysis.oninput=e=>{if(e.target.matches('[data-analysis-title],#analysisNotes'))$('#approveAnalysis').innerHTML=icon('check')+' 保存修改并确认';};
-  const folder=$('#folderInput');if(folder)folder.onchange=()=>{queueFiles(folder.files);folder.value='';};
   const drop=$('.upload-zone');if(drop){drop.ondragover=e=>{e.preventDefault();if(!busy()&&!sending)drop.classList.add('drag-over');};drop.ondragleave=()=>drop.classList.remove('drag-over');drop.ondrop=e=>{e.preventDefault();drop.classList.remove('drag-over');if(busy()||sending||collectingMaterials)return;const projectId=p?.id;collectingMaterials=true;safe(async()=>{try{const files=await droppedMaterialFiles(e.dataTransfer);if(projectId!==p?.id)throw Error('项目已切换，请在当前项目重新选择文件夹');queueFiles(files);}finally{collectingMaterials=false;}});};}
 }
 function updateQueue(){const el=$('#sendQueue');if(el)el.innerHTML=queueRows(sendQueue);const status=$('#sendStatus');if(status&&!sending)status.textContent=sendQueue.length?`${sendQueue.length} 个文件待发送`:'材料先保存到本机；识别时才发送给你的模型。';}
@@ -326,6 +330,12 @@ document.addEventListener('click',e=>safe(async()=>{
     const form=$('#briefForm');if(form&&!busy()&&!sameBrief(readBrief(form)))throw Error('需求已修改，请先保存并重新规划提示词');
     openThemePromptReview();return;
   }
+  if(b.hasAttribute('data-theme-prompts-regenerate')){
+    if(busy())throw Error('请等待当前任务完成');
+    if(!p.apiReady){openAPI();return;}
+    await prepareThemeAssetGeneration();$('#themePromptReviewState').textContent='AI 正在重选三种风格并生成对应提示词…';
+    try{await act('regenerateThemePrompts',{},2);}catch(error){$('#themePromptReviewState').textContent=error.message;throw error;}return;
+  }
   if(b.hasAttribute('data-theme-assets-generate')){
     if(!p.themePromptConfirmation)throw Error('请先重启服务启用提示词确认流程');
     if(p.themeAssetsCurrent&&p.themeAssets?.directions?.length&&p.themeAssets.status!=='ready'){openThemePromptReview();return;}
@@ -343,6 +353,7 @@ document.addEventListener('click',e=>safe(async()=>{
     const extra={theme,...(change?{referenceStyleId:$('#themeDirectionReference').value||null,instruction:$('#themeDirectionInstruction').value}:{})};
     await prepareThemeAssetGeneration();await act(change?'changeThemeDirection':'regenerateThemeDirection',extra,2);if(change)$('#themeDirectionDialog').close();return;
   }
+  if(b.dataset.themeCrossRestore){if(busy())throw Error('请等待当前任务完成');await act('restoreAIImage',{targetType:'theme',theme:b.dataset.theme,use:b.dataset.use,direction:b.dataset.themeCrossRestore,sourceHash:b.dataset.hash,sourceRevision:b.dataset.sourceRevision},2);return;}
   if(b.dataset.themeAssetPrompt){
     const theme=b.dataset.themeAssetPrompt,use=b.dataset.themeAssetUse;
     if(p.aiImageEditModes&&p.themeAssets?.directions.find(d=>d.id===theme)?.assets?.[use]){aiImageEditor.open({targetType:'theme',theme,use});return;}
@@ -379,6 +390,7 @@ document.addEventListener('click',e=>safe(async()=>{
   if(b.hasAttribute('data-open-api')){openAPI();return;}
   if(b.dataset.materialImagePicker!==undefined){await flushSlideEdits();imageLibraryEditor={projectId:p.id,page:Number(b.dataset.materialImagePicker),nodeId:b.dataset.imageNode||null};$('#materialImageDialog').showModal();syncImageLibrary();return;}
   if(b.dataset.cropMaterial){await flushSlideEdits();$('#materialReader').close();$('#materialImageDialog').close();materialCropEditor.open(b.dataset.cropMaterial);return;}
+  if(b.hasAttribute('data-extract-all-images')){await flushSlideEdits();if(busy()||sending)throw Error('请等待当前任务完成');await act('extractAllMaterialImages');return;}
   if(b.dataset.extractImages||b.dataset.separateImages){await flushSlideEdits();if(busy())throw Error('请等待当前任务完成');if(b.dataset.separateImages&&!p.apiReady){openAPI();toast('请配置支持视觉输入的主模型');return;}await act(b.dataset.extractImages?'extractMaterialImages':'separateMaterialImages',{id:b.dataset.extractImages||b.dataset.separateImages});if(readerMaterialId&&$('#materialReader').open)readMaterial(readerMaterialId);return;}
   if(b.dataset.insertMaterialImage){if(imageLibraryEditor?.projectId!==p.id||tab!==1)throw Error('请从当前页重新打开素材库');if(busy())throw Error('请等待图片处理完成');const {page,nodeId}=imageLibraryEditor,slides=collectSlides(page),s=slides[page],m=p.materials.find(m=>m.id===b.dataset.insertMaterialImage&&m.kind==='image');if(!m||!s)throw Error('图片或页面已变化');const previous=collectSlides();let n;if(nodeId){n=s.elements.find(n=>n.id===nodeId&&n.type==='image');if(!n)throw Error('图片字段已变化');s.sourceLinks=(s.sourceLinks||[]).filter(l=>l.target!=='element:'+n.id);s.sources=s.sources.filter(id=>id!==n.materialId||s.sourceLinks.some(l=>l.materialId===id));}else{mutateElements(s,'add',null,'image');n=s.elements.at(-1);n.label=m.generated?(supplementInfo(m)?.name||'AI 补充配图'):m.extracted?'材料配图':'原始配图';}n.materialId=m.id;if(supplementInfo(m)?.caption&&!s.elements.some(c=>c.role==='caption'&&c.parentId===n.id))s.elements=setImageCaption(s.elements,n.id,'caption-'+crypto.randomUUID(),supplementInfo(m).caption);syncLegacy(s);await act('saveContent',{slides});treeUndo={projectId:p.id,version:p.version,slides:previous,page};syncTreeUndo();$('#materialImageDialog').close();toast('图片已插入内容树，来源对应已保存');return;}
   if(b.dataset.generatePage!==undefined){if(!p.imageReady){openAPI();return;}await act('generateFullPreview',{index:Number(b.dataset.generatePage),force:true},3);return;}

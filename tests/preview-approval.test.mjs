@@ -14,7 +14,7 @@ function fixture(status='needs_revision'){
 }
 
 test('检查未通过、失败或未完成可明确确认继续，原检查结果保留且确认绑定当前版本',()=>{
-  for(const status of ['needs_revision','failed','pending']){
+  for(const status of ['needs_revision','failed','pending','inconclusive']){
     const p=fixture(status),state=previewApprovalState(p),before=structuredClone(p.visualPages);
     assert.equal(state.ready,true);assert.equal(state.requiresAcceptance,true);assert.equal(state.issues.filter(v=>v.includes('装饰过量')).length,1,'同一检查问题不重复列出');
     assert.throws(()=>previewApprovalRecord(p,{confirmAllPages:true,approvalStamp:state.stamp}),/明确确认接受/);

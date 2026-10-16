@@ -99,7 +99,7 @@ test('内容原子确认及底图、素材、代表页、全篇预览的两条�
     if(mode==='adjust'&&!direct||aiRedraw){
       await act('prepareAIImageEdit',{...target,imageEditMode:mode,sourceHash:before.sourceHash,instruction:'主体向右移动',prompt:before.prompt});await wait();
       const input=requests.slice(start).find(r=>typeof r.messages?.at(-1)?.content==='string').messages.at(-1).content;
-      if(target.targetType==='theme'&&mode==='redraw')assert.match(input,/主体描述用一个短语，通常10–25字/);
+      if(target.targetType==='theme'&&mode==='redraw'){assert.match(input,/主体描述用一个短语，通常10–25字/);assert.match(input,/单段通常100–220字，不设凑字数下限/);}
       if(mode==='adjust')assert.doesNotMatch(input,/主体描述用一个短语/,'局部编辑仍仅整理用户意见');
       const draft=p.aiImageEditDrafts[before.key];request={...request,...(mode==='adjust'?{instruction:draft.instruction,adjustmentRevision:draft.revision,...(target.targetType==='theme'?{prompt:before.prompt}:{})}:{prompt:draft.prompt})};
     }else if(mode==='adjust')request.instruction='  主体向右移动，标题不变。\n保留其他内容。  ';

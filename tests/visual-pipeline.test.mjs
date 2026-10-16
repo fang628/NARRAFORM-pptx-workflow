@@ -7,6 +7,7 @@ import {spawn,execFileSync} from 'node:child_process';
 import JSZip from 'jszip';
 import {Resvg} from '@resvg/resvg-js';
 import {digest} from '../lib/visual-model.mjs';
+import {imagePromptVersion} from '../lib/slide-image-prompts.mjs';
 import {fixtureReply,fixtureRequest} from './visual-fixture.mjs';
 import {validateAudit} from '../lib/visual-model.mjs';
 
@@ -45,20 +46,20 @@ test('按页确认、生图、自由重建、实际 PowerPoint 渲染及 release
   const confirm=async i=>{await act('confirmPageLayout',{index:i});await act('designPage',{index:i});p=await wait();assert.equal(p.task.status,'done',p.task.message);await act('approvePageDesign',{index:i});};
   await confirm(0);await act('concepts');p=await wait();assert.equal(p.task.status,'done',p.task.message);assert.equal(p.concepts.length,3);assert.equal(imagePeak,2);assert.equal(p.task.concurrency,2);assert.equal(p.task.jobs.filter(j=>j.status==='done').length,6);assert.equal(p.task.jobs.some(j=>j.status==='running'),false);assert.ok(p.concepts.every(c=>c.representatives.every(r=>r.index===0)));assert.deepEqual(p.confirmedVisualPages,[0]);const pasted=p.concepts[0].representatives[0];const pixelScript='from PIL import Image;import json,sys;print(json.dumps([list(Image.open(f).convert("RGBA").getpixel((1566,258))) for f in sys.argv[1:]]))';const pixels=JSON.parse(execFileSync(path.resolve('.venv/Scripts/python.exe'),['-c',pixelScript,path.join(dir,p.id,pasted.file),path.join(dir,p.id,pasted.normalized)],{encoding:'utf8',windowsHide:true}));assert.deepEqual(pixels[0],[200,50,80,255]);assert.notDeepEqual(pixels[1],pixels[0]);assert.ok(p.concepts.every(c=>c.representatives[0].images[0].id===imageId));assert.ok(p.concepts.every(c=>c.representatives[0].previewHash!==c.representatives[0].providerHash));assert.ok(requests.filter(b=>b.prompt&&b.size==='1920x1080').every(b=>b.prompt.includes('占位块')&&b.prompt.includes('无字')));
   assert.equal(requests.filter(b=>b.prompt&&b.size==='1920x1080').length,3);
-  for(const c of p.concepts){const r=c.representatives[0];assert.equal(r.designChecks.special_split,undefined);assert.equal(r.review.designChecks.special_split,true);assert.equal(r.designChecks.warnings,undefined);assert.ok(fs.existsSync(path.join(dir,p.id,r.file)));}
+  for(const c of p.concepts){const r=c.representatives[0];assert.equal(r.designChecks.special_split,undefined);assert.equal(r.review.designChecks.special_split,undefined);assert.equal(r.designChecks.warnings,undefined);assert.ok(fs.existsSync(path.join(dir,p.id,r.file)));}
   assert.equal(requests.filter(b=>b.messages?.at(-1)?.content?.[0]?.text?.startsWith('检查生图整页成品：')).length,3);
-  assert.equal(p.conceptReadiness.a.passed,true);assert.equal(p.conceptReadiness.c.passed,false);
-  const unrepaired=p.concepts[2].representatives[0];assert.equal(unrepaired.previewReview.status,'needs_revision');assert.ok(!unrepaired.autoRepair,'装饰问题不能在贴回后重绘整页');assert.ok(!unrepaired.repairHistory);
+  assert.equal(p.conceptReadiness.a.passed,true);assert.equal(p.conceptReadiness.c.passed,true);
+  const unrepaired=p.concepts[2].representatives[0];assert.equal(unrepaired.previewReview.status,'passed');assert.ok(unrepaired.previewReview.warnings.some(w=>w.includes('装饰')));assert.ok(!unrepaired.autoRepair,'装饰问题不能在贴回后重绘整页');assert.ok(!unrepaired.repairHistory);
   const firstCheck=requests.findIndex(b=>b.messages?.at(-1)?.content?.[0]?.text?.startsWith('检查生图整页成品：'));assert.equal(requests.slice(0,firstCheck).filter(b=>b.prompt).length,3);assert.equal(requests.slice(firstCheck).filter(b=>b.prompt).length,0,'贴回后的检查不触发生图');
   badDecoration=false;await act('checkVisualPage',{kind:'concept',theme:'c',index:0});p=await wait();assert.equal(p.task.status,'done');assert.equal(p.conceptReadiness.c.passed,true);assert.equal(requests.filter(b=>b.prompt&&b.size==='1920x1080').length,3);
   const beforeRewriteImages=requests.filter(b=>b.prompt).length;
   await act('rewriteVisualPrompt',{kind:'concept',theme:'a',index:0,instruction:'增加留白，精简重复说明'});p=await wait();assert.equal(p.task.status,'done',p.task.message);
   const rewritten=p.concepts[0].representatives[0].promptDraft;
-  assert.equal([...rewritten.matchAll(/^- \*\*/gm)].length,8);assert.ok(!rewritten.includes('【本次生成边界】'));assert.match(rewritten,/增加留白并精简装饰/);
+  assert.equal([...rewritten.matchAll(/^- \*\*/gm)].length,7);assert.ok(!rewritten.includes('【本次生成边界】'));assert.match(rewritten,/增加留白并精简装饰/);
   assert.equal(requests.filter(b=>b.prompt).length,beforeRewriteImages,'修改提示词不自行生图');
   const rewriteRequest=requests.find(b=>typeof b.messages?.at(-1)?.content==='string'&&b.messages.at(-1).content.startsWith('按用户要求修改以下整页生图提示词'));
-  assert.match(rewriteRequest.messages.at(-1).content,/任务结构示例：/);assert.match(rewriteRequest.messages.at(-1).content,/不为凑字数删文案/);
-  assert.ok(p.concepts.every(c=>c.representatives.every(r=>r.promptVersion==='workflow-image-prompt-v8')));
+  assert.doesNotMatch(rewriteRequest.messages.at(-1).content,/任务结构示例：/);assert.match(rewriteRequest.messages.at(-1).content,/不设置凑字数的下限/);
+  assert.ok(p.concepts.every(c=>c.representatives.every(r=>r.promptVersion===imagePromptVersion)));
   badPageReview=true;
   await act('selectTheme',{id:'b'});await act('generateFullPreview',{index:1},400);await act('generateFullPreview',{force:true});p=await wait();assert.equal(p.task.status,'done',p.task.message);assert.deepEqual(p.fullPreviewPages,[true,false,false]);let hash=p.visualPages[0].previewHash;
   assert.equal(p.visualPages[0].geometryAdjustment.mode,'local-composite');assert.equal(p.visualPages[0].normalized,p.visualPages[0].repairHistory[0].normalized);assert.equal(p.visualPages[0].prompt,p.visualPages[0].repairHistory[0].prompt);assert.equal(p.visualPages[0].images[0].background,undefined);

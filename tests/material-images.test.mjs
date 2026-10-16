@@ -3,15 +3,35 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
-import {execFileSync,spawn} from 'node:child_process';
+import {execFile,execFileSync,spawn} from 'node:child_process';
+import {promisify} from 'node:util';
 import {pathToFileURL} from 'node:url';
-import {validateFigureRegions} from '../lib/material-images.mjs';
+import {validateFigureRegions,materialImageAction} from '../lib/material-images.mjs';
 import {validateElements,initialElements,moveElementBranch,elementLevelTarget,orderedElements} from '../lib/elements.mjs';
-import {originalMaterialCount} from '../public/material-images.js';
+import {originalMaterialCount,extractAllImagesButton} from '../public/material-images.js';
+import {materialPanel} from '../public/materials.js';
 const python=path.resolve('.venv',process.platform==='win32'?'Scripts/python.exe':'bin/python');
 const fixture=path.resolve('work','material-images-test-'+Date.now());
 execFileSync(python,['tests/material-image-fixture.py',fixture],{windowsHide:true});
 const extract=(...args)=>JSON.parse(execFileSync(python,['tools/extract_images.py',...args],{windowsHide:true,encoding:'utf8'}));
+
+test('一键提取复用文档提取流程，保留来源、去重，单份失败不影响其他文档',async()=>{
+  const data=path.join(fixture,'batch'),id='batch-project',assets=path.join(data,id,'assets');fs.mkdirSync(assets,{recursive:true});
+  const materials=['pdf','docx','pptx'].map(ext=>{fs.copyFileSync(path.join(fixture,'source.'+ext),path.join(assets,'source.'+ext));return {id:ext,name:'材料.'+ext,file:'source.'+ext,sha256:'source-'+ext,kind:'document'};});
+  fs.writeFileSync(path.join(assets,'broken.pdf'),'not a pdf');materials.push({id:'broken',name:'损坏.pdf',file:'broken.pdf',kind:'document'});
+  const p={id,materials,analysis:{old:true},task:{status:'running'}};let worker;
+  const env={root:process.cwd(),data,run:promisify(execFile),credentials:new Map(),ensure:(_p,ok,message)=>{if(!ok)throw Error(message);},save(){},launch(_p,_label,fn){worker=fn;}};
+  assert.equal(await materialImageAction(p,{action:'extractAllMaterialImages'},env),true);
+  await worker(new AbortController().signal);
+  assert.equal(p.task.imageExtractionBatch.completed,3);assert.equal(p.task.imageExtractionBatch.failures.length,1);assert.equal(p.task.imageExtractionBatch.added,3);
+  assert.deepEqual(p.materials.filter(m=>m.extracted).map(m=>m.sourceMaterialId),['pdf','docx','pptx']);assert.equal(p.task.resultImageIds.length,3);assert.equal(p.analysis,null);
+  await materialImageAction(p,{action:'extractAllMaterialImages'},env);await worker(new AbortController().signal);
+  assert.equal(p.task.imageExtractionBatch.added,0);assert.equal(p.task.imageExtractionBatch.duplicates,3);assert.equal(p.materials.filter(m=>m.extracted).length,3);
+  assert.match(materialPanel(p,()=>'',[],'',null),/data-extract-all-images disabled/);
+  assert.equal(extractAllImagesButton({materials:materials.map(m=>({...m,generated:true}))}), '');
+  assert.equal(extractAllImagesButton({materials:materials.map(m=>({...m,extracted:true}))}), '');
+  assert.equal(extractAllImagesButton({materials:materials.map(m=>({...m,reconstructed:true}))}), '');
+});
 
 test('主副标题独立成族，副标题可删除且不进入正文并列或拖动',async()=>{
   const s={title:'主标题',subtitle:'副标题附文',body:['正文甲','正文乙'],sources:[],sourceLinks:[]},nodes=validateElements(initialElements(s));
@@ -62,6 +82,8 @@ test('HTTP：分离图片插入内容树与原材料对应；AI 初次设计、�
   const act=(action,extra={},status=200)=>call(prefix+'/action',{action,...extra},status),wait=async()=>{for(let i=0;i<500;i++){p=await call(prefix);if(p.task?.status!=='running')return p;await new Promise(r=>setTimeout(r,25));}throw Error('任务超时');};
   p=await call(prefix+'/materials',{name:'材料.pdf',base64:fs.readFileSync(path.join(fixture,'source.pdf')).toString('base64')});const original=p.materials[0];await act('extractMaterialImages',{id:original.id});p=await wait();assert.equal(p.task.status,'done',p.task.message);const image=p.materials.find(m=>m.extracted);assert.ok(image);assert.equal(image.sourceMaterialHash,original.sha256);assert.deepEqual(image.sourceLocations.map(l=>l.page),[1,2]);
   await act('extractMaterialImages',{id:original.id});p=await wait();assert.equal(p.materials.length,2);assert.equal(p.materials[0].imageExtraction.duplicates,1);
+  for(const ext of ['docx','pptx'])p=await call(prefix+'/materials',{name:'材料.'+ext,base64:fs.readFileSync(path.join(fixture,'source.'+ext)).toString('base64')});
+  await act('extractAllMaterialImages');p=await wait();assert.equal(p.task.status,'done',p.task.message);assert.equal(p.task.imageExtractionBatch.completed,3);assert.equal(p.task.imageExtractionBatch.added,2);assert.equal(p.task.imageExtractionBatch.duplicates,1);assert.equal(p.task.resultImageIds.length,2);
   p=await act('saveContent',{slides:[{title:'图片来源',body:[],sources:[],elements:[{id:'title',type:'text',role:'title',text:'图片来源'},{id:'photo',type:'image',label:'材料配图',materialId:image.id,parentId:'title'}]}]});assert.equal(p.slides[0].sourceLinks[0].materialId,image.id);assert.match(p.slides[0].sourceLinks[0].note,/材料.pdf/);assert.equal(p.slides[0].elements[1].parentId,'title');assert.ok((await fetch(base+prefix+'/assets/'+image.id)).ok);
   const cfg={baseURL:'http://127.0.0.1:'+mock.address().port+'/v1',key:'synthetic-secret',model:'test-vision'};await act('configure',{text:cfg});p=await call(prefix+'/materials',{name:'scan.png',base64:fs.readFileSync(path.join(fixture,'source.png')).toString('base64')});const scan=p.materials.at(-1);await act('separateMaterialImages',{id:scan.id});p=await wait();assert.equal(p.task.status,'done',p.task.message);assert.ok(sawRegion);const crop=p.materials.at(-1);assert.equal(crop.width,100);assert.equal(crop.height,100);assert.equal(crop.sourceMaterialId,scan.id);assert.equal(crop.needsRegionReview,true);
   await act('removeMaterial',{id:original.id});p=await call(prefix);assert.equal(p.materials.some(m=>m.id===image.id),false);assert.equal(p.slides[0].elements.find(n=>n.id==='photo').materialId,null);assert.equal(p.slides[0].sourceLinks.length,0);

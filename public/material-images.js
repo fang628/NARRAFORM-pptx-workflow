@@ -1,4 +1,6 @@
 export const materialLimits=Object.freeze({count:200,fileBytes:500_000_000,fileMB:500,extractedImages:1000});
+export const extractableDocuments=p=>(p?.materials||[]).filter(m=>!m.generated&&!m.extracted&&!m.reconstructed&&m.purpose!=='reconstruction'&&m.purpose!=='workflow-background'&&/\.(pdf|docx|pptx)$/i.test(m.file||m.name||''));
+export function extractAllImagesButton(p){return extractableDocuments(p).length?`<button type="button" class="secondary" data-extract-all-images ${p.task?.status==='running'?'disabled':''} title="在本机提取全部 PDF、Word 和 PPTX 的内嵌图片，保留来源并跳过重复图片">一键提取图片 ↗</button>`:'';}
 export const pageLimits=Object.freeze({min:1,max:30});
 export const supplementImageTypes=Object.freeze([{id:'illustration',name:'主题配图'},{id:'scene',name:'场景图片'},{id:'flowchart',name:'流程图'},{id:'roadmap',name:'路线图'},{id:'mechanism',name:'机理图'},{id:'schematic',name:'结构示意图'},{id:'other',name:'其他图片'}]);
 export const supplementInfo=m=>m?.supplementImage||m?.scientificFigure;

@@ -24,9 +24,19 @@ test('主体只引用原始材料的现有证据编号，禁用页型不强求�
   assert.deepEqual(Object.keys(validateThemePlanning({...direction,subjectSources:{contentSubject:direction.subjectSources.contentSubject}},p).subjectSources),['contentSubject']);
 });
 
+test('新规划在登记和生图前核对全篇主体，并保留判断依据供后续复用',()=>{
+  const {p,direction}=fixture();
+  assert.throws(()=>validateThemePlanning(direction,p,{requireDeckScope:true}),error=>error.code==='BACKGROUND_SUBJECT_NOT_DECK_WIDE');
+  const subjectSources=Object.fromEntries(Object.entries(direction.subjectSources).map(([k,s])=>[k,{...s,scope:'whole-deck',scopeReason:'全篇章节都围绕肽链及其改造展开'}]));
+  const planned=validateThemePlanning({...direction,subjectSources},p,{requireDeckScope:true});
+  assert.equal(planned.subjectSources.heroSubject.scope,'whole-deck');assert.equal(planned.subjectSources.tocSubject.scopeReason,subjectSources.tocSubject.scopeReason);
+  subjectSources.heroSubject.scope='section-only';
+  assert.throws(()=>validateThemePlanning({...direction,subjectSources},p,{requireDeckScope:true}),error=>error.code==='BACKGROUND_SUBJECT_NOT_DECK_WIDE');
+});
+
 test('匹配预设时禁止无依据原创，允许均不匹配、明确指定或沿用预设登记',()=>{
   const {p,direction}=fixture();
-  assert.throws(()=>validateStyleSelection({...direction,referenceStyleId:null},p),/已有完全符合主题的预设/);
+  assert.throws(()=>validateStyleSelection({...direction,referenceStyleId:null},p),/已有符合主题的预设/);
   assert.throws(()=>validateStyleSelection({...direction,referenceStyleId:'B'},p),/不在贴合主题/);
   p.styleRegistry=[{id:'STYLE-child',definition:{referenceStyleId:'A'}}];
   assert.deepEqual(validateStyleSelection({...direction,referenceStyleId:'STYLE-child'},p).matchingPresetIds,['A']);
@@ -51,14 +61,20 @@ test('登记的材料对象进入短提示词，同时允许陪衬且维持清�
   const {p,direction}=fixture(),d={...direction,...validateThemePlanning(direction,p)};
   for(const use of ['hero-image','toc-image']){
     const prompt=themeAssetPrompt(p,d,use);
-    assert.match(prompt,/主体：肽链/);assert.match(prompt,/取自材料/);assert.match(prompt,/明显可见/);
-    assert.match(prompt,/可搭配少量主题场景点缀，避免孤立，不形成竞争主体/);
+    const source=d.subjectSources[use==='hero-image'?'heroSubject':'tocSubject'];
+    assert.equal(source.materialId,'report');assert.equal(source.evidence.quote,p.materials[0].text);
+    assert.ok(prompt.includes('主体：'+source.element));assert.match(prompt,/单一具象主体占满视觉区/);
+    assert.match(prompt,/可配少量主题点缀/);assert.doesNotMatch(prompt,/取自材料|明显可见/);
     assert.ok(prompt.length<=400,prompt.length);assert.doesNotMatch(prompt,/F1|report|evidenceId|匹配预设/);
   }
 });
 
-test('部分适配不强制预设，完全适配才强制；旧版匹配不推定完全适配',()=>{
+test('符合主题的预设必须采用，不以完全匹配字段或局部配色调整为跳过理由',()=>{
   const {p,direction}=fixture();
-  for(const fullyMatchingPresetIds of [[],undefined])assert.doesNotThrow(()=>validateStyleSelection({...direction,referenceStyleId:null,styleSelection:{matchingPresetIds:['A'],fullyMatchingPresetIds,reason:'仅配色可参考，视觉语言需要重新设计'}},p));
+  for(const fullyMatchingPresetIds of [[],undefined]){
+    const styleSelection={matchingPresetIds:['A'],fullyMatchingPresetIds,reason:'主题与用途适配，局部配色和构图可调整'};
+    assert.throws(()=>validateStyleSelection({...direction,referenceStyleId:null,styleSelection},p),error=>error.code==='STYLE_PRESET_REQUIRED');
+    assert.doesNotThrow(()=>validateStyleSelection({...direction,referenceStyleId:'A',styleSelection},p));
+  }
   assert.throws(()=>validateStyleSelection({...direction,styleSelection:{...direction.styleSelection,fullyMatchingPresetIds:['B']}},p),/必须属于/);
 });

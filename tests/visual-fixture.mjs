@@ -8,11 +8,11 @@ export async function fixtureRequest(req){
   const form=await new Request('http://127.0.0.1',{method:'POST',headers:{'content-type':req.headers['content-type']},body:bytes}).formData(),result={referenceImages:[]};
   for(const [key,value] of form){if(typeof value==='string')result[key]=key==='n'?Number(value):value;else result.referenceImages.push({field:key,size:value.size,sha256:crypto.createHash('sha256').update(Buffer.from(await value.arrayBuffer())).digest('hex')});}return result;
 }
-export const fixtureDirections=()=>['a','b','c'].map((id,i)=>({id,referenceStyleId:['A','B','D'][i],name:['浅蓝科研','深蓝技术','靛蓝编辑'][i],description:'依据材料的研究主题选择，构图与层级有不同策略',style:['明亮浅蓝，证据优先','深蓝底，放射关系','靛蓝浅底，杂志式编排'][i],coreColor:['#E4F4FB','#01126B','#EEF4FA'][i],typography:'标题深色无衬线、正文深蓝，小标题清晰，非机械艺术字',frames:'正文无框，短标签平整浅色填充、细线描边',decoration:'少量主题线条避开文字区',layoutLanguage:['左图右文，中心支撑','放射结构与独立证据','不对称分区与层级'][i],heroSubject:'抽象非事实分子主题主体',tocSubject:'实验容器主题示意',textArea:'左侧标题与目录连续留白，正文区域不放密集细节'}));
+export const fixtureDirections=()=>['a','b','c'].map((id,i)=>({id,referenceStyleId:['A','B','D'][i],name:['浅蓝科研','深蓝技术','靛蓝编辑'][i],description:'依据材料的研究主题选择，构图与层级有不同策略',style:['明亮浅蓝，证据优先','深蓝底，放射关系','靛蓝浅底，杂志式编排'][i],coreColor:['#E4F4FB','#01126B','#EEF4FA'][i],typography:'标题深色无衬线、正文深蓝，小标题清晰，非机械艺术字',frames:'正文无框，短标签平整浅色填充、细线描边',decoration:'少量主题线条避开文字区',layoutLanguage:['左图右文，中心支撑','放射结构与独立证据','不对称分区与层级'][i],heroSubject:'右侧具象微观分子实体',tocSubject:'同一分子实体的具象近景',textArea:'左侧标题与目录连续留白，正文区域不放密集细节'}));
 export const fixtureCustomDirections=()=>fixtureDirections().map((d,i)=>({...d,referenceStyleId:null,styleSelection:{matchingPresetIds:[],reason:'合成案例预设均不适用'},name:['明亮编辑','深色工业','极简网格'][i],description:'合成模型只验证执行链路',style:['浅灰与黄，左文右图，独立渐变','暗色和黄色，非对称分块','纸白和灰，精细线条'][i]}));
 export function fixturePlannedDirections(prompt,{custom=false}={}){
   const sources=JSON.parse(prompt.split('主体来源材料：')[1]?.split('\n')[0]||'[]');
-  return (custom?fixtureCustomDirections():fixtureDirections()).map(d=>({...d,styleSelection:custom?d.styleSelection:{matchingPresetIds:['A','B','D'],reason:'合成测试：科研题材适用这些预设'},subjectSources:Object.fromEntries(['heroSubject','tocSubject','contentSubject'].map(k=>[k,{materialId:sources[0]?.id,evidenceId:sources[0]?.evidence?.[0]?.id,element:'分子修饰'}]))}));
+  return (custom?fixtureCustomDirections():fixtureDirections()).map(d=>({...d,styleSelection:custom?d.styleSelection:{matchingPresetIds:['A','B','D'],reason:'合成测试：科研题材适用这些预设'},subjectSources:Object.fromEntries(['heroSubject','tocSubject','contentSubject'].map(k=>[k,{materialId:sources[0]?.id,evidenceId:sources[0]?.evidence?.[0]?.id,element:'分子实体',scope:'whole-deck',scopeReason:'该对象是全篇研究的核心实体，各章节围绕其研究展开'}]))}));
 }
 const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 export function fixtureReply(b,options={}){
@@ -29,7 +29,8 @@ export function fixtureReply(b,options={}){
     return {data:[{b64_json:png.toString('base64')}]};
   }
   let result;
-  if(prompt.includes('按照 pptx-workflow 1.3')){const nodes=JSON.parse(prompt.split('已有节点：')[1].split('\n使用的材料：')[0]);result={purpose:'合成页面验证',conclusion:'保持事实和层级',logic:'承接前页进入下一步',layoutIntent:'左文右图，装饰独立重建',style:'浅灰底深字、亮黄色强调、独立渐变与圆形装饰',readingOrder:nodes.map(n=>n.id),nodes:nodes.map(n=>({id:n.id,position:n.type==='image'?'右上':'左侧',relativeSize:'中等',alignment:'左对齐',carrier:'独立原生对象',relation:n.parentId?'附属'+n.parentId:'并列'})),differences:'保留每页准确内容',missingMaterials:[]};}
+  if(prompt.startsWith('生图提示词发送前检查：'))result={passed:true,issues:[],correctedPrompt:null};
+  else if(prompt.includes('按照 pptx-workflow 1.3')){const nodes=JSON.parse(prompt.split('已有节点：')[1].split('\n使用的材料：')[0]);result={purpose:'合成页面验证',conclusion:'保持事实和层级',logic:'承接前页进入下一步',layoutIntent:'左文右图，装饰独立重建',style:'浅灰底深字、亮黄色强调、独立渐变与圆形装饰',readingOrder:nodes.map(n=>n.id),nodes:nodes.map(n=>({id:n.id,position:n.type==='image'?'右上':'左侧',relativeSize:'中等',alignment:'左对齐',carrier:'独立原生对象',relation:n.parentId?'附属'+n.parentId:'并列'})),differences:'保留每页准确内容',missingMaterials:[]};}
   else if(prompt.includes('识别与理解单份材料'))result={category:'研究材料',summary:'分子修饰研究材料',keyPoints:['分子修饰'],facts:[],suggestedUse:'主题与配图',questions:[]};
   else if(prompt.startsWith('汇总材料理解')){const readings=JSON.parse(prompt.split('材料理解：')[1]);result={summary:'分子修饰与递送研究',outline:[{title:'研究目标',sourceIds:readings.map(r=>r.id)}],questions:[]};}
   else if(prompt.startsWith('三方向底图规划：'))result={directions:fixturePlannedDirections(prompt,{custom:options.customDirections})};
