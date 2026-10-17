@@ -15,15 +15,16 @@ test('真实HTTP接入：三方向与全篇预览精定位后本地贴图，PPTX
   const boxes=[{x:850,y:170,w:400,h:203},{x:850,y:450,w:220,h:220}],coarse=[{x:842,y:163,w:415,h:218},{x:844,y:443,w:232,h:232}];
   const png=(w,h,body)=>new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 1600 900">${body}</svg>`).render().asPng();
   const preview=png(1920,1080,'<rect width="1600" height="900" fill="#333"/>'+boxes.map(b=>`<rect x="${b.x-3}" y="${b.y-3}" width="${b.w+6}" height="${b.h+6}" fill="#111"/><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" fill="#ddd"/>`).join(''));
-  let imageCalls=0,locateCalls=0;
+  let imageCalls=0,locateCalls=0,countSequence=null;const imageRequests=[];
   const mock=http.createServer(async(req,res)=>{
     const b=await fixtureRequest(req),content=b.messages?.at(-1)?.content,text=typeof content==='string'?content:content?.[0]?.text||'';
     let reply;
-    if(b.prompt){imageCalls++;if(b.prompt.includes('**内容要求**')){assert.equal((b.prompt.match(/占位框尺寸约 \d+×\d+ px/g)||[]).length,2);assert.match(b.prompt,/1920×1080画布/);assert.doesNotMatch(b.prompt,/比例误差不超过2%/);}reply={data:[{b64_json:preview.toString('base64')}]};}
+    if(b.prompt){imageCalls++;imageRequests.push(b);if(b.prompt.includes('**内容要求**')){assert.equal((b.prompt.match(/占位框尺寸约 \d+×\d+ px/g)||[]).length,2);assert.match(b.prompt,/1920×1080画布/);assert.doesNotMatch(b.prompt,/比例误差不超过2%/);}reply={data:[{b64_json:preview.toString('base64')}]};}
     else if(text.startsWith('图片计划：')||text.startsWith('定位图片预留区：')){
       if(text.startsWith('定位图片预留区：')){locateCalls++;assert.match(text,/节点身份、所属内容分组和图文位置/);assert.match(text,/不按原图宽高比匹配/);}
       const images=JSON.parse(text.split('登记图片：')[1].split('\n视觉方向：')[0]);
-      reply={choices:[{message:{content:JSON.stringify({images:images.map((im,i)=>({...im,...coarse[i]}))})}}]};
+      const rendered=text.startsWith('定位图片预留区：'),count=rendered&&countSequence?.length?countSequence.shift():images.length;
+      reply={choices:[{message:{content:JSON.stringify({...(rendered?{placeholderCount:count,countEvidence:'实际可见 '+count+' 个图片预留框'}:{}),images:rendered&&count!==images.length?[]:images.map((im,i)=>({...im,...coarse[i]}))})}}]};
     }else reply=fixtureReply(b);
     res.setHeader('content-type','application/json');res.end(JSON.stringify(reply));
   });await new Promise(r=>mock.listen(0,'127.0.0.1',r));t.after(()=>{mock.closeAllConnections();mock.close();});
@@ -63,4 +64,29 @@ test('真实HTTP接入：三方向与全篇预览精定位后本地贴图，PPTX
     const off=pic.match(/<a:off x="(\d+)" y="(\d+)"/),ext=pic.match(/<a:ext cx="(\d+)" cy="(\d+)"/);
     [im.x,im.y,im.w,im.h].forEach((v,k)=>assert.ok(Math.abs(Number([off[1],off[2],ext[1],ext[2]][k])-v/120*914400)<=1,'PPTX坐标与预览一致，误差不超过1 EMU'));
   }
+  for(const actual of [1,3]){
+    countSequence=[actual,2];const before=imageRequests.length;
+    await act('generateFullPreview',{index:0});await wait();
+    const regenerated=p.visualPages[0],draws=imageRequests.slice(before);
+    assert.equal(draws.length,2,'数量错误只需一次重生成');
+    assert.equal(draws[1].prompt,draws[0].prompt,'严格复用实际发送的原提示词，不附加数量修正或旧图');
+    assert.deepEqual(draws[1].referenceImages,draws[0].referenceImages,'沿用初次参考底图，不使用数量错误的生成图');
+    assert.equal(regenerated.generationAttempts[1].retryReason,'placeholder-count');
+    assert.equal(regenerated.placeholderReview.countAttempts,1);
+    assert.equal(regenerated.placeholderReview.countReport.passed,true);
+    assert.equal(regenerated.placeholderReview.history[0].countReport.observed,actual);
+    assert.equal(regenerated.images.length,2);assert.equal(regenerated.placeholderReview.status,'passed');
+    const ledger=JSON.parse(fs.readFileSync(path.join(data,p.id,regenerated.jobFile),'utf8'));
+    assert.equal(ledger.generationAttempts[0].placeholderCount.passed,false);
+    assert.equal(ledger.generationAttempts[1].placeholderCount.passed,true);
+  }
+  countSequence=[3,3,3];const beforeExhausted=imageRequests.length;
+  await act('generateFullPreview',{index:0});await wait();
+  const exhausted=p.visualPages[0],draws=imageRequests.slice(beforeExhausted);
+  assert.equal(draws.length,3);assert.ok(draws.every(r=>r.prompt===draws[0].prompt));
+  assert.equal(exhausted.placeholderReview.status,'count_exhausted');assert.equal(exhausted.placeholderReview.countAttempts,2);
+  assert.equal(exhausted.images.length,0,'数量持续错误时不猜测位置贴图');
+  assert.equal(exhausted.previewReview.status,'needs_revision');assert.ok(exhausted.previewReview.issues.some(v=>v.includes('占位框数量')));
+  assert.ok(fs.existsSync(path.join(data,p.id,exhausted.file)),'最后生成结果仍可查看和选用');
+
 });

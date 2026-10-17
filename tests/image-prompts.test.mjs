@@ -51,6 +51,24 @@ test('整页提示词七项自足，原文与多层图片归属保留，工程�
   assert.ok(prompt.length<1700,'短文案页面无需附加整段工作流');
 });
 
+test('创意形态按本页语义择一，真实逻辑用箭头；旧完整稿补全不重复',()=>{
+  const {p,d,images}=fixture();
+  p.themeAssets={stamp:themeAssetsStamp(p),directions:[{...d,assets:{'content-background':{normalized:'bg.png',previewHash:'hash'}}}]};
+  for(const [logic,form] of [['样本处理流程，第一步进入第二步','箭形组合'],['三个等级分级，底层支撑上层','金字塔式'],['三个时期的发展历程','波浪走向']]){
+    Object.assign(p.pageDesigns[1].plan,{logic,layoutIntent:'按当前内容建立重点'});
+    const prompt=slideImagePrompt(p,1,d,images),layout=prompt.split('- **排版要求**：')[1].split(/\n- \*\*/)[0],relation=prompt.split('- **视觉关系要求**：')[1];
+    assert.match(layout,new RegExp(form));assert.match(relation,/直箭头、弯箭头或箭形/);assert.match(relation,/方向与起止/);
+    assert.equal(effectiveSlideImagePrompt(p,1,d,images,'full',prompt),prompt);
+    const old=prompt.replace(/创意方向：[^\n]+/,'').replace(/；图文对应所属分组；[^\n]+/,'；图文对应所属分组，不新增因果箭头。');
+    const repaired=effectiveSlideImagePrompt(p,1,d,images,'full',old);
+    assert.match(repaired,/创意方向：/);assert.match(repaired.split('- **视觉关系要求**：')[1],/直箭头、弯箭头或箭形/);
+    assert.equal(effectiveSlideImagePrompt(p,1,d,images,'full',repaired),repaired);
+  }
+  Object.assign(p.pageDesigns[1].plan,{logic:'两组并列，不宣称因果',layoutIntent:'左右对照'});
+  const parallel=slideImagePrompt(p,1,d,images).split('- **视觉关系要求**：')[1];
+  assert.match(parallel,/若有实际逻辑联系/);assert.match(parallel,/纯并列不强加方向/);
+});
+
 test('内容项完整保留多层归属，排版项只给主要分组与大致区域',()=>{
   const {p,d,images}=fixture(),s=p.slides[1];
   s.elements.push({id:'SECOND-GROUP',type:'group',label:'T 细胞模型',parentId:'S01-TITLE'},

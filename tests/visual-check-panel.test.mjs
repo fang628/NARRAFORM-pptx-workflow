@@ -26,3 +26,10 @@ test('原图本地几何调整可查看实际指令，04保持只展示问题',(
   assert.match(pageCheckPanel(p,r,'concept','a'),/只移动原图，不修改底稿/);
   assert.doesNotMatch(pageCheckPanel(p,r,'full'),/修改提示词|整页图片检查/);
 });
+
+test('显示实际占位框数量与原提示词重生成记录，04不额外打印通过说明',()=>{
+  const r={index:0,previewReview:{status:'passed',issues:[]},placeholderReview:{status:'passed',countAttempts:1,countLimit:2,countReport:{expected:2,observed:2,passed:true}},generationAttempts:[{attempt:0,prompt:'本页原设计'},{attempt:1,retryReason:'placeholder-count',prompt:'本页原设计',status:'generated'}]};
+  const html=pageCheckPanel(p,r,'concept','a');
+  assert.match(html,/占位框数量 · 已通过/);assert.match(html,/设计 2 个 · 实际 2 个/);assert.match(html,/原提示词重生成第 1 次/);
+  assert.doesNotMatch(pageCheckPanel(p,r,'full'),/占位框数量 · 已通过/);
+});

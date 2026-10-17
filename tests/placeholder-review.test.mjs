@@ -1,8 +1,39 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {placeholderReport,placeholderCorrectionPrompt,repairPlaceholders} from '../lib/placeholder-review.mjs';
+import {placeholderReport,placeholderCorrectionPrompt,repairPlaceholders,placeholderCountReport} from '../lib/placeholder-review.mjs';
 import {fittedImagePlans} from '../lib/image-geometry.mjs';
 const image=(factor=1)=>({nodeId:'figure',id:'original',label:'结果配图',x:1000,y:120,w:400*factor,h:200,aspect:2});
+
+test('实际数量独立于登记清单：少框、多框、无原图时多画框均按原提示词重生成',async()=>{
+  for(const [expected,observed] of [[1,0],[1,2],[0,1]]){
+    const order=[];
+    const result=await repairPlaceholders({initial:0,
+      inspect:async n=>{order.push('inspect'+n);return {images:n&&expected?[image()]:[],countReport:placeholderCountReport({placeholderCount:n?expected:observed,countEvidence:'逐框清点'},expected)};},
+      regenerate:()=>assert.fail('数量错误不发送比例修正'),
+      regenerateCount:async(_,report,n)=>{assert.equal(report.passed,false);order.push('redraw'+n);return n;}});
+    assert.deepEqual(order,['inspect0','redraw1','inspect1']);assert.equal(result.review.countAttempts,1);
+    assert.equal(result.review.attempts,0);assert.equal(result.review.countReport.passed,true);
+    assert.equal(result.review.history[0].passed,false);assert.equal(result.images.length,expected);
+  }
+  for(const raw of [{},{placeholderCount:'2',countEvidence:'实际看图'},{placeholderCount:2},{placeholderCount:-1,countEvidence:'实际看图'}])assert.throws(()=>placeholderCountReport(raw,2),/数量检查/);
+});
+
+test('数量重生成最多两次，持续不符不贴原图；取消后不再生图',async()=>{
+  let draws=0;
+  const inspect=async()=>({images:[],countReport:placeholderCountReport({placeholderCount:2,countEvidence:'多出一个框'},1)});
+  const result=await repairPlaceholders({initial:0,inspect,regenerateCount:async()=>++draws});
+  assert.equal(draws,2);assert.equal(result.candidate,2);assert.equal(result.review.status,'count_exhausted');assert.equal(result.images.length,0);assert.match(result.review.error,/按原提示词重生成 2 次/);
+  const c=new AbortController();draws=0;
+  await assert.rejects(repairPlaceholders({initial:0,inspect,signal:c.signal,regenerateCount:async()=>{draws++;c.abort();return 1;}}),/abort/i);
+  assert.equal(draws,1);
+});
+
+test('比例修正出的新图仍复查数量，数量错误回到原提示词路径',async()=>{
+  const order=[];
+  const result=await repairPlaceholders({initial:0,inspect:async n=>({images:n===1?[]:[image(n?1:1.4)],countReport:placeholderCountReport({placeholderCount:n===1?2:1,countEvidence:'逐框看图'},1)}),
+    regenerate:async()=>{order.push('ratio');return 1;},regenerateCount:async()=>{order.push('original');return 2;}});
+  assert.deepEqual(order,['ratio','original']);assert.equal(result.review.attempts,1);assert.equal(result.review.countAttempts,1);assert.equal(result.review.status,'passed');
+});
 
 test('占位框按相对比例判断，2%边界内合格，未知比例不虚报通过',()=>{
   assert.equal(placeholderReport([image(1.02)])[0].passed,true);

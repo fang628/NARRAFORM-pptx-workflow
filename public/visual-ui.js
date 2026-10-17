@@ -39,7 +39,7 @@ export function pageCheckPanel(p,r,kind='full',theme=''){
   const history=(r.repairHistory||[]).map((old,n)=>`<li><a href="${image(p,r.index,theme)}&revision=${encodeURIComponent(old.jobFile)}" target="_blank" rel="noopener">${n?'第 '+n+' 次修正版':'原始版本'} ↗</a>${old.previewReview?.issues?.length?`<p>${old.previewReview.issues.map(h).join('；')}</p>`:''}</li>`).join('');
   const promptCheck=r.promptCheck||r.generationAttempts?.[0]?.promptCheck;
   const promptStates={passed:'已通过',repaired:'已自动整理并复查通过',inconclusive:'检查未完成 · 沿用有效稿',local_only:'已完成格式检查',checking:'正在检查'};
-  const ratio=r.placeholderReview,ratioStates={passed:'已通过',not_needed:'无登记原图，已跳过',exhausted:'已达修正上限，按适配规则贴回',fallback:'修正未完成，沿用已定位底稿贴回'};
+  const ratio=r.placeholderReview,ratioStates={count_exhausted:'数量不符，暂未贴回原图',passed:'已通过',not_needed:'无登记原图，已跳过',exhausted:'已达修正上限，按适配规则贴回',fallback:'修正未完成，沿用已定位底稿贴回'};
   const hasResults=!!(promptCheck||ratio||r.review);
   const status=ok?'已通过':pending?(hasResults?'部分检查完成 · 整页待检查':p.task?.status==='running'?'等待检查':'尚未取得检查结果'):check.status==='needs_revision'?'有待修改问题':check.status==='failed'?'检查失败':check.status==='cancelled'?'检查已取消':'检查未完成';
   const rows=(ratio?.checks||[]).map(c=>`<tr><td>${h(c.label||'配图')}</td><td>${Number.isFinite(c.expectedAspect)?c.expectedAspect.toFixed(3)+':1':'未记录'}</td><td>${Number.isFinite(c.observedAspect)?c.observedAspect.toFixed(3)+':1':'未记录'}</td><td>${Number.isFinite(c.relativeError)?(c.relativeError*100).toFixed(1)+'%':'未记录'} · ${c.passed?'通过':'超出容差'}</td></tr>`).join('');
@@ -49,18 +49,19 @@ export function pageCheckPanel(p,r,kind='full',theme=''){
     for(const attempt of record.generationAttempts||[]){
       if(!attempt.attempt||!attempt.prompt)continue;
       const key=record.normalized+':'+attempt.attempt+':'+attempt.prompt;if(seen.has(key))continue;seen.add(key);
-      correctionPrompts.push({title:'占位框修正第 '+attempt.attempt+' 次'+(attempt.status==='failed'?' · 请求失败':''),prompt:attempt.prompt});
+      correctionPrompts.push({title:(attempt.retryReason==='placeholder-count'?'占位框数量不符 · 原提示词重生成第 ':'占位框修正第 ')+attempt.attempt+' 次'+(attempt.status==='failed'?' · 请求失败':''),prompt:attempt.prompt});
     }
     if(record.geometryAdjustment?.prompt)correctionPrompts.push({title:'原图位置与大小调整 · 本地合成',prompt:record.geometryAdjustment.prompt});
   }
   const issues=check.issues||[];
-  const hasModifications=!!(repair?.attempts||ratio?.attempts||r.geometryAdjustment||r.repairHistory?.length);
+  const hasModifications=!!(repair?.attempts||ratio?.attempts||ratio?.countAttempts||r.geometryAdjustment||r.repairHistory?.length);
   const names={related_visual:'配图相关性',semantic_layout:'内容关系',independent_text:'独立文段',title_hierarchy:'标题层级',readability:'文字可读性',restrained_decoration:'装饰主次',image_integrity:'原图完整性',top_progress:'页顶导航',academic_fill:'文本承载'};
   const checks=r.designChecks||r.review?.designChecks;
   const results=Object.entries(names).filter(([key])=>typeof checks?.[key]==='boolean').map(([key,name])=>`<div><dt>${name}</dt><dd>${checks[key]?'通过':['academic_fill','restrained_decoration'].includes(key)?'建议调整':'需调整'}</dd></div>`).join('');
   const promptBox=(title,text)=>`<div class="check-prompt"><label>${h(title)}<textarea readonly rows="4" aria-label="${h(title)}" spellcheck="false">${h(text)}</textarea></label></div>`;
   return `<details class="page-visual-check" ${!ok?'open':''}><summary>本步检查 · ${status}${repair?' · 自动修正 '+repair.attempts+'/'+repair.limit:''}</summary>
     <section class="check-result"><strong>发送前提示词检查 · ${h(promptCheck?promptStates[promptCheck.status]||promptCheck.status:'暂无记录')}</strong>${list(promptCheck?.issues)}${promptCheck?.changed&&r.generationAttempts?.[0]?.prompt?promptBox('自动整理后的提示词（已发送）',r.generationAttempts[0].prompt):''}</section>
+    ${ratio?.countReport?`<section class="check-result"><strong>占位框数量 · ${ratio.countReport.passed?'已通过':'不符合原设计'}</strong><p>设计 ${h(ratio.countReport.expected)} 个 · 实际 ${h(ratio.countReport.observed)} 个 · 按原提示词重生成 ${ratio.countAttempts||0}/${ratio.countLimit??2} 次</p></section>`:''}
     <section class="check-result"><strong>占位框比例 · ${h(ratio?ratioStates[ratio.status]||ratio.status:'暂无记录')}</strong>${r.placeholderLocalization?.total?`<p>本地边界精定位 ${r.placeholderLocalization.refined}/${r.placeholderLocalization.total} 张${r.placeholderLocalization.refined<r.placeholderLocalization.total?' · 其余沿用 AI 定位':''}</p>`:''}${ratio?`<p>容差 ${Math.round((ratio.tolerance??p.placeholderRatioTolerance??.05)*100)}% · 修正 ${ratio.attempts||0}/${ratio.limit??2} 次</p>`:''}${rows?`<div class="check-table-scroll"><table class="check-ratio-table"><thead><tr><th>图片</th><th>原图比例</th><th>占位框比例</th><th>偏差与结论</th></tr></thead><tbody>${rows}</tbody></table></div>`:''}${ratio?.error?`<p>${h(ratio.error)}</p>`:''}</section>
     <section class="check-result"><strong>整页图片检查 · ${ok?'已通过':pending?'尚未完成':check.status==='needs_revision'?'有待修改问题':'未取得有效结论'}</strong>${results?`<dl class="check-items">${results}</dl>`:''}${list(issues)}${list(check.warnings)}${r.review?.notes?`<p>${h(r.review.notes)}</p>`:''}${pending?'<p>下方为已保存的检查与修正记录；整页检查完成后会同步更新。</p>':''}</section>
     <section class="check-result"><strong>修改提示词</strong>${correctionPrompts.map(v=>promptBox(v.title+'（实际发送）',v.prompt)).join('')}${!correctionPrompts.length?`<p>${hasModifications?'已有修正记录，暂无保存的完整修改提示词。':'暂无修改提示词；本页未记录自动修改。'}</p>`:''}${r.geometryAdjustment&&!r.geometryAdjustment.prompt?list(r.geometryAdjustment.issues):''}${repair?`<p>${h(repairState[repair.status]||repair.status)}${repair.error?'：'+h(repair.error):''}</p>`:''}</section>
