@@ -6,8 +6,10 @@ import {designRulesFor} from '../lib/design-rules.mjs';
 import {themeAssetPrompt,themeAssetsStamp} from '../lib/theme-assets.mjs';
 import {correctionPrompt} from '../lib/visual-repair.mjs';
 import {imageStyle} from '../lib/image-prompts.mjs';
-import {nestedContentList} from '../lib/prompt-structure.mjs';
+import {nestedContentList,deduplicateSlidePrompt} from '../lib/prompt-structure.mjs';
 import {initialElements,orderedElements} from '../lib/elements.mjs';
+import {registerStyleDirections} from '../lib/style-registry.mjs';
+import {roughLayoutImageGuidance} from '../lib/layout-guidance.mjs';
 
 function fixture(){
   const elements=[
@@ -34,17 +36,17 @@ test('整页提示词七项自足，原文与多层图片归属保留，工程�
   assert.match(prompt,/预留图注空间/);assert.doesNotMatch(prompt,/图注是对应图片的说明字段/);assert.match(designRulesFor(p,1),/图注是对应图片的说明字段，紧邻图片上方或下方排布/);assert.doesNotMatch(prompt,/下方留图注空间|注释：/);
   assert.match(prompt,/占位框与登记图片一一对应，共1个/);assert.match(prompt,/不得重复、拆分或新增多余占位框/);
   assert.match(prompt,/1\.55:1/);assert.match(prompt,/展示前本地贴回原件/);
+  assert.doesNotMatch(prompt,/比例误差不超过2%/);
   for(const section of ['内容要求','排版要求','图片占位框比例'])assert.match(prompt.split('- **'+section+'**：')[1].split(/\n- \*\*/)[0],/1\.55:1/,'每个关键分项重复强调具体图片比例');
   assert.match(prompt,/当前“结果与讨论”/);assert.match(prompt,/页顶且仅一条粗分段/);
   assert.doesNotMatch(prompt,/文本框内尽量不要有渐变|有填充的文本框与所在背景底色须有可辨认色差/);
   assert.doesNotMatch(prompt,/\*\*(?:简约要求|紧密排版要求|可读性要求)\*\*/);
   const styleSection=prompt.split('- **风格要求**')[1].split('- **进度条要求**')[0];
   assert.ok(styleSection.length<300,'普通页面的风格和两个子项应控制在约300字内');assert.doesNotMatch(styleSection,/不对称对照|若其旧配色|组合和局部轮廓/);
-  assert.doesNotMatch(prompt,/\*\*原图保真要求\*\*/);assert.match(prompt,/实际排版要有创意，保留合理的组合与局部构图发挥空间。/);
+  assert.doesNotMatch(prompt,/\*\*原图保真要求\*\*|实际排版要有创意，保留合理的组合与局部构图发挥空间。/);
   assert.doesNotMatch(prompt,/设计规范版本|restrained_decoration|floor\(N\/2\)|S01-|GEN-001|不应使用的重复长风格/);
   const layoutSection=prompt.split('- **排版要求**')[1].split('- **图片占位框比例**')[0];
-  assert.match(layoutSection,/适合内容时积极采用有表达作用的特殊分块/);
-  assert.match(layoutSection,/创意方向：可探索非对称双区对照/);assert.match(layoutSection,/具体形状、装饰与局部组合交给生图AI/);assert.ok(layoutSection.length<350);
+  assert.match(layoutSection,/创意方向：左右对照，证据紧邻所属观点/);assert.doesNotMatch(layoutSection,/只给粗略创意方向|具体形状、装饰与局部组合交给生图AI/);assert.ok(layoutSection.length<350);
   assert.doesNotMatch(styleSection,/扇形、同心、波浪/,'分块要求不重复堆进风格项');
   assert.ok(prompt.length<1700,'短文案页面无需附加整段工作流');
 });
@@ -60,7 +62,7 @@ test('内容项完整保留多层归属，排版项只给主要分组与大致�
   assert.match(content,/\n  - 标题：两种模型的评价结果\n    - 副标题：PEG-TP5，5 μmol\/L\n    - 小标题：巨噬细胞模型\n      - 正文：LPS/);
   assert.match(content,/\n      - 图片：TNF-α 检测结果\n        - 图注：原始检测与统计结果。/);
   assert.match(content,/\n    - 小标题：T 细胞模型\n      - 正文：比较细胞活性。\n        - 正文：相同处理条件。\n      - 正文：记录对照结果。/);
-  assert.match(content,/同一父项下的同级正文为并列/);assert.match(content,/\n  - 页顶导航（独立于正文结构）：\n    - 页顶导航：结果与讨论/);
+  assert.match(content,/同一父项下的同级正文为并列/);assert.doesNotMatch(content,/页顶导航/);
   const layout=prompt.split('- **排版要求**')[1].split('- **图片占位框比例**')[0];
   assert.match(layout,/“T 细胞模型”：右侧/);assert.doesNotMatch(layout,/正文：“功能指标”|正文：“条件”/);
   assert.doesNotMatch(layout,/条件”；右侧；并列/,'过期设计稿的并列措辞不能覆盖内容树从属');
@@ -78,7 +80,7 @@ test('封面目录不补事实图片，学术限制依实际用途适用',()=>{
   p.pageDesigns[1].plan.nodes=[];
   const toc=slideImagePrompt(p,1,d,[]);assert.match(toc,/比例要求\*\*：目录页/);assert.match(toc,/无进度条/);assert.match(toc,/本页无配图/);assert.match(toc,/不画任何图片占位框/);
   p.brief.title='创新创业路演';assert.doesNotMatch(slideImagePrompt(p,1,d,[]),/文本框内尽量不要有渐变/);
-  const background=themeAssetPrompt(p,d,'hero-image');assert.doesNotMatch(background,/细节简洁/);assert.match(background,/单一具象主体占满视觉区/);assert.ok(background.includes(promptColor(d.coreColor)));assert.ok(background.includes(d.heroSubject));assert.ok(background.includes(d.textArea));assert.doesNotMatch(background,/无衬线|正文无框|不应使用的重复长风格/);
+  const background=themeAssetPrompt(p,d,'hero-image');assert.doesNotMatch(background,/细节简洁/);assert.match(background,/艺术主视觉占满视觉区/);assert.ok(background.includes(promptColor(d.coreColor)));assert.ok(background.includes(d.heroSubject));assert.ok(background.includes(d.textArea));assert.doesNotMatch(background,/无衬线|正文无框|不应使用的重复长风格/);
 });
 
 test('自然语言修改与返工不会累积规范，旧版尾部用户修改保留',()=>{
@@ -125,11 +127,60 @@ test('已选底图的保留要求只写一次，连续补全不膨胀，保持�
   const original=slideImagePrompt(p,1,d,images);let revised=original;
   for(let i=0;i<4;i++)revised=effectiveSlideImagePrompt(p,1,d,images,'full',revised);
   assert.equal(revised,original);
-  assert.equal(revised.split('无字底图原样作为最终PPT页面背景').length,2);
-  assert.equal(revised.split('随附底图作为锁定背景层').length,2);assert.match(revised,/仅在其上新增文字、图片占位框及必要图形/);assert.match(revised,/不重绘、改色、移动或改变底图原有主体、纹理与构图/);
+  assert.equal(revised.split(backgroundUse).length,2);
+  assert.match(revised,/保持原底图颜色、结构、装饰和排布不变，在原底图基础上构建信息/);
+  assert.doesNotMatch(revised,/底图.*阅读留白|随附底图作为锁定背景层/);
   assert.match(revised,/每张登记原图仅画一个等比、平坦无字占位块/);
   for(const n of p.slides[1].elements.filter(n=>n.type==='text'))assert.ok(revised.includes(n.text));
   assert.match(revised,/1\.55:1/);
+});
+
+test('封面目录与正文的预览只锁定底图，不重新描述主体排布；旧模板转换后不重复',()=>{
+  const {p,d,images}=fixture();d.decoration='主体放在右下，左侧大面积留白';
+  for(const kind of ['cover','toc','content']){
+    p.slides[1].kind=kind;
+    p.themeAssets={stamp:themeAssetsStamp(p),directions:[{...d,heroSubject:'主体占满左半区',tocSubject:'主体放在右下',assets:Object.fromEntries(['hero-image','toc-image','content-background'].map(use=>[use,{normalized:'bg.png',previewHash:'hash'}]))}]};
+    const prompt=slideImagePrompt(p,1,d,images);
+    assert.ok(prompt.includes(backgroundUse));assert.doesNotMatch(prompt,/主体占满左半区|主体放在右下|左侧大面积留白|延续其主题主体/);
+    const old=prompt.replace(backgroundUse,'使用随附对应内容底图图生图，正文和证据优先。随附底图作为锁定背景层，仅在其上新增文字、图片占位框及必要图形；不重绘、改色、移动或改变底图原有主体、纹理与构图。无字底图原样作为最终PPT页面背景。');
+    const next=effectiveSlideImagePrompt(p,1,d,images,'full',old);assert.equal(next.split(backgroundUse).length,2);assert.doesNotMatch(next,/锁定背景层|正文和证据优先/);assert.equal(effectiveSlideImagePrompt(p,1,d,images,'full',next),next);
+  }
+});
+
+test('创意原则只用于编写，最终稿保留本页设计意图；旧稿清理不叠加且底图继续锁定',()=>{
+  const {p,d,images}=fixture(),[preset]=registerStyleDirections(p,[{...d,referenceStyleId:'A'}],'test');
+  for(const direction of [d,preset])for(const kind of ['cover','toc','content'])for(const mode of ['concept','full']){
+    p.slides[1].kind=kind;
+    p.themeAssets={stamp:themeAssetsStamp(p),directions:[{...direction,assets:Object.fromEntries(['hero-image','toc-image','content-background'].map(use=>[use,{normalized:'bg.png',previewHash:'hash'}]))}]};
+    const prompt=slideImagePrompt(p,1,direction,images,mode),layout=prompt.split('- **排版要求**：')[1].split(/\n- \*\*/)[0];
+    assert.doesNotMatch(layout,/只给粗略创意方向|实际排版要有创意|具体形状、装饰与局部组合交给生图AI|异形文本框或色块|扇形、同心、波浪|文本框.{0,4}(?:宽度|高度|坐标)/);
+    if(!direction.presetDesign)assert.match(layout,/创意方向：左右对照，证据紧邻所属观点/);
+    assert.ok(!prompt.includes(roughLayoutImageGuidance));assert.ok(prompt.includes(backgroundUse));
+    if(direction.presetDesign)assert.match(layout,/在预设设计语言与已确认版式内发挥/);
+    const legacy=prompt.replace('- **排版要求**：','- **排版要求**：'+roughLayoutImageGuidance+'实际排版要有创意，保留合理的组合与局部构图发挥空间。'),repaired=effectiveSlideImagePrompt(p,1,direction,images,mode,legacy);
+    assert.equal(repaired,prompt);assert.equal(effectiveSlideImagePrompt(p,1,direction,images,mode,repaired),repaired);
+    assert.doesNotMatch(prompt.split('- **风格要求**：')[1].split(/\n- \*\*/)[0],/创意设计：/,'创意说明集中在排版项');
+  }
+});
+
+test('预设不逐组重复空泛承载说明，旧稿清理仍保留原文、具体布局和图片比例',()=>{
+  const {p,d,images}=fixture(),[preset]=registerStyleDirections(p,[{...d,referenceStyleId:'A'}],'test');
+  for(const direction of [d,preset]){
+    const prompt=slideImagePrompt(p,1,direction,images);
+    assert.doesNotMatch(prompt,/与所属内容共同成组，沿用预设承载/);
+    const legacy=prompt.replace('- **排版要求**：','- **排版要求**：').replace('- **图片占位框比例**：',
+      '  - “体外全血稳定性”：与所属内容共同成组，沿用预设承载。\n  - “大鼠体内药代动力学”：与所属内容共同成组，沿用预设承载。\n  - “补充组”：与所属内容共同成组。\n  - “证据组”：右侧，与对应数据共用对齐轴。\n- **图片占位框比例**：');
+    const next=effectiveSlideImagePrompt(p,1,direction,images,'full',legacy),layout=next.split('- **排版要求**：')[1].split('- **图片占位框比例**：')[0];
+    assert.doesNotMatch(layout,/与所属内容共同成组|体外全血稳定性|大鼠体内药代动力学/);
+    assert.match(layout,/“证据组”：右侧，与对应数据共用对齐轴/);
+    for(const n of p.slides[1].elements.filter(n=>n.type==='text'))assert.ok(next.includes(n.text));
+    assert.equal((next.match(/1\.55:1/g)||[]).length,3);
+    assert.equal(effectiveSlideImagePrompt(p,1,direction,images,'full',next),next);
+  }
+  p.pageDesigns[1].plan.nodes.find(n=>n.id==='S01-GROUP').position='';
+  const noPosition=slideImagePrompt(p,1,d,images);
+  assert.doesNotMatch(noPosition,/与所属内容共同成组/);
+  assert.match(noPosition,/小标题：巨噬细胞模型/);
 });
 
 test('旧稿精简为七项，原图说明归入配图，具体承载形状交给生图AI',()=>{
@@ -153,4 +204,40 @@ test('旧八项修改稿提交时删除套话、释放文字配色并强调底�
   assert.equal(effectiveSlideImagePrompt(p,1,d,images,'full',next),next);
   for(const n of p.slides[1].elements.filter(n=>n.type==='text'))assert.ok(next.includes(n.text));
   assert.equal((next.match(/1\.55:1/g)||[]).length,3);
+});
+
+test('生成后比例检查阈值不写入生图提示词，旧稿清理仍保留三处目标比例',()=>{
+  const {p,d,images}=fixture(),base=slideImagePrompt(p,1,d,images);
+  for(const old of [base,base.replace('；不为适配分区','；只等比缩放，不为适配分区'),base.replace('；不为适配分区','；比例误差不超过2%，不为适配分区')]){
+    const updated=effectiveSlideImagePrompt(p,1,d,images,'full',old);assert.doesNotMatch(updated,/2%|比例误差/);assert.equal((updated.match(/1\.55:1/g)||[]).length,3);assert.equal(effectiveSlideImagePrompt(p,1,d,images,'full',updated),updated);
+  }
+});
+
+test('导航集中在进度条项，逐图只列位置与比例，占位块通用要求不重复',()=>{
+  const {p,d,images}=fixture(),prompt=slideImagePrompt(p,1,d,images);
+  assert.equal(prompt.split('结果与讨论').length,3,'章节名仅在进度条的标签和当前段标记出现');
+  assert.equal((prompt.match(/平坦无字占位块/g)||[]).length,1);
+  assert.equal((prompt.match(/页顶且仅一条粗分段进度条/g)||[]).length,1);
+  assert.equal((prompt.match(/1\.55:1/g)||[]).length,3,'保留具体比例的三处强调');
+  const content=prompt.split('- **内容要求**：')[1].split('- **排版要求**：')[0];
+  assert.doesNotMatch(content,/页顶导航/);
+  assert.match(prompt,/“TNF-α 检测结果”：左侧，宽高比必须为 1\.55:1，占位框尺寸约 558×360 px（1920×1080画布），预留图注空间/);
+});
+
+test('旧模板的重复导航和占位说明自动合并，不删正文、人工意见或比例',()=>{
+  const {p,d,images}=fixture(),base=slideImagePrompt(p,1,d,images);
+  const instruction=base.split('- **进度条要求**：')[1].split('\n')[0];
+  const legacy=base.replace('- **排版要求**：','  - 页顶导航（独立于正文结构）：\n    - 页顶导航：结果与讨论\n- **排版要求**：')
+    .replace('宽高比必须为 1.55:1，预留图注空间','宽高比必须为 1.55:1，平坦无字占位块，预留图注空间')
+    .replace('- **视觉关系要求**：','  - '+instruction+'\n- **视觉关系要求**：');
+  assert.equal(deduplicateSlidePrompt(legacy),base);
+  const userText='页顶且仅一条粗分段进度条，按章节组织。';
+  p.slides[1].elements.push({id:'EXTRA-TEXT',type:'text',role:'body',text:userText,parentId:'S01-GROUP'});
+  const withText=slideImagePrompt(p,1,d,images)+'\n人工意见：进度条再细一点。';
+  const cleaned=effectiveSlideImagePrompt(p,1,d,images,'full',withText);
+  assert.ok(cleaned.includes('正文：'+userText));assert.match(cleaned,/人工意见：进度条再细一点/);
+  assert.equal(effectiveSlideImagePrompt(p,1,d,images,'full',cleaned),cleaned);
+  assert.equal((cleaned.match(/1\.55:1/g)||[]).length,3);
+  const onlyContent='- **内容要求**：\n  - 页顶导航（独立于正文结构）：\n    - 页顶导航：手动保留的导航\n';
+  assert.equal(deduplicateSlidePrompt(onlyContent),onlyContent,'未迁移到进度条时不丢失导航文案');
 });

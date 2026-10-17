@@ -52,15 +52,15 @@ test('OCR 核对、分通道联通测试、单页设计稿及失效闸门',async
   p=await act('saveContent',{slides:[{title:'材料到内容',body:[],sources:[imageId],elements,sourceLinks:[{materialId:imageId,target:'element:body',quote:'先理解材料，再生成内容。',note:'核对后的 OCR 文字'}]}]});
   assert.equal(p.slides[0].elements.find(n=>n.id==='group').text,'先理解，再设计');assert.ok(scene(p.slides[0],themes[0],0,1,{}).some(e=>e.text==='先理解，再设计'));
   await act('approvePageDesign',{index:0},400);p=await act('confirmPageLayout',{index:0});assert.equal(p.pageDesigns[0].layoutCurrent,true);
-  badDesign=true;await act('designPage',{index:0});p=await wait();assert.equal(p.task.status,'failed');assert.equal(p.pageDesigns[0].markdown,undefined);badDesign=false;
-  await act('designPage',{index:0});p=await wait();assert.equal(p.task.status,'done',p.task.message);const d=p.pageDesigns[0];assert.match(d.markdown,/嵌套排版树/);assert.match(d.markdown,/\*\*先理解，再设计\*\*/);assert.match(d.markdown,/原材料对应索引/);assert.equal(d.current,true);assert.equal(designCalls,2);
+  badDesign=true;await act('designPage',{index:0});p=await wait();assert.equal(p.task.status,'done');assert.equal(p.pageDesigns[0].generation.status,'failed');assert.equal(p.pageDesigns[0].generation.attempt,2);assert.equal(p.pageDesigns[0].markdown,undefined);badDesign=false;
+  await act('designPage',{index:0});p=await wait();assert.equal(p.task.status,'done',p.task.message);const d=p.pageDesigns[0];assert.match(d.markdown,/嵌套排版树/);assert.match(d.markdown,/\*\*先理解，再设计\*\*/);assert.match(d.markdown,/原材料对应索引/);assert.equal(d.current,true);assert.equal(designCalls,4);
   assert.throws(()=>validatePageDesign({...d.plan,readingOrder:[...d.plan.readingOrder].reverse()},initialElements(p.slides[0])),/顺序/);
   const download=await fetch(base+prefix+'/page-design?index=0');assert.equal(download.status,200);assert.match(await download.text(),/图片意图/);
   await act('savePageDesign',{index:0,markdown:d.markdown.replace('**先理解，再设计**','**篡改内容**')},400);
   p=await act('savePageDesign',{index:0,markdown:d.markdown+'\n优先使用亮黄色强调。\n'});p=await act('approvePageDesign',{index:0});assert.equal(p.pageDesigns[0].approvedCurrent,true);
   const previous=structuredClone(p.pageDesigns[0]),tree=JSON.stringify(p.slides[0].elements);
   await act('revisePageDesign',{index:0,instruction:''},400);await act('revisePageDesign',{index:0,instruction:'x'.repeat(3001)},400);
-  badDesign=true;await act('revisePageDesign',{index:0,instruction:'图片放大并移到右侧'});p=await wait();assert.equal(p.task.status,'failed');assert.equal(p.pageDesigns[0].markdown,previous.markdown);assert.equal(p.pageDesigns[0].approvedCurrent,true);badDesign=false;
+  badDesign=true;await act('revisePageDesign',{index:0,instruction:'图片放大并移到右侧'});p=await wait();assert.equal(p.task.status,'done');assert.equal(p.pageDesigns[0].generation.status,'failed');assert.equal(p.pageDesigns[0].markdown,previous.markdown);assert.equal(p.pageDesigns[0].approvedCurrent,true);badDesign=false;
   await act('revisePageDesign',{index:0,instruction:'图片放大并移到右侧',markdown:previous.markdown});p=await wait();assert.equal(p.task.status,'done',p.task.message);
   assert.match(revisionPrompt,/图片放大并移到右侧/);assert.ok(revisionPrompt.includes(JSON.stringify(previous.markdown)));assert.match(p.pageDesigns[0].markdown,/图片放大并置于右侧/);
   assert.equal(p.pageDesigns[0].approvedCurrent,false);assert.equal(p.pageDesigns[0].origin,'ai-revision');assert.equal(JSON.stringify(p.slides[0].elements),tree);

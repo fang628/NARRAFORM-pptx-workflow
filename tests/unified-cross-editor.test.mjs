@@ -4,7 +4,7 @@ import {initAIImageEditor} from '../public/provenance.js';
 
 test('底图和三版预览共用三模式单输入弹窗，保留当前方向风格并参考其他方向结构，结果与撤回均指向当前图片',async()=>{
   const original=globalThis.document,fields=new Map(),calls=[],errors=[];let html='';
-  const field=id=>{if(!fields.has(id))fields.set(id,{id:id.slice(1),value:'',checked:false,disabled:false,dataset:{},handlers:{},setAttribute(){},hasAttribute(){return false;},addEventListener(n,fn){this.handlers[n]=fn;},closest(){return this;}});return fields.get(id);};
+  const field=id=>{if(!fields.has(id))fields.set(id,{id:id.slice(1),value:'',checked:false,disabled:false,dataset:{},style:{},classList:{toggle(){}},handlers:{},setAttribute(){},hasAttribute(){return false;},addEventListener(n,fn){this.handlers[n]=fn;},closest(){return this;}});return fields.get(id);};
   const dialog={open:false,handlers:{},querySelector:field,addEventListener(n,fn){this.handlers[n]=fn;},showModal(){this.open=true;},close(){this.open=false;}};
   globalThis.document={body:{insertAdjacentHTML(_,v){html=v;}},querySelector:()=>dialog};
   try{
@@ -19,7 +19,7 @@ test('底图和三版预览共用三模式单输入弹窗，保留当前方向�
     const flush=()=>new Promise(r=>setImmediate(r)),click=async id=>{dialog.handlers.click({stopPropagation(){},target:field(id)});await flush();};
     field('[data-edit-mode="cross"]').dataset.editMode='cross';field('[data-edit-mode="adjust"]').dataset.editMode='adjust';
     editor.open({targetType:'theme',theme:'a',use:'hero-image'});field('#aiEditCrossTarget').value='b';await click('[data-edit-mode="cross"]');
-    assert.equal((html.match(/<textarea\b/g)||[]).length,1);assert.ok(html.includes('data-edit-mode="cross"'));assert.equal(field('#aiEditCrossFields').hidden,false);assert.match(field('#aiEditCrossDestination').textContent,/当前方向 A/);assert.match(field('#aiEditCrossPrompt').textContent,/目标风格：方向a/);
+    assert.equal((html.match(/<textarea\b/g)||[]).length,1);assert.ok(html.includes('data-edit-mode="cross"'));assert.equal(field('#aiEditCrossFields').hidden,false);assert.match(field('#aiEditCrossDestination').textContent,/当前方向 A/);assert.match(field('#aiEditCrossPrompt').textContent,/底色 浅灰色/);assert.doesNotMatch(field('#aiEditCrossPrompt').textContent,/方向a|目标风格：/);
     field('#aiEditInstruction').value='降低反光';field('#aiEditInstruction').handlers.input();assert.match(field('#aiEditCrossPrompt').textContent,/降低反光/);
     await click('[data-edit-mode="adjust"]');assert.equal(field('#aiEditCrossFields').hidden,true);await click('[data-edit-mode="cross"]');assert.equal(field('#aiEditInstruction').value,'降低反光');
     await click('#aiEditImageUndo');assert.equal(calls.at(-1).theme,'a');assert.equal(calls.at(-1).sourceHash,'hash-a');assert.equal(p.themeAssets.directions[1].assets['hero-image'].previewHash,'hash-b');

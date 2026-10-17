@@ -746,6 +746,7 @@ html{scroll-padding-top:90px}
 .preview-grid.preview-masonry{grid-auto-rows:1px;row-gap:0;column-gap:26px;align-items:start}.preview-grid.preview-masonry>.preview-card{height:auto;min-height:0;align-self:start}
 
 #materialReader .source-reader-position{color:#ccc8b4}
+#materialReader .material-reader-switch{margin:0 0 18px;padding:12px 14px;background:#b9b6a515;border-left:2px solid #d1c75f;color:#dedbcc}.material-reader-switch select{margin-top:6px;background:#eeede7;color:#30302d}
 
 /* Keep the terminal footer inside short desktop sidebars. */
 @media(min-width:701px){
@@ -977,4 +978,31 @@ button:is(.close,.danger,[data-delete],[data-delete-project],[data-delete-style]
 #aiImageEditDialog #aiEditCrossDestination{padding:9px 12px;background:#eee3ae;color:#534b2d;font-size:12px;line-height:1.65;margin:10px 0}
 #aiImageEditDialog .theme-cross-reference img{width:128px;height:72px}
 #aiImageEditDialog .prompt-modes{flex-wrap:wrap}#aiImageEditDialog .prompt-modes button{flex:1;white-space:nowrap}
+#aiImageEditDialog .ai-edit-context{display:block;padding:12px 14px}
+#aiImageEditDialog .ai-edit-context::after{display:none}
+#aiImageEditDialog .ai-edit-region-stage{position:relative;width:fit-content;max-width:100%;margin:0 auto;background:#eeede6;outline:1px solid #aaa797;line-height:0;user-select:none}
+#aiImageEditDialog .ai-edit-region-stage.selecting{cursor:crosshair;touch-action:none}
+#aiImageEditDialog #aiEditImage{display:block;width:auto;height:auto;max-width:100%;max-height:38vh;object-fit:contain;pointer-events:none;padding:0;border:0;background:transparent}
+#aiEditRegionSelection{position:absolute;box-sizing:border-box;border:2px dashed #fff238;box-shadow:0 0 0 1px #38372ccc,inset 0 0 0 1px #38372c88;background:#fff2380c;cursor:move;line-height:1.4}
+#aiEditRegionSelection .ai-edit-region-label{position:absolute;left:-2px;top:-23px;padding:2px 7px;background:#fff238;color:#29291f;font-size:11px;white-space:nowrap;pointer-events:none}
+#aiImageEditDialog .ai-edit-context-meta{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-top:12px}
+#aiImageEditDialog #aiEditContext{margin:0;padding:0;font-size:12px}
+#aiImageEditDialog .ai-edit-region-tools{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+#aiImageEditDialog .ai-edit-region-tools button{font-size:12px;min-height:32px;padding:5px 10px}
+#aiImageEditDialog #aiEditRegionToggle[aria-pressed=true]{background:#f2e5a6;border-color:#a7974b;color:#393524}
+#aiImageEditDialog #aiEditRegionClear{color:#b53832}
+#aiImageEditDialog #aiEditRegionState{font-size:11px;color:#686453}
 @media(max-width:540px){#aiImageEditDialog .theme-cross-reference img{width:90px;height:52px}#aiImageEditDialog .prompt-modes button{font-size:11px;padding:8px 5px}}
+
+/* 03: mutually exclusive rendering choices, before foundation planning. */
+.visual-treatment-options{margin:0 0 22px;padding:14px 16px 10px;border:1px solid #b9b5a7;display:flex;flex-wrap:wrap;gap:12px;background:#e8e6de;min-width:0}
+.visual-treatment-options legend{padding:0 7px;color:#555247;font-size:12px;letter-spacing:.08em}
+.visual-treatment-options label{display:flex;align-items:center;gap:12px;flex:1;min-width:180px;margin:0;padding:12px 14px;background:#f3f1e9;border:1px solid transparent;cursor:pointer}
+.visual-treatment-options label:has(input:checked){background:#f8edb5;border-color:#b3a25b}
+.visual-treatment-options input{width:16px;height:16px;accent-color:#796b2d;margin:0;flex:0 0 auto}
+.visual-treatment-options strong{display:block;color:#39382f;font-size:14px;font-weight:600}
+.visual-treatment-options small{display:block;color:#716c5b;font-size:11px;margin-top:4px}
+.visual-treatment-options p{flex-basis:100%;margin:0;color:#716c5b;font-size:11px}
+.visual-treatment-options:disabled{opacity:.65}
+
+.visual-treatment-footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;width:100%}.visual-treatment-footer p{flex:1;min-width:180px}.visual-treatment-footer button{font-size:12px;white-space:nowrap}

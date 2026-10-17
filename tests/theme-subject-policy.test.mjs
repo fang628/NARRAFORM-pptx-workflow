@@ -1,44 +1,45 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {nonConcreteSubject,validateConcreteBackgroundSubjects,validateDeckSubjectScope} from '../lib/theme-subject-policy.mjs';
-import {themeSharedSubject} from '../lib/theme-direction-consistency.mjs';
-import {themeAssetSubjectRule} from '../lib/theme-image-prompts.mjs';
+import {backgroundSubjectRule,backgroundVariationRule,distinguishBackgroundVisuals} from '../lib/theme-subject-policy.mjs';
+import {themeAssetSubjectRule,themeAssetPrompt,themeAssetSubject} from '../lib/theme-image-prompts.mjs';
+import {validateThemePlanning} from '../lib/theme-planning.mjs';
+import {workflowStyles,workflowPageContext} from '../lib/workflow-library.mjs';
+import {harmonizeThemeDirections} from '../lib/theme-direction-consistency.mjs';
+import {registerStyleDirections,requireStyleRegistration} from '../lib/style-registry.mjs';
+import {fixtureCustomDirections} from './visual-fixture.mjs';
 
-test('封面目录排除抽象图表、数字、结构式及研究概念，接受具象宏观与微观物体',()=>{
-  for(const subject of ['右侧抽象分子主体','柱状图','右侧分子结构式','2026','数字组成的主体','化学式','概念关系图','分子修饰']){
-    assert.equal(nonConcreteSubject(subject),true,subject);
-    assert.throws(()=>validateConcreteBackgroundSubjects({heroSubject:subject,tocSubject:'细胞实体'},{cover:true,toc:true}),error=>error.code==='BACKGROUND_SUBJECT_NOT_CONCRETE');
+const brief={title:'材料主线',cover:true,toc:true,pages:3};
+test('艺术主体可抽象，无材料实物证据也能规划；主题与全材料主线要求仍保留',()=>{
+  const p={brief,materials:[{id:'doc',name:'报告',text:'不同章节共同讨论研究的变化与连接。'}]},raw={...fixtureCustomDirections()[0],heroSubject:'流动光带',tocSubject:'交织薄片',contentSubject:'低对比波纹',subjectSources:{heroSubject:{kind:'artistic',element:'流动光带',inspiration:'以连续变化与连接呼应全篇共同主线'}}};
+  const plan=validateThemePlanning(raw,p);assert.equal(plan.subjectSources.heroSubject.kind,'artistic');assert.equal(plan.subjectSources.heroSubject.materialId,undefined);assert.equal(plan.subjectSources.heroSubject.element,'流动光带');
+  assert.match(backgroundSubjectRule,/必须符合主题并贯穿全篇材料的共同主线/);assert.match(backgroundSubjectRule,/不能只代表某一小节/);assert.match(backgroundSubjectRule,/不要求是主题对应的具体物质/);
+  assert.match(themeAssetSubjectRule('hero-image'),/抽象形态/);assert.match(backgroundVariationRule,/任何风格/);
+});
+
+test('所有完整预设和表现类型都区分封面与目录，仅移位置或镜像不算区别',()=>{
+  const snapshot=structuredClone(workflowStyles);
+  for(const visualTreatment of ['flat','realistic'])for(const preset of workflowStyles){
+    const p={brief,visualTreatment,styleRegistry:[]},raw={...fixtureCustomDirections()[0],referenceStyleId:preset.id,heroSubject:'左侧流动光带',tocSubject:'右侧镜像流动光带',contentSubject:'低对比波纹'};
+    const [d]=harmonizeThemeDirections([raw],p);assert.notEqual(d.tocSubject,raw.tocSubject);assert.equal(d.heroSubject,raw.heroSubject);
+    const [registered]=registerStyleDirections(p,[d],'test');requireStyleRegistration(p,registered);assert.equal(registered.styleRegistrationId,preset.id);
+    const hero=themeAssetPrompt(p,registered,'hero-image'),toc=themeAssetPrompt(p,registered,'toc-image');
+    assert.ok(hero.includes(raw.heroSubject));assert.ok(toc.includes(visualTreatment==='realistic'?'分层透光轮廓':'错位叠片'));
+    assert.equal(themeAssetSubject(p,registered,'toc-image'),registered.tocSubject);assert.equal(p.styleRegistry.length,0);
   }
-  for(const subject of ['数字显微镜','球形纳米颗粒','蛋白质实体表面','DNA双螺旋实体','材料中的细胞，非真实实验影像','右侧建筑实体']){
-    assert.equal(nonConcreteSubject(subject),false,subject);
-    assert.doesNotThrow(()=>validateConcreteBackgroundSubjects({heroSubject:subject,tocSubject:subject},{cover:true,toc:true}));
+  assert.deepEqual(workflowStyles,snapshot);
+});
+
+test('不同主体、形状或视觉效果任一差异均可；不强制给已有创意叠加固定形状',()=>{
+  for(const [heroSubject,tocSubject] of [['流动光带','交织薄片'],['圆环','展开的环带'],['光带的磨砂色面','光带的透光折射']]){
+    const d={heroSubject,tocSubject};assert.deepEqual(distinguishBackgroundVisuals(d,brief,'flat'),d);
   }
+  const d={heroSubject:'流动光带',tocSubject:'流动光带'};
+  assert.deepEqual(distinguishBackgroundVisuals(d,{cover:false,toc:true,pages:3}),d);
+  const once=distinguishBackgroundVisuals(d,brief,'flat');assert.deepEqual(distinguishBackgroundVisuals(once,brief,'flat'),once);
 });
 
-test('主体来源本身不能指向抽象结构式，仅有内容背景时不强制封面主体限制',()=>{
-  assert.throws(()=>validateConcreteBackgroundSubjects({heroSubject:'微观实体',subjectSources:{heroSubject:{element:'化学结构式'}}},{cover:true}),/具象宏观或微观物体/);
-  assert.doesNotThrow(()=>validateConcreteBackgroundSubjects({heroSubject:'结构式',tocSubject:'图表',contentSubject:'边角概念轮廓'},{pages:1,cover:false}));
-  for(const use of ['hero-image','toc-image'])assert.match(themeAssetSubjectRule(use),/具象宏观或微观物体/);
-  assert.doesNotMatch(themeAssetSubjectRule('content-background'),/具象宏观或微观物体/);
-});
-
-test('旧方案的抽象主体不再锁定新一轮规划，保留具象对象时继续共用材料身份',()=>{
-  const p={brief:{cover:true,toc:true}};
-  assert.equal(themeSharedSubject([{heroSubject:'抽象分子图表',tocSubject:'化学结构式'}],p),null);
-  const source={materialId:'doc',evidenceId:'F1',element:'球形纳米颗粒'};
-  assert.deepEqual(themeSharedSubject([{heroSubject:'纳米颗粒',subjectSources:{heroSubject:source}}],p),{element:'球形纳米颗粒',source});
-});
-
-test('封面目录拒绝局部案例主体，新规划要求全篇代表性，旧方案不锁定未经判断的对象',()=>{
-  const brief={cover:true,toc:true},source={materialId:'doc',evidenceId:'F1',element:'显微镜',scope:'section-only',scopeReason:'仅在实验方法一段中出现'};
-  const raw={subjectSources:{heroSubject:source,tocSubject:source}};
-  assert.throws(()=>validateDeckSubjectScope(raw,brief),error=>error.code==='BACKGROUND_SUBJECT_NOT_DECK_WIDE');
-  assert.throws(()=>validateDeckSubjectScope({},brief,{required:true}),error=>error.code==='BACKGROUND_SUBJECT_NOT_DECK_WIDE');
-  assert.doesNotThrow(()=>validateDeckSubjectScope(raw,{cover:false,pages:1},{required:true}));
-  const core={...source,element:'肽链',scope:'whole-deck',scopeReason:'全篇围绕肽链的结构、改造和应用展开，无需每页重复名称'};
-  assert.doesNotThrow(()=>validateDeckSubjectScope({subjectSources:{heroSubject:core,tocSubject:core}},brief,{required:true}));
-  const p={brief},local={heroSubject:'实验方法中的显微镜',subjectSources:{heroSubject:source}},global={heroSubject:'肽链实体',subjectSources:{heroSubject:core}};
-  assert.deepEqual(themeSharedSubject([local,global],p,{requireDeckScope:true}),{element:'肽链',source:core});
-  assert.equal(themeSharedSubject([{heroSubject:'显微镜',subjectSources:{heroSubject:{element:'显微镜'}}}],p,{requireDeckScope:true}),null);
-  for(const use of ['hero-image','toc-image'])assert.match(themeAssetSubjectRule(use),/贯穿全篇.*不选局部案例对象/);
+test('当前规范与阶段注入不再强制同一材料实物，仍保留全篇主题与目录留白',()=>{
+  const page=workflowPageContext({slides:[{kind:'toc'}]},0);
+  assert.match(page,/全材料共同主线/);assert.match(page,/至少一项与封面明显不同/);assert.match(page,/目录文字区连续留空/);
+  assert.doesNotMatch(page,/材料中贯穿全篇的具象物体|延续封面的共同主体/);
 });

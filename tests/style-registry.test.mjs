@@ -6,7 +6,7 @@ import {registerStyleDirections,requireStyleRegistration,describeStyle,deleteReg
 import {themeDirectionOptions,styleRegistryPanel} from '../public/theme-assets.js';
 
 test('原创风格无须 A-F；完整登记、重复复用与修改留存旧版本',()=>{
-  const raw=fixtureDirections();raw[0]={...raw[0],referenceStyleId:null,name:'珊瑚纸艺',coreColor:'#FFF4EC',style:'暖纸白、珊瑚红与炭灰',layoutLanguage:'连续折页展开与非对称证据轨道'};
+  const raw=fixtureDirections().map(d=>({...d,referenceStyleId:null}));raw[0]={...raw[0],referenceStyleId:null,name:'珊瑚纸艺',coreColor:'#FFF4EC',style:'暖纸白、珊瑚红与炭灰',layoutLanguage:'连续折页展开与非对称证据轨道'};
   const p={id:'synthetic-project',styleRegistry:[]},directions=validateThemeDirections(raw);
   assert.equal(directions[0].referenceStyleId,null);
   assert.throws(()=>requireStyleRegistration(p,directions[0]),/尚未登记/);
@@ -26,14 +26,14 @@ test('不完整风格不登记，不伪造参考编号；可参考本项目已�
   const p={styleRegistry:[]},raw=fixtureDirections().map(d=>({...d,referenceStyleId:null}));raw[1].typography='';
   assert.throws(()=>registerStyleDirections(p,raw,'theme-assets'),/typography/);assert.equal(p.styleRegistry.length,0,'批次全部验证后再登记');
   assert.throws(()=>validateThemeDirections(fixtureDirections().map(d=>({...d,referenceStyleId:'invented'}))),/参考风格编号不存在/);
-  const [first]=registerStyleDirections(p,[fixtureDirections()[0]],'theme-assets');
+  const [first]=registerStyleDirections(p,[{...fixtureDirections()[0],referenceStyleId:null}],'theme-assets');
   const [reuse]=registerStyleDirections(p,[{...fixtureDirections()[1],referenceStyleId:first.styleRegistrationId}],'theme-assets');
   assert.equal(requireStyleRegistration(p,reuse).definition.referenceStyleId,first.styleRegistrationId);
 });
 
 test('删除登记后不再展示或供新参考，既有方案来源可追溯且不复活',()=>{
   const p={id:'fixture',styleRegistry:[],styleRegistryDeletion:true};
-  const [direction]=registerStyleDirections(p,[fixtureDirections()[0]],'theme-assets'),id=direction.styleRegistrationId;
+  const [direction]=registerStyleDirections(p,[{...fixtureDirections()[0],referenceStyleId:null}],'theme-assets'),id=direction.styleRegistrationId;
   p.reuseCheckpoint={source:{styleRegistry:structuredClone(p.styleRegistry)}};
   deleteRegisteredStyle(p,id);
   assert.ok(p.styleRegistry[0].deletedAt);assert.ok(p.reuseCheckpoint.source.styleRegistry[0].deletedAt);
@@ -42,6 +42,6 @@ test('删除登记后不再展示或供新参考，既有方案来源可追溯�
   assert.equal(registerStyleDirections(p,[direction],'concepts')[0].styleRegistrationId,id);assert.ok(p.styleRegistry[0].deletedAt);
   assert.throws(()=>validateStyleDefinition({...fixtureDirections()[1],referenceStyleId:id},p),/不存在/);
   assert.throws(()=>deleteRegisteredStyle(p,id),/已删除/);
-  const [fresh]=registerStyleDirections(p,[fixtureDirections()[0]],'theme-assets');
+  const [fresh]=registerStyleDirections(p,[{...fixtureDirections()[0],referenceStyleId:null}],'theme-assets');
   assert.notEqual(fresh.styleRegistrationId,id);assert.equal(p.styleRegistry.filter(r=>!r.deletedAt).length,1);
 });

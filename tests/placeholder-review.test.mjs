@@ -1,13 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {placeholderReport,placeholderCorrectionPrompt,repairPlaceholders} from '../lib/placeholder-review.mjs';
+import {fittedImagePlans} from '../lib/image-geometry.mjs';
 const image=(factor=1)=>({nodeId:'figure',id:'original',label:'结果配图',x:1000,y:120,w:400*factor,h:200,aspect:2});
 
-test('占位框按相对比例判断，5%边界内允许贴回，未知比例不虚报通过',()=>{
-  assert.equal(placeholderReport([image(1.05)])[0].passed,true);
-  assert.equal(placeholderReport([image(.95)])[0].passed,true);
-  assert.equal(placeholderReport([image(1.051)])[0].passed,false);
-  assert.equal(placeholderReport([image(.949)])[0].passed,false);
+test('占位框按相对比例判断，2%边界内合格，未知比例不虚报通过',()=>{
+  assert.equal(placeholderReport([image(1.02)])[0].passed,true);
+  assert.equal(placeholderReport([image(.98)])[0].passed,true);
+  assert.equal(placeholderReport([image(1.021)])[0].passed,false);
+  assert.equal(placeholderReport([image(.979)])[0].passed,false);
   assert.throws(()=>placeholderReport([{...image(),aspect:undefined}]),/有效比例/);
   const once=placeholderCorrectionPrompt(placeholderReport([image(1.4)]));
   const twice=placeholderCorrectionPrompt(placeholderReport([image(1.2)]));
@@ -17,13 +18,19 @@ test('占位框按相对比例判断，5%边界内允许贴回，未知比例不
 });
 
 test('先复查再决定修正，比例接近即停止；最多2次修正后放行贴回',async()=>{
-  for(const [ratios,attempts,status] of [[[1.4,1.02],1,'passed'],[[1.3,1.3,1.3],2,'exhausted'],[[1.04],0,'passed']]){
+  for(const [ratios,attempts,status] of [[[1.4,1.02],1,'passed'],[[1.3,1.3,1.3],2,'exhausted'],[[1.01],0,'passed']]){
     const order=[],signal=new AbortController().signal;
     const r=await repairPlaceholders({initial:0,signal,inspect:async n=>{order.push('inspect'+n);return [image(ratios[n])];},regenerate:async(n,checks,attempt)=>{assert.equal(checks[0].passed,false);order.push('repair'+attempt);return attempt;}});
     assert.equal(r.review.attempts,attempts);assert.equal(r.review.limit,2);assert.equal(r.review.status,status);assert.equal(r.review.history.length,attempts+1);
     assert.equal(order[0],'inspect0');assert.equal(order.at(-1),'inspect'+attempts);
     assert.equal(r.candidate,attempts);assert.equal(r.images[0].w,400*ratios.at(-1));
   }
+});
+
+test('占位框2%要求与原图5%适配分离，修框上限之后仍可小幅贴满',async()=>{
+  const r=await repairPlaceholders({initial:0,inspect:async()=>[image(1.04)],regenerate:async(_,checks,attempt)=>attempt});
+  assert.equal(r.review.status,'exhausted');assert.equal(r.review.attempts,2);assert.equal(r.review.tolerance,.02);assert.equal(r.review.checks[0].passed,false);
+  const [fit]=fittedImagePlans(r.images);assert.equal(fit.imageFit,'fill');assert.ok(Math.abs(fit.aspectAdjustment-.04)<1e-9);assert.equal(fit.w,r.images[0].w);assert.equal(fit.h,r.images[0].h);
 });
 
 test('无原图跳过检查；取消或测量失败不放行合成',async()=>{

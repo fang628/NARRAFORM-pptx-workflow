@@ -112,8 +112,8 @@ test('逐页来源一次批量修正只改引用，持续失败、重复字段�
   assert.equal(result.slides[0].sourceLinks[0].quote,original);assert.equal(result.slides[1].sourceLinks[0].quote,original);
   assert.deepEqual(result.slides.map(s=>[s.title,s.body]),raw.map(s=>[s.title,s.body]));
   assert.match(repairPrompt,/只修复下列引用/);assert.match(repairPrompt,/原文证据目录/);
-  for(const [next,error] of [['invalid',/自动修正一次后仍未通过/],['duplicate',/重复或无关/],['missing',/未找到支持文案的原文依据/]]){mode=next;calls=0;await assert.rejects(contentWithEvidence(args),error);assert.equal(calls,2);}
-  calls=0;await assert.rejects(contentWithEvidence({...args,validate:()=>{throw Error('模型返回页数错误');}}),/页数错误/);assert.equal(calls,1);
+  for(const [next,error] of [['invalid',/自动修正一次后仍未通过/],['duplicate',/重复或无关/],['missing',/未找到支持文案的原文依据/]]){mode=next;calls=0;await assert.rejects(contentWithEvidence(args),error);assert.equal(calls,mode==='duplicate'?4:2);}
+  calls=0;await assert.rejects(contentWithEvidence({...args,validate:()=>{throw Error('模型返回页数错误');}}),/页数错误/);assert.equal(calls,3);
 });
 
 test('真实API路径：生成内容和单页修改都使用证据目录与一次修正，人工伪造仍拒绝',async t=>{

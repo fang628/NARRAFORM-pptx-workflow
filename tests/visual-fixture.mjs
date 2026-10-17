@@ -11,7 +11,7 @@ export async function fixtureRequest(req){
 export const fixtureDirections=()=>['a','b','c'].map((id,i)=>({id,referenceStyleId:['A','B','D'][i],name:['浅蓝科研','深蓝技术','靛蓝编辑'][i],description:'依据材料的研究主题选择，构图与层级有不同策略',style:['明亮浅蓝，证据优先','深蓝底，放射关系','靛蓝浅底，杂志式编排'][i],coreColor:['#E4F4FB','#01126B','#EEF4FA'][i],typography:'标题深色无衬线、正文深蓝，小标题清晰，非机械艺术字',frames:'正文无框，短标签平整浅色填充、细线描边',decoration:'少量主题线条避开文字区',layoutLanguage:['左图右文，中心支撑','放射结构与独立证据','不对称分区与层级'][i],heroSubject:'右侧具象微观分子实体',tocSubject:'同一分子实体的具象近景',textArea:'左侧标题与目录连续留白，正文区域不放密集细节'}));
 export const fixtureCustomDirections=()=>fixtureDirections().map((d,i)=>({...d,referenceStyleId:null,styleSelection:{matchingPresetIds:[],reason:'合成案例预设均不适用'},name:['明亮编辑','深色工业','极简网格'][i],description:'合成模型只验证执行链路',style:['浅灰与黄，左文右图，独立渐变','暗色和黄色，非对称分块','纸白和灰，精细线条'][i]}));
 export function fixturePlannedDirections(prompt,{custom=false}={}){
-  const sources=JSON.parse(prompt.split('主体来源材料：')[1]?.split('\n')[0]||'[]');
+  const sources=JSON.parse((prompt.split('主题灵感材料：')[1]||prompt.split('主体来源材料：')[1])?.split('\n')[0]||'[]');
   return (custom?fixtureCustomDirections():fixtureDirections()).map(d=>({...d,styleSelection:custom?d.styleSelection:{matchingPresetIds:['A','B','D'],reason:'合成测试：科研题材适用这些预设'},subjectSources:Object.fromEntries(['heroSubject','tocSubject','contentSubject'].map(k=>[k,{materialId:sources[0]?.id,evidenceId:sources[0]?.evidence?.[0]?.id,element:'分子实体',scope:'whole-deck',scopeReason:'该对象是全篇研究的核心实体，各章节围绕其研究展开'}]))}));
 }
 const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -37,7 +37,7 @@ export function fixtureReply(b,options={}){
   else if(prompt.startsWith('检查三方向底图：'))result={passed:!options.backgroundIssue,issues:options.backgroundIssue?['合成检查：主体大面积遮挡预留阅读区']:[],notes:'合成模型已收到当前底图与同方向其他底图，不代表真实审美评估'};
   else if(prompt.startsWith('按自然语言修改无字主题底图提示词'))result={prompt:prompt.split('原提示词：')[1]+'\n减少左侧细线，保留主体和底色。'};
   else if(prompt.startsWith('concepts:'))result={concepts:['a','b','c'].map((id,i)=>({...fixtureDirections()[i],id,referenceStyleId:null,styleSelection:{matchingPresetIds:[],reason:'合成案例预设均不适用'},name:['明亮编辑','深色工业','极简网格'][i],description:'合成模型只验证执行链路',style:['浅灰与黄，左文右图，独立渐变','暗色和黄色，非对称分块','纸白和灰，精细线条'][i]}))};
-  else if(prompt.startsWith('图片计划：')||prompt.startsWith('定位图片预留区：')){const images=JSON.parse(prompt.split('登记图片：')[1].split('\n视觉方向：')[0]);result={images:images.map((n,i)=>({...n,x:1130,y:120+i*210,w:350,h:190}))};}
+  else if(prompt.startsWith('图片计划：')||prompt.startsWith('定位图片预留区：')){const images=JSON.parse(prompt.split('登记图片：')[1].split('\n视觉方向：')[0]);result={images:images.map((n,i)=>{const aspect=n.aspect||350/190,h=Math.min(190,350/aspect);return {...n,x:1130,y:120+i*210,w:h*aspect,h};})};}
   else if(prompt.startsWith('贴回原图后的几何修正：')){const images=JSON.parse(prompt.split('当前原图：')[1].split('\n本轮图片几何问题：')[0]);result={images:images.map(n=>({...n,x:n.x-10,w:n.w-10,background:'不应接受该字段'}))};}
   else if(prompt.startsWith('检查生图整页成品：')){const badDecoration=options.badDecoration&&prompt.includes('风格：纸白和灰');result={imageGeometryIssues:options.badPageReview?['原图遮挡文字，需要移动缩小']:[],designChecks:{...designChecks,...(options.conflictingSplit?{split_kind:'regular'}:{}),...(badDecoration?{restrained_decoration:false,reason:'合成检查：新增装饰过多，需在当前方案步骤调整'}:{})},passed:!options.badPageReview,issues:options.badPageReview?['合成检查：文字区域被遮挡']:[],notes:'合成模型响应，已接收实际PNG，供管线测试。'};}
   else if(prompt.startsWith('自由元素审计：')){

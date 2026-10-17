@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {selectMaterialFiles,droppedMaterialFiles,directoryMaterialFiles,bindMaterialPickers,materialUploadControls,materialPanel} from '../public/materials.js';
+import {selectMaterialFiles,droppedMaterialFiles,directoryMaterialFiles,bindMaterialPickers,materialUploadControls,materialPanel,materialReaderSelector} from '../public/materials.js';
 import {materialLimits} from '../public/material-images.js';
 import {scene,themes,validateSlides} from '../lib/scene.mjs';
 
@@ -93,4 +93,17 @@ test('已收到材料保留原始、编辑裁片和AI补充图，隐藏重建素
 test('仅有重建素材或底图时不显示空的已收到材料列表',()=>{
   const p={id:'internal-only',materials:[{id:'asset',name:'内部素材',kind:'image',file:'asset.png',generated:true,reconstructed:true,purpose:'reconstruction'},{id:'background',name:'内部底图',kind:'image',file:'background.png',generated:true,purpose:'workflow-background'}]};
   const html=materialPanel(p,()=>'',[],'');assert(!html.includes('已收到的材料'));assert(!html.includes('received-material'));
+});
+
+test('提取内容入口是真按钮，阅读弹窗可切换原始和补充材料，不混入重建素材',()=>{
+  const p={id:'reader',materials:[{id:'a',name:'报告.md',kind:'document',text:'原始文字'},
+    {id:'b',name:'<图片>.png',sourcePath:'资料/"图片".png',kind:'image',generated:true,purpose:'element'},
+    {id:'internal',name:'重建素材.png',kind:'image',reconstructed:true}]};
+  assert.match(materialPanel(p,()=>'',[],''),/<button[^>]+data-open-material-reader[^>]+aria-controls="materialReader"[^>]*>查看提取内容 ↗<\/button>/);
+  assert.doesNotMatch(materialPanel(p,()=>'',[],''),/<small>点击查看提取内容<\/small>/);
+  const selector=materialReaderSelector(p,'b');
+  assert.match(selector,/<select id="materialReaderSelect">/);assert.match(selector,/<option value="b" selected>/);
+  assert.match(selector,/资料\/&quot;图片&quot;\.png/);assert.doesNotMatch(selector,/internal|重建素材/);
+  assert.equal(materialReaderSelector(p,'internal'),'');
+  assert.equal(materialReaderSelector({materials:[p.materials[0]]},'a'),'');
 });

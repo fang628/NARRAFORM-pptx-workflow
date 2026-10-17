@@ -95,3 +95,51 @@ export function initMaterialCropEditor({getProject,act,busy,onError}){
   return {open(id){if(busy())throw Error('请等待当前任务完成');const p=getProject(),m=p?.materials.find(m=>m.id===id&&m.kind==='image'&&!m.generated);if(!m)throw Error('请选择原始图片或已分离图片');
     context={projectId:p.id,id,sourceHash:m.sha256};regions=[];selected=-1;gesture=null;$('#materialCropName').textContent=m.name;image.src=`/api/projects/${p.id}/assets/${m.id}`;$('#materialCropState').textContent=p.apiReady?'保存后使用主模型重新理解新裁片，结果需核对确认。':'尚未配置主模型：可先保存裁片，配置后重新理解。';dialog.showModal();render();},close(){dialog.close();context=null;gesture=null;}};
 }
+
+// Shared image editing helpers stay in this established browser entry point.
+export function imageEditRegion(value){
+  if(value==null)return null;
+  if(typeof value!=='object'||Array.isArray(value))throw Error('框选位置格式无效');
+  const keys=['x','y','w','h'];
+  if(keys.some(k=>typeof value[k]!=='number'||!Number.isFinite(value[k])))throw Error('框选位置须为有效坐标');
+  const r=Object.fromEntries(keys.map(k=>[k,Math.round(value[k]*100)/100]));
+  if(r.x<0||r.y<0||r.w<1||r.h<1||r.x+r.w>1000||r.y+r.h>1000)throw Error('框选位置须在图片内，请重新框选');
+  return r;
+}
+export const sameImageEditRegion=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
+
+
+export function initImageEditRegion({stage,image,overlay,toggle,clear,status,onChange}){
+  let region=null,gesture=null,enabled=false,active=false;
+  function paint(){
+    overlay.hidden=!region||!enabled;stage.classList.toggle('selecting',enabled&&active);
+    toggle.disabled=!enabled;toggle.setAttribute('aria-pressed',String(enabled&&active));
+    toggle.textContent=active?'拖动框选 / 调整位置':'框选修改位置';clear.disabled=!enabled||!region;
+    status.textContent=region?'已框选 · 仅作定位提示':'可选 · 框选提示修改位置';
+    if(region)Object.assign(overlay.style,{left:region.x/10+'%',top:region.y/10+'%',width:region.w/10+'%',height:region.h/10+'%'});
+  }
+  function commit(){onChange?.(region?{...region}:null);paint();}
+  function point(e){const r=image.getBoundingClientRect();return {x:Math.max(0,Math.min(1000,(e.clientX-r.left)/r.width*1000)),y:Math.max(0,Math.min(1000,(e.clientY-r.top)/r.height*1000))};}
+  toggle.addEventListener('click',()=>{if(!enabled)return;active=!active;paint();});
+  clear.addEventListener('click',()=>{if(!enabled)return;region=null;active=false;commit();});
+  stage.addEventListener('pointerdown',e=>{
+    if(!enabled||!active||e.button!==0||!image.complete||!image.naturalWidth)return;
+    const r=image.getBoundingClientRect();if(!r.width||!r.height)return;
+    e.preventDefault();stage.setPointerCapture(e.pointerId);
+    const a=point(e),handle=e.target.closest('[data-edit-region-handle]')?.dataset.editRegionHandle;
+    gesture={id:e.pointerId,a,previous:region?{...region}:null,handle:handle||(e.target.closest('#aiEditRegionSelection')?'move':'draw')};
+    if(gesture.handle==='draw')region=cropSelection(a,a);paint();
+  });
+  stage.addEventListener('pointermove',e=>{
+    if(!gesture||e.pointerId!==gesture.id)return;const b=point(e);
+    region=gesture.handle==='draw'?cropSelection(gesture.a,b):adjustCrop(gesture.previous,b.x-gesture.a.x,b.y-gesture.a.y,gesture.handle);paint();
+  });
+  function finish(e,cancel=false){
+    if(!gesture||e.pointerId!==gesture.id)return;
+    if(cancel||!region||region.w<2||region.h<2)region=gesture.previous;
+    gesture=null;if(stage.hasPointerCapture?.(e.pointerId))stage.releasePointerCapture(e.pointerId);commit();
+  }
+  stage.addEventListener('pointerup',e=>finish(e));stage.addEventListener('pointercancel',e=>finish(e,true));
+  return {get value(){return region?{...region}:null;},setEnabled(value){if(!value&&gesture){region=gesture.previous;gesture=null;}enabled=value;paint();},
+    reset(value=null){region=imageEditRegion(value);gesture=null;active=!!region;paint();}};
+}

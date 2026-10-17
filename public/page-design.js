@@ -1,5 +1,11 @@
 import {sourcePanel,foldHint} from './provenance.js';
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+export function contentPageCountNotice(p){
+  const actual=p.slides?.length||0,expected=p.brief?.pages;
+  if(!expected)return '';
+  const state=p.contentPageCount,draft=p.contentDraftAvailable&&state;
+  return `<p class="subtle content-page-count" role="status">实际 ${actual} / 目标 ${h(expected)} 页（含封面、目录等）${draft?` · 初稿 ${h(state.actual)} 页${state.status==='repairing'?'，正在自动调整':'已保留，可继续调整'}`:actual&&actual!==expected?' · 页数不一致，重新生成时将按目标调整':''}</p>`;
+}
 // A deliberately small renderer: no raw HTML, external embeds or executable links.
 export function designPreview(markdown,p,index){
   const lines=markdown.split('\n').filter(l=>!l.startsWith('<!--')),out=[];
@@ -41,12 +47,14 @@ const feedbackDrafts=new Map();
 export function rememberDesignFeedback(projectId,index,value){feedbackDrafts.set(projectId+':'+index,value);}
 export function pageDesignPanel(p,i){
   const d=p.pageDesigns?.[i],failure=p.initialDesign?.failed?.find(f=>f.index===i);
+  const generation=d?.generation?.current!==false?d?.generation:null;
   const state=d?.approvedCurrent?'设计稿已确认':d?.current?'等待复核':d?.markdown?'内容已变 · 需重新生成':d?.layoutCurrent?'排版已确认':'等待 AI 初稿';
   return `<section class="page-design-panel" data-page-design="${i}">
     <div class="page-design-head"><div><span class="eyebrow">DESIGN SPEC / ${String(i+1).padStart(2,'0')}</span><h3>单页设计稿</h3></div><span class="tag" data-design-state>${state}</span></div>
     <div class="page-design-body">
       <p class="subtle">AI 先完成设计初稿；修改上方内容后可重新生成，确认本页即可进入视觉方案。</p>
-      ${failure&&!d?.current?`<p class="image-extraction-report">本页 AI 设计未完成：${h(failure.message)}；可单页重试或补齐设计稿。</p>`:''}
+      ${generation?.status==='running'?`<p class="subtle" role="status">${generation.attempt?`本页设计稿自动重新生成 ${generation.attempt}/${generation.limit}`:'正在生成本页设计稿'}…</p>`:''}
+      ${generation?.status==='failed'?`<p class="image-extraction-report" role="status">本页设计稿暂未完成：${h(generation.history?.at(-1)?.message)}；${d.markdown?'上一版已保留':'内容树已保留'}，其他任务继续。可单页重试或补齐设计稿。</p>`:failure&&!d?.current?`<p class="image-extraction-report">本页 AI 设计未完成：${h(failure.message)}；可单页重试或补齐设计稿。</p>`:''}
       <section class="design-input-check"><h4>设计稿本步检查 · ${d?.inputCheck?.warnings.length?'材料与图注待核对':'内容与素材登记'}</h4>${d?.inputCheck?.warnings.length?`<ul>${d.inputCheck.warnings.map(v=>`<li>${h(v)}</li>`).join('')}</ul>`:d?'<p>暂无新增素材登记缺口。</p>':'<p>生成设计稿后在这里显示本步检查结果。</p>'}<p>实际画面检查在视觉方案与完整预览生成结束时完成。</p></section>
       <div class="page-design-actions">
         <button type="button" class="primary" data-page-design-action="designPage" data-page="${i}">${d?.markdown?'AI 重新设计本页':'AI 生成本页设计稿'} ↗</button>

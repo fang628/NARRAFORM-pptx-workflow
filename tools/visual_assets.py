@@ -5,6 +5,41 @@ from PIL import Image, ImageDraw
 import xml.etree.ElementTree as ET
 
 Image.MAX_IMAGE_PIXELS = 40_000_000
+ASPECT_RATIO_TOLERANCE = .005
+
+# Node decodes subprocess output as UTF-8; Windows Python otherwise emits GBK
+# on redirected stderr, turning useful validation messages into replacement glyphs.
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, 'reconfigure'):
+        stream.reconfigure(encoding='utf-8', errors='backslashreplace')
+
+
+def normalize_page(image):
+    w,h = image.size
+    error = abs(w*9-h*16)/(h*16)
+    if error > ASPECT_RATIO_TOLERANCE+1e-12:
+        raise ValueError(f'整页生图需接近 16:9；收到 {w}x{h}，比例偏差 {error:.2%} 超过 {ASPECT_RATIO_TOLERANCE:.1%}，请调整生图比例')
+    scale = min(1920/w,1080/h)
+    rw,rh = min(1920,max(1,round(w*scale))),min(1080,max(1,round(h*scale)))
+    resized = image.resize((rw,rh),Image.Resampling.LANCZOS)
+    x,y = (1920-rw)//2,(1080-rh)//2
+    if (rw,rh)==(1920,1080):
+        normalized=resized
+    else:
+        # Preserve the whole picture at a uniform scale. Extend only boundary
+        # pixels into the tiny remaining margins; never crop/stretch the content.
+        normalized=Image.new('RGBA',(1920,1080))
+        normalized.paste(resized,(x,y))
+        if x:normalized.paste(resized.crop((0,0,1,rh)).resize((x,rh)),(0,y))
+        right=1920-x-rw
+        if right:normalized.paste(resized.crop((rw-1,0,rw,rh)).resize((right,rh)),(x+rw,y))
+        if y:normalized.paste(normalized.crop((0,y,1920,y+1)).resize((1920,y)),(0,0))
+        bottom=1080-y-rh
+        if bottom:normalized.paste(normalized.crop((0,y+rh-1,1920,y+rh)).resize((1920,bottom)),(0,y+rh))
+    return normalized,{'sourceWidth':w,'sourceHeight':h,'width':1920,'height':1080,
+                       'upscaled':scale>1,'aspectRelativeError':error,
+                       'normalization':'contain-edge-pad' if (rw,rh)!=(1920,1080) else 'resize',
+                       'contentBox':{'x':x,'y':y,'w':rw,'h':rh}}
 
 def main():
     op, source, target = sys.argv[1:4]
@@ -44,11 +79,9 @@ def main():
     elif op == 'inspect':
         print(json.dumps({'width':image.width,'height':image.height}))
     elif op == 'normalize':
-        w,h = image.size
-        if w*9 != h*16:
-            raise ValueError(f'整页生图必须返回 16:9；收到 {w}x{h}，请调整生图比例')
-        image.resize((1920,1080),Image.Resampling.LANCZOS).save(target)
-        print(json.dumps({'sourceWidth':w,'sourceHeight':h,'width':1920,'height':1080,'upscaled':w<1920}))
+        normalized,report=normalize_page(image)
+        normalized.save(target)
+        print(json.dumps(report))
     elif op == 'copy':
         image.save(target)
         print(json.dumps({'width':image.width,'height':image.height}))

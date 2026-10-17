@@ -1,3 +1,4 @@
+import {initImageEditRegion,sameImageEditRegion} from './material-images.js';
 import {crossImageChoices,crossImageTarget,crossImageSelection,crossImageRequest} from './theme-cross-edit.js';
 import {crossThemePrompt,crossPreviewPrompt} from './theme-cross-model.js';
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -164,8 +165,10 @@ export function setPromptInput(input,value,{reset=false,onChange}={}){
 }
 
 export function initAIImageEditor({getProject,act,busy,openAPI,onError}){
-  document.body.insertAdjacentHTML('beforeend',`<dialog id="aiImageEditDialog"><form id="aiImageEditForm"><div class="modal-heading"><div><span class="eyebrow">REVISION SHEET / IMAGE</span><h2 id="aiEditTitle">修改 AI 图片</h2></div><button type="button" class="close" data-edit-close aria-label="关闭图片修改">×</button></div><div class="ai-edit-body"><div class="ai-edit-context"><img id="aiEditImage" alt="当前 AI 图片"><p id="aiEditContext"></p></div><div class="ai-edit-image-history" role="group" aria-label="图片版本"><button type="button" id="aiEditImageUndo" class="text-button" hidden>↶ 撤回图片修改</button><button type="button" id="aiEditImageRedo" class="text-button" hidden>↷ 重做图片修改</button></div><div class="prompt-modes" role="group" aria-label="图片修改方式"><button type="button" data-edit-mode="adjust">图生图小修改</button><button type="button" data-edit-mode="redraw">文生图重绘</button><button type="button" data-edit-mode="cross" hidden>交叉修改</button></div><div id="aiEditCrossFields" hidden><label>参考另一方向的结构<select id="aiEditCrossTarget"></select></label><div id="aiEditCrossReference"></div><p id="aiEditCrossDestination"></p></div><p id="aiEditHint" class="subtle"></p><label><span id="aiEditInputName">修改意见</span><textarea id="aiEditInstruction" rows="7" maxlength="3000" placeholder="例如：缩小右侧主体，标题区域增加留白。"></textarea></label><div class="prompt-edit-tools" role="group" aria-label="提示词版本"><button type="button" id="aiEditPromptUndo" class="text-button">↶ 撤回提示词</button><button type="button" id="aiEditPromptRedo" class="text-button">↷ 重做提示词</button><button type="button" id="aiEditPrepare" class="secondary">AI 整理调整意见</button></div><details id="aiEditCrossDetails" class="theme-cross-prompt" hidden><summary>查看实际调整指令</summary><p id="aiEditCrossPrompt"></p></details><p id="aiEditState" class="subtle" role="status"></p></div><div class="modal-actions"><label class="checkbox"><input type="checkbox" id="aiEditConsent">确认将本次指令发送给配置的生图供应商并消耗额度</label><button type="submit" id="aiEditGenerate" class="primary">确认并图生图小修改 ↗</button></div></form></dialog>`);
+  document.body.insertAdjacentHTML('beforeend',`<dialog id="aiImageEditDialog"><form id="aiImageEditForm"><div class="modal-heading"><div><span class="eyebrow">REVISION SHEET / IMAGE</span><h2 id="aiEditTitle">修改 AI 图片</h2></div><button type="button" class="close" data-edit-close aria-label="关闭图片修改">×</button></div><div class="ai-edit-body"><div class="ai-edit-context"><div id="aiEditRegionStage" class="ai-edit-region-stage"><img id="aiEditImage" alt="当前 AI 图片" draggable="false"><div id="aiEditRegionSelection" hidden><span class="ai-edit-region-label">定位提示</span>${['nw','n','ne','e','se','s','sw','w'].map(handle=>`<span class="crop-handle crop-handle-${handle}" data-edit-region-handle="${handle}" aria-hidden="true"></span>`).join('')}</div></div><div class="ai-edit-context-meta"><p id="aiEditContext"></p><div id="aiEditRegionTools" class="ai-edit-region-tools"><button type="button" id="aiEditRegionToggle" class="secondary" aria-pressed="false">框选修改位置</button><button type="button" id="aiEditRegionClear" class="text-button action-delete" disabled>清除框选 ×</button><small id="aiEditRegionState" role="status"></small></div></div></div><div class="ai-edit-image-history" role="group" aria-label="图片版本"><button type="button" id="aiEditImageUndo" class="text-button" hidden>↶ 撤回图片修改</button><button type="button" id="aiEditImageRedo" class="text-button" hidden>↷ 重做图片修改</button></div><div class="prompt-modes" role="group" aria-label="图片修改方式"><button type="button" data-edit-mode="adjust">图生图小修改</button><button type="button" data-edit-mode="redraw">文生图重绘</button><button type="button" data-edit-mode="cross" hidden>交叉修改</button></div><div id="aiEditCrossFields" hidden><label>参考另一方向的结构<select id="aiEditCrossTarget"></select></label><div id="aiEditCrossReference"></div><p id="aiEditCrossDestination"></p></div><p id="aiEditHint" class="subtle"></p><label><span id="aiEditInputName">修改意见</span><textarea id="aiEditInstruction" rows="7" maxlength="3000" placeholder="例如：缩小右侧主体，标题区域增加留白。"></textarea></label><div class="prompt-edit-tools" role="group" aria-label="提示词版本"><button type="button" id="aiEditPromptUndo" class="text-button">↶ 撤回提示词</button><button type="button" id="aiEditPromptRedo" class="text-button">↷ 重做提示词</button><button type="button" id="aiEditPrepare" class="secondary">AI 整理调整意见</button></div><details id="aiEditCrossDetails" class="theme-cross-prompt" hidden><summary>查看实际调整指令</summary><p id="aiEditCrossPrompt"></p></details><p id="aiEditState" class="subtle" role="status"></p></div><div class="modal-actions"><label class="checkbox"><input type="checkbox" id="aiEditConsent">确认将本次指令发送给配置的生图供应商并消耗额度</label><button type="submit" id="aiEditGenerate" class="primary">确认并图生图小修改 ↗</button></div></form></dialog>`);
   const dialog=document.querySelector('#aiImageEditDialog'),$=s=>dialog.querySelector(s),histories=new Map();let ctx=null,mode='adjust',seen=0,pending=null,textHistory=null,crossState=null;
+  const regionSelections=new Map(),regionKey=()=>ctx?ctx.projectId+':'+ctx.key+':'+ctx.sourceHash:null;
+  const regionEditor=initImageEditRegion({stage:$('#aiEditRegionStage'),image:$('#aiEditImage'),overlay:$('#aiEditRegionSelection'),toggle:$('#aiEditRegionToggle'),clear:$('#aiEditRegionClear'),status:$('#aiEditRegionState'),onChange:region=>{if(ctx)regionSelections.set(regionKey(),region);$('#aiEditConsent').checked=false;}});
   const run=fn=>Promise.resolve().then(fn).catch(e=>onError(e.message));
   function crossStyle(){return crossImageChoices(getProject(),ctx.target).find(d=>d.id===crossState?.targetTheme);}
   function updateCrossPrompt(){
@@ -192,6 +195,7 @@ export function initAIImageEditor({getProject,act,busy,openAPI,onError}){
     $('[data-edit-mode="redraw"]').setAttribute('aria-pressed',String(mode==='redraw'));
     $('[data-edit-mode="cross"]').setAttribute('aria-pressed',String(mode==='cross'));
     $('[data-edit-mode="cross"]').hidden=!availableCrossReferences().length;
+    $('#aiEditRegionTools').hidden=mode!=='adjust';
     $('#aiEditCrossFields').hidden=mode!=='cross';$('#aiEditCrossDetails').hidden=mode!=='cross';$('#aiEditPrepare').hidden=mode==='cross';
     const key=ctx.projectId+':'+ctx.key+':'+ctx.sourceHash+':'+mode,draft=getProject()?.aiImageEditDrafts?.[ctx.key];
     if(!histories.has(key)){
@@ -220,11 +224,12 @@ export function initAIImageEditor({getProject,act,busy,openAPI,onError}){
   function refresh(){
     if(!dialog.open||!ctx)return;const p=getProject();if(p?.id!==ctx.projectId){dialog.close();return;}
     const draft=p.aiImageEditDrafts?.[ctx.key];
-    if(pending&&draft?.revision>seen&&draft.mode===mode&&draft.sourceHash===ctx.sourceHash){
+    if(pending&&draft?.revision>seen&&draft.mode===mode&&draft.sourceHash===ctx.sourceHash&&sameImageEditRegion(draft.editRegion,pending.editRegion)){
       seen=draft.revision;pending=null;
       $('#aiEditInstruction').value=textHistory.record(mode==='adjust'?draft.instruction:draft.prompt);
       $('#aiEditConsent').checked=false;$('#aiEditState').textContent=mode==='adjust'?'AI 已整理到修改意见中，可继续编辑，核对后直接生成。':'AI 已整理，请核对下方实际发送内容，再确认生成。';
     }else if(pending&&!busy()){$('#aiEditState').textContent=p.task?.message||'整理未完成，请重试';pending=null;}
+    regionEditor.setEnabled(mode==='adjust'&&!pending);
     const running=busy();$('#aiEditPrepare').disabled=running;$('#aiEditGenerate').disabled=!!pending||running&&!p.imageTaskQueueEnabled;
     $('#aiEditInstruction').disabled=!!pending;
     $('#aiEditPromptUndo').disabled=!!pending||!textHistory?.canUndo;$('#aiEditPromptRedo').disabled=!!pending||!textHistory?.canRedo;
@@ -241,13 +246,13 @@ export function initAIImageEditor({getProject,act,busy,openAPI,onError}){
     const target=ctx.target;await act('restoreAIImage',{...target,sourceHash:ctx.sourceHash,sourceRevision:ctx.image.jobFile||ctx.image.file,direction:b.id==='aiEditImageUndo'?'undo':'redo'});
     const value=imageEditTarget(getProject(),target);ctx={...ctx,...value,sourceHash:value.image.previewHash||value.image.sha256};
     for(const editMode of ['adjust','redraw'])histories.delete(ctx.projectId+':'+ctx.key+':'+ctx.sourceHash+':'+editMode);
-    $('#aiEditImage').src=value.url;setMode(mode);$('#aiEditState').textContent='已恢复图片及对应提示词，无需重新生图。';
+    $('#aiEditImage').src=value.url;regionSelections.set(regionKey(),null);regionEditor.reset();setMode(mode);$('#aiEditState').textContent='已恢复图片及对应提示词，无需重新生图。';
   });else if(b.id==='aiEditPrepare')run(async()=>{
     const p=getProject();if(!p.apiReady){openAPI();return;}if(busy())throw Error('请等待当前任务完成');
     const instruction=$('#aiEditInstruction').value;if(!instruction.trim())throw Error('请填写修改意见');
     textHistory.record(instruction);
-    pending={instruction};$('#aiEditConsent').checked=false;$('#aiEditState').textContent='AI 正在整理，尚未发送生图请求…';
-    try{await act('prepareAIImageEdit',{...ctx.target,imageEditMode:mode,sourceHash:ctx.sourceHash,instruction:mode==='adjust'?instruction:'将输入框中的草稿与修改意见整理为可独立文生图的完整最终提示词，保留未要求改变的内容。',prompt:mode==='redraw'?instruction:undefined});refresh();}catch(e){pending=null;refresh();throw e;}
+    pending={instruction,editRegion:mode==='adjust'?regionEditor.value:null};regionEditor.setEnabled(false);$('#aiEditInstruction').disabled=true;$('#aiEditGenerate').disabled=true;$('#aiEditConsent').checked=false;$('#aiEditState').textContent='AI 正在整理，尚未发送生图请求…';
+    try{await act('prepareAIImageEdit',{...ctx.target,imageEditMode:mode,sourceHash:ctx.sourceHash,...(mode==='adjust'&&regionEditor.value?{editRegion:regionEditor.value}:{}),instruction:mode==='adjust'?instruction:'将输入框中的草稿与修改意见整理为可独立文生图的完整最终提示词，保留未要求改变的内容。',prompt:mode==='redraw'?instruction:undefined});refresh();}catch(e){pending=null;refresh();throw e;}
   });});
   $('#aiEditInstruction').addEventListener('input',()=>{textHistory?.record($('#aiEditInstruction').value);$('#aiEditConsent').checked=false;updateCrossPrompt();refresh();});
   $('#aiImageEditForm').addEventListener('submit',e=>{e.preventDefault();e.stopPropagation();run(async()=>{
@@ -257,9 +262,9 @@ export function initAIImageEditor({getProject,act,busy,openAPI,onError}){
     if(pending)throw Error('请等待 AI 整理完成');
     if(mode==='cross'){const {action,...extra}=crossImageRequest(p,ctx.target,crossState,$('#aiEditInstruction').value);await act(action,extra);dialog.close();return;}
     if(!$('#aiEditInstruction').value.trim())throw Error(mode==='adjust'?'请填写修改意见':'请填写完整的重绘提示词');
-    const {action,...request}=ctx.request,extra={...request,imageEditMode:mode,sourceHash:ctx.sourceHash,...(mode==='adjust'?{instruction:$('#aiEditInstruction').value}:{prompt:$('#aiEditInstruction').value})};
+    const {action,...request}=ctx.request,extra={...request,imageEditMode:mode,sourceHash:ctx.sourceHash,...(mode==='adjust'?{instruction:$('#aiEditInstruction').value,...(regionEditor.value?{editRegion:regionEditor.value}:{})}:{prompt:$('#aiEditInstruction').value})};
     if(mode==='adjust'&&ctx.target.targetType==='theme')extra.prompt=ctx.prompt;
     await act(action,extra);dialog.close();
   });});
-  return {open(target){const p=getProject(),value=imageEditTarget(p,target);ctx={...value,target,projectId:p.id,sourceHash:value.image.previewHash||value.image.sha256};crossState=null;$('#aiEditTitle').textContent=target.targetType==='theme'?'修改底图':target.targetType==='visual'?'修改预览图':'修改 AI 图片';$('#aiEditImage').src=value.url;$('#aiEditContext').textContent=(target.targetType==='theme'?'主题底图':target.targetType==='visual'?'整页预览 · 第 '+(target.index+1)+' 页':'AI 素材')+' · '+(value.image.model||'已配置的生图模型');dialog.showModal();setMode('adjust');},refresh,close(){dialog.close();ctx=null;}};
+  return {open(target){const p=getProject(),value=imageEditTarget(p,target);ctx={...value,target,projectId:p.id,sourceHash:value.image.previewHash||value.image.sha256};crossState=null;$('#aiEditTitle').textContent=target.targetType==='theme'?'修改底图':target.targetType==='visual'?'修改预览图':'修改 AI 图片';$('#aiEditImage').src=value.url;$('#aiEditContext').textContent=(target.targetType==='theme'?'主题底图':target.targetType==='visual'?'整页预览 · 第 '+(target.index+1)+' 页':'AI 素材')+' · '+(value.image.model||'已配置的生图模型');const draft=p.aiImageEditDrafts?.[ctx.key];regionEditor.reset(regionSelections.has(regionKey())?regionSelections.get(regionKey()):draft?.mode==='adjust'&&draft.sourceHash===ctx.sourceHash?draft.editRegion:null);dialog.showModal();setMode('adjust');},refresh,close(){dialog.close();ctx=null;}};
 }

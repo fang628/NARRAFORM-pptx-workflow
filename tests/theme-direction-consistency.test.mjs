@@ -1,7 +1,7 @@
 import {promptColor} from '../lib/prompt-colors.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {harmonizeThemeDirections,themeSharedSubject,themeColorDistance,themeColorFamily,distinctThemeColorFamilies} from '../lib/theme-direction-consistency.mjs';
+import {harmonizeThemeDirections,themeColorDistance,themeColorFamily,distinctThemeColorFamilies} from '../lib/theme-direction-consistency.mjs';
 import {themeAssetPrompt} from '../lib/theme-image-prompts.mjs';
 import {registerStyleDirections,requireStyleRegistration} from '../lib/style-registry.mjs';
 import {fixtureDirections} from './visual-fixture.mjs';
@@ -15,29 +15,27 @@ test('整组重选不能只给旧方案改名、改描述或调换顺序，必�
 });
 
 const p=()=>({brief:{title:'肽链修饰',toc:true},styleRegistry:[]});
-const make=()=>fixtureDirections().map((d,i)=>({...d,coreColor:['#F5F8FC','#f5f8fc','#F7F5FA'][i],style:'主背景 #F5F8FC，强调色 #445566',
+const make=()=>fixtureDirections().map((d,i)=>({...d,referenceStyleId:null,coreColor:['#F5F8FC','#f5f8fc','#F7F5FA'][i],style:'主背景 #F5F8FC，强调色 #445566',
   heroSubject:['右侧肽链','右侧设备','右侧细胞'][i],tocSubject:'右侧蛋白口袋',contentSubject:'左下聚合物',
   subjectSources:Object.fromEntries(['heroSubject','tocSubject','contentSubject'].map(field=>[field,{materialId:'doc'+i,evidenceId:'F1',element:i?'设备':'肽链',evidence:{quote:'材料中的肽链'}}]))}));
 
-test('三方向重复或近似底色自动区分，同一材料主体贯穿三方向及全部用途',()=>{
+test('三方向重复或近似底色自动区分，艺术主体不被强制统一',()=>{
   const project=p(),original=make(),snapshot=structuredClone(original),directions=harmonizeThemeDirections(original,project);
   assert.deepEqual(original,snapshot);
   for(let i=0;i<directions.length;i++)for(let j=0;j<i;j++)assert.ok(themeColorDistance(directions[i].coreColor,directions[j].coreColor)>=16);
-  for(const d of directions)for(const field of ['heroSubject','tocSubject','contentSubject']){
-    assert.equal(d.subjectSources[field].element,'肽链');assert.equal(d.subjectSources[field].materialId,'doc0');assert.ok(d[field].includes('肽链'));
-  }
+  for(let i=0;i<directions.length;i++)for(const field of ['heroSubject','tocSubject','contentSubject']){assert.equal(directions[i][field],original[i][field]);assert.deepEqual(directions[i].subjectSources[field],original[i].subjectSources[field]);}
   const registered=registerStyleDirections(project,directions,'test');
   for(const d of registered){assert.equal(requireStyleRegistration(project,d).definition.coreColor,d.coreColor);
     assert.ok(d.style.includes('主背景 '+d.coreColor)||d.style.includes('主背景底色 '+d.coreColor));
-    for(const use of ['hero-image','toc-image','content-background']){const prompt=themeAssetPrompt(project,d,use);assert.ok(prompt.includes(promptColor(d.coreColor)));assert.ok(prompt.includes('肽链'));assert.doesNotMatch(prompt,/设备|蛋白口袋|聚合物/);}
+    for(const use of ['hero-image','toc-image','content-background']){const prompt=themeAssetPrompt(project,d,use);assert.ok(prompt.includes(promptColor(d.coreColor)));assert.ok(prompt.includes(use==='hero-image'?d.heroSubject:use==='toc-image'?d.tocSubject:d.contentSubject));}
   }
 });
 
-test('更换单个方向只调整新定义，保留其他方向底图，继续共用原主体并避开既有主色',()=>{
+test('更换单个方向只调整新定义，保留其他方向底图，保留新艺术意象并避开既有主色',()=>{
   const project=p(),others=harmonizeThemeDirections(make(),project),snapshot=structuredClone(others);
   const raw={...make()[1],coreColor:others[0].coreColor};
-  const [changed]=harmonizeThemeDirections([raw],project,{reservedColors:others.map(d=>d.coreColor),subject:themeSharedSubject(others,project)});
-  assert.deepEqual(others,snapshot);assert.equal(changed.subjectSources.heroSubject.materialId,'doc0');
+  const [changed]=harmonizeThemeDirections([raw],project,{reservedColors:others.map(d=>d.coreColor)});
+  assert.deepEqual(others,snapshot);assert.equal(changed.subjectSources.heroSubject.materialId,'doc1');
   for(const other of others)assert.ok(themeColorDistance(changed.coreColor,other.coreColor)>=16);
 });
 
@@ -61,7 +59,7 @@ test('无需调整的三种明显不同主色保留；单页内容模式不引�
   assert.deepEqual(harmonizeThemeDirections(input,project).map(d=>d.coreColor),input.map(d=>d.coreColor));
   project.brief={title:'内容页',pages:1,cover:false};
   const [d]=harmonizeThemeDirections([{...input[0],heroSubject:'不使用',tocSubject:'不使用'}],project);
-  assert.equal(d.heroSubject,'不使用');assert.equal(d.tocSubject,'不使用');assert.ok(d.contentSubject.includes('肽链'));
+  assert.equal(d.heroSubject,'不使用');assert.equal(d.tocSubject,'不使用');assert.equal(d.contentSubject,input[0].contentSubject);
 });
 
 test('同色系即使色差很大也必须调整，蓝与邻近青蓝不算两个色系',()=>{

@@ -3,6 +3,35 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import {imagePromptCheck,preservePromptText,preservePlaceholderRatios,validImagePrompt} from '../lib/image-prompt-check.mjs';
 import {generatedImage} from '../lib/provider.mjs';
+import {roughLayoutImageGuidance} from '../lib/layout-guidance.mjs';
+
+test('整页发送前清理模板重复，局部调整稿与底图稿保持独立路径',async()=>{
+  const prompt='- **内容要求**：\n  - 标题：导航示例\n  - 页顶导航（独立于正文结构）：\n    - 页顶导航：研究背景\n- **排版要求**：保持分组，1.5:1。\n- **图片占位框比例**：每张登记原图仅画一个等比、平坦无字占位块。\n  - “结果图”：右侧，宽高比必须为 1.5:1，平坦无字占位块。\n- **进度条要求**：页顶且仅一条粗分段进度条，逐段写“研究背景”。';
+  const signal=new AbortController().signal;
+  const cleaned=await imagePromptCheck({stage:'整页预览'},signal)(prompt);
+  assert.doesNotMatch(cleaned.prompt,/页顶导航（独立于正文结构）/);
+  assert.equal((cleaned.prompt.match(/平坦无字占位块/g)||[]).length,1);
+  assert.equal((cleaned.prompt.match(/1\.5:1/g)||[]).length,2);
+  for(const options of [{stage:'整页预览',mode:'adjust'},{stage:'三方向底图'}]){
+    assert.equal((await imagePromptCheck(options,signal)(prompt)).prompt,prompt);
+  }
+});
+
+test('清理旧创意套话及重复排版指令，保留相同正文、不同节点和跨分项比例',async()=>{
+  const prompt='- **内容要求**：\n  - 标题：规划示例\n    - 正文：'+roughLayoutImageGuidance+'\n    - 正文：保留相同文案\n    - 正文：保留相同文案\n  - 图片比例：1.55:1。\n- **排版要求**：'+roughLayoutImageGuidance+'实际排版要有创意，保留合理的组合与局部构图发挥空间。两组结果左右对照，图片紧邻对应观点。两组结果左右对照，图片紧邻对应观点。\n  - 两组结果左右对照，图片紧邻对应观点。\n  - “组甲”：同组图文上下排列。\n  - “组乙”：同组图文上下排列。\n  - 占位框宽高比1.55:1。\n- **图片占位框比例**：1.55:1。\n- **风格要求**：采用医学期刊风格，页面可用蓝白灰。采用医学期刊风格，页面可用蓝白灰。';
+  const options={stage:'整页预览'},signal=new AbortController().signal;
+  const {prompt:next}=await imagePromptCheck(options,signal)(prompt);
+  const content=next.split('- **内容要求**：')[1].split('- **排版要求**：')[0];
+  assert.ok(content.includes(roughLayoutImageGuidance),'即使正文恰好与规则同文，也不能删除真实节点');
+  assert.equal((content.match(/保留相同文案/g)||[]).length,2);
+  const layout=next.split('- **排版要求**：')[1].split('- **图片占位框比例**：')[0];
+  assert.doesNotMatch(layout,/实际排版要有创意|只给粗略创意方向/);
+  assert.equal((layout.match(/两组结果左右对照，图片紧邻对应观点。/g)||[]).length,1);
+  assert.match(layout,/“组甲”：同组图文上下排列/);assert.match(layout,/“组乙”：同组图文上下排列/);
+  assert.equal((next.match(/1\.55:1/g)||[]).length,3);
+  assert.equal((next.match(/采用医学期刊风格，页面可用蓝白灰。/g)||[]).length,1);
+  assert.equal((await imagePromptCheck(options,signal)(next)).prompt,next,'重复处理不继续变化');
+});
 
 test('发送前只整理冲突规范，保持确认文案及不同节点的重复文字',()=>{
   assert.equal(validImagePrompt('  标题\n正文  '),'  标题\n正文  ');

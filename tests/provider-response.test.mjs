@@ -29,21 +29,21 @@ test('文字模型格式失败自动重试一次，保留原任务和图像输�
   const {config,calls}=await mock(t,(res,body,count)=>answer(res,count===1?'这是说明文字':'{"images":[]}'));
   const controller=new AbortController(),entries=[];observeTask(controller.signal,e=>entries.push(e));
   const user=[{type:'text',text:'PRIVATE_PROMPT'},{type:'image_url',image_url:{url:'data:image/png;base64,c3ludGhldGlj'}}];
-  const result=await chat(config,'只输出 JSON',user,controller.signal);assert.deepEqual(parseJSON(result.text),{images:[]});assert.equal(calls.length,2);assert.deepEqual(calls[1].messages[1].content,user);assert.match(calls[1].messages[0].content,/上次响应格式不正确/);
+  const result=await chat(config,'只输出 JSON',user,controller.signal);assert.deepEqual(parseJSON(result.text),{images:[]});assert.equal(calls.length,2);assert.deepEqual(calls[1].messages[1].content,user);assert.match(calls[1].messages[0].content,/修正要求：重新输出完整 JSON/);
   assert.equal(entries.filter(e=>e.kind==='retry').length,1);assert.ok(!JSON.stringify(entries).includes('PRIVATE_'));
 });
 
-test('HTTP 200 HTML 错误页诊断明确，文字最多两次，生图最多三次',async t=>{
+test('HTTP 200 HTML 错误页诊断明确，文字与生图各最多三次',async t=>{
   const {config,calls}=await mock(t,res=>{res.setHeader('content-type','text/html');res.end('<html>PRIVATE_KEY PRIVATE_PROMPT upstream unavailable</html>');});
-  await assert.rejects(chat(config,'JSON','test'),e=>{assert.match(e.message,/chat\/completions.*HTML.*HTTP 200.*text\/html/);assert.ok(!e.message.includes('PRIVATE_'));return true;});assert.equal(calls.length,2);
-  await assert.rejects(generatedImage(config,'test'),/images\/generations.*停止重试/);assert.equal(calls.length,5);
+  await assert.rejects(chat(config,'JSON','test'),e=>{assert.match(e.message,/chat\/completions.*HTML.*HTTP 200.*text\/html/);assert.ok(!e.message.includes('PRIVATE_'));return true;});assert.equal(calls.length,3);
+  await assert.rejects(generatedImage(config,'test'),/images\/generations.*停止重试/);assert.equal(calls.length,6);
 });
 
 test('空响应、不完整 SSE 与输出长度截断均有界失败',async t=>{
   let mode='empty';const {config,calls}=await mock(t,res=>{if(mode==='empty')res.end('');else if(mode==='sse'){res.setHeader('content-type','text/event-stream');res.end('data: {"choices":[{"delta":{"content":"{\\\"a\\\":1}"}}]}\n\n');}else answer(res,'{"a":1}','length');});
-  await assert.rejects(chat(config,'JSON','test'),/空响应/);assert.equal(calls.length,2);
-  mode='sse';await assert.rejects(chat(config,'JSON','test'),/不完整.*SSE/);assert.equal(calls.length,4);
-  mode='length';await assert.rejects(chat(config,'JSON','test'),/长度上限被截断/);assert.equal(calls.length,6);
+  await assert.rejects(chat(config,'JSON','test'),/空响应/);assert.equal(calls.length,3);
+  mode='sse';await assert.rejects(chat(config,'JSON','test'),/不完整.*SSE/);assert.equal(calls.length,6);
+  mode='length';await assert.rejects(chat(config,'JSON','test'),/长度上限被截断/);assert.equal(calls.length,9);
 });
 
 test('权限错误与取消不重试，非结构化文字测试保持兼容',async t=>{

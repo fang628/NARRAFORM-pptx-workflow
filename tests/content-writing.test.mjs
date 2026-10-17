@@ -4,6 +4,7 @@ import {contentWritingRules,longContentFields} from '../lib/content-writing.mjs'
 import {designRulesFor} from '../lib/design-rules.mjs';
 import {validateSlides} from '../lib/scene.mjs';
 import {checkContentPages} from '../lib/content-check.mjs';
+import {validateAudit} from '../lib/visual-model.mjs';
 
 test('短字段和结论写法仅注入内容阶段，相关图片按组实际插入',()=>{
   const p={brief:{title:'实验结果',progress:false},slides:[{kind:'content',title:'结果'}],materials:[]};
@@ -32,4 +33,15 @@ test('长字段只在内容结束时提示，不截断原文、公式或讲稿�
   assert.ok(p.contentChecks[0].warnings.some(w=>w.includes('不影响继续制作')));
   assert.doesNotThrow(()=>validateSlides(slides));
   assert.equal(longContentFields([{id:'unicode',type:'text',text:'😀'.repeat(60)}]).length,0);
+});
+
+test('信息完整优先，同级分点独立重建；不能把多个正文节点合成一个文本框',()=>{
+  const s=validateSlides([{kind:'content',title:'完整结果',body:['处理组数据完整保留。','对照条件单独呈现。'],sources:[]}])[0];
+  const p={brief:{progress:false},materials:[],slides:[s]};
+  for(const stage of ['content','design','review','rebuild']){
+    const rules=designRulesFor(p,0,stage);assert.match(rules,/信息完整 → 内容关系 → 可读性/);assert.match(rules,/同级观点优先并列/);assert.match(rules,/不得因图片较多减少分点/);
+  }
+  const texts=[{nodeId:'title',text:s.title},{nodeId:'body-0',text:s.body[0]},{nodeId:'body-1',text:s.body[1]}].map((e,i)=>({...e,key:'text-'+i,type:'text',x:100,y:100+i*100,w:800,h:70,size:30,color:'222222'}));
+  assert.equal(validateAudit(texts,s,[],p,0).length,3);
+  const merged=[texts[0],{...texts[1],text:s.body.join('\n')}];assert.throws(()=>validateAudit(merged,s,[],p,0),/逐条保留准确文字/);
 });

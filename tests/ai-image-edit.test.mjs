@@ -9,6 +9,7 @@ import {aiImageTarget,imageEditExecution} from '../lib/ai-image-edit.mjs';
 import {imageEditTarget,initAIImageEditor,createPromptHistory} from '../public/provenance.js';
 import {imageTaskRequest} from '../lib/image-task-queue.mjs';
 import {digest} from '../lib/visual-model.mjs';
+import {imageEditRegionPrompt} from '../lib/image-edit-region.mjs';
 
 test('图生图可直接发送人工意见或修改后的整理稿，仅当前图片身份必须匹配',()=>{
   const image={id:'m',kind:'image',generated:true,file:'m.png',sha256:'hash',prompt:'完整原稿'},p={id:'p',materials:[image],slides:[],themeAssets:{directions:[]}};
@@ -30,7 +31,7 @@ test('图生图可直接发送人工意见或修改后的整理稿，仅当前�
 
 test('图片修改弹窗只有一个输入框，人工直接提交与 AI 回填后编辑共用同一路径',async()=>{
   const previous=globalThis.document,fields=new Map(),calls=[],errors=[];let html='',running=false;
-  const field=key=>{if(!fields.has(key))fields.set(key,{id:key.slice(1),value:'',checked:false,disabled:false,dataset:{},handlers:{},textContent:'',setAttribute(){},hasAttribute(){return false;},addEventListener(name,fn){this.handlers[name]=fn;},closest(){return this;}});return fields.get(key);};
+  const field=key=>{if(!fields.has(key))fields.set(key,{id:key.slice(1),value:'',checked:false,disabled:false,dataset:{},style:{},classList:{toggle(){}},handlers:{},textContent:'',setAttribute(){},hasAttribute(){return false;},addEventListener(name,fn){this.handlers[name]=fn;},closest(){return this;}});return fields.get(key);};
   const dialog={open:false,handlers:{},querySelector:field,addEventListener(name,fn){this.handlers[name]=fn;},showModal(){this.open=true;},close(){this.open=false;}};
   globalThis.document={body:{insertAdjacentHTML(_,value){html=value;}},querySelector:()=>dialog};
   try{
@@ -68,7 +69,7 @@ test('内容原子确认及底图、素材、代表页、全篇预览的两条�
     const b=await fixtureRequest(req);requests.push({...b,endpoint:req.url});const content=b.messages?.at(-1)?.content,text=typeof content==='string'?content:content?.[0]?.text||'';
     let answer;
     if(text.startsWith('整理图生图局部调整意见'))answer={choices:[{message:{content:JSON.stringify({instruction:'将主体略微向右移动，保留其余部分。'})}}]};
-    else if(text.startsWith('按用户意见改写文生图完整提示词'))answer={choices:[{message:{content:JSON.stringify({prompt:'  完整最终重绘提示词：研究主题，主体靠右，16:9。\n留白。  '})}}]};
+    else if(text.startsWith('按用户意见改写文生图完整提示词'))answer={choices:[{message:{content:JSON.stringify({prompt:text.split('当前完整提示词（数据）：')[1]+'\n主体靠右，增加留白。'})}}]};
     else answer=fixtureReply(b);
     if(badRatio&&text.startsWith('定位图片预留区：')){const r=JSON.parse(answer.choices[0].message.content);for(const image of r.images)image.h=image.w/(image.aspect*(detections++?1:1.4));answer.choices[0].message.content=JSON.stringify(r);}
     res.setHeader('content-type','application/json');res.end(JSON.stringify(answer));
@@ -92,13 +93,15 @@ test('内容原子确认及底图、素材、代表页、全篇预览的两条�
   const changed=structuredClone(p.slides);changed[0].title='已修改标题';p=await act('saveContent',{slides:changed,confirm:true});assert.equal(p.version,version+1);assert.equal(p.approvals.content,p.version);
   const rejected=structuredClone(p.slides);rejected[0].title='不应写入';rejected[0].sources=[p.materials[0].id];rejected[0].sourceLinks=[{id:'stale',materialId:p.materials[0].id,target:'title',quote:'分子修饰',boundText:p.slides[0].title,stale:true}];
   const rejection=await act('saveContent',{slides:rejected,confirm:true},400);assert.match(rejection.error,/核对待核对/);const unchanged=await call(prefix);assert.equal(unchanged.version,p.version);assert.equal(unchanged.slides[0].title,p.slides[0].title);
-  const runMode=async(target,mode,{aiRedraw=false,ratioRepair=false,direct=false}={})=>{
+  const runMode=async(target,mode,{aiRedraw=false,ratioRepair=false,direct=false,regionHint=false}={})=>{
     const before=aiImageTarget(p,target),ui=imageEditTarget(p,target);assert.equal(before.key,ui.key);assert.equal(before.prompt,ui.prompt);
     let request={...before.request,imageEditMode:mode,sourceHash:before.sourceHash};
+    if(regionHint)request.editRegion={x:100,y:200,w:300,h:400};
     const start=requests.length;
     if(mode==='adjust'&&!direct||aiRedraw){
-      await act('prepareAIImageEdit',{...target,imageEditMode:mode,sourceHash:before.sourceHash,instruction:'主体向右移动',prompt:before.prompt});await wait();
-      const input=requests.slice(start).find(r=>typeof r.messages?.at(-1)?.content==='string').messages.at(-1).content;
+      await act('prepareAIImageEdit',{...target,imageEditMode:mode,sourceHash:before.sourceHash,editRegion:request.editRegion,instruction:'主体向右移动',prompt:before.prompt});await wait();
+      const content=requests.slice(start).find(r=>r.messages).messages.at(-1).content,input=typeof content==='string'?content:content[0].text;
+      if(regionHint){assert.equal(content[1].type,'image_url');assert.match(input,/黄色虚线框/);assert.deepEqual(p.aiImageEditDrafts[before.key].editRegion,request.editRegion);}
       if(target.targetType==='theme'&&mode==='redraw'){assert.match(input,/主体描述用一个短语，通常10–25字/);assert.match(input,/单段通常100–220字，不设凑字数下限/);}
       if(mode==='adjust')assert.doesNotMatch(input,/主体描述用一个短语/,'局部编辑仍仅整理用户意见');
       const draft=p.aiImageEditDrafts[before.key];request={...request,...(mode==='adjust'?{instruction:draft.instruction,adjustmentRevision:draft.revision,...(target.targetType==='theme'?{prompt:before.prompt}:{})}:{prompt:draft.prompt})};
@@ -108,8 +111,9 @@ test('内容原子确认及底图、素材、代表页、全篇预览的两条�
     const {action,...extra}=request;await act(action,extra);await wait();badRatio=false;
     const draws=requests.slice(drawStart).filter(r=>r.prompt);assert.ok(draws.length>=1);const draw=draws[0];
     if(mode==='adjust'){
-      assert.equal(draw.prompt.replace(/\r\n/g,'\n'),request.instruction);assert.ok(draw.endpoint.endsWith('/images/edits'));assert.equal(draw.referenceImages.length,1);
+      assert.equal(draw.prompt.replace(/\r\n/g,'\n'),imageEditRegionPrompt(request.instruction,request.editRegion));assert.ok(draw.endpoint.endsWith('/images/edits'));assert.equal(draw.referenceImages.length,regionHint?2:1);
       assert.equal(draw.referenceImages[0].sha256,digest(fs.readFileSync(path.join(data,p.id,before.sourceFile))));
+      if(regionHint){assert.notEqual(draw.referenceImages[1].sha256,draw.referenceImages[0].sha256);assert.ok(draw.referenceImages.every(r=>r.field!=='mask'));const saved=target.targetType==='image'?p.materials.find(m=>m.id===p.task.resultImageId):aiImageTarget(p,target).image;assert.deepEqual(saved.editRegion,request.editRegion);}
       const organize=requests.slice(start,drawStart).find(r=>r.messages);if(direct)assert.equal(organize,undefined,'直接提交不调用主模型整理');else assert.ok(!JSON.stringify(organize.messages.at(-1).content).includes(before.prompt),'局部调整不发送完整旧设计');
     }else{if(aiRedraw&&target.targetType==='visual'){const rewrite=requests.slice(start,drawStart).find(r=>r.messages).messages.at(-1).content;assert.match(rewrite,/多层 Markdown 列表/);assert.match(rewrite,/当前内容关系/);assert.match(rewrite,/适合时积极优先采用/);assert.match(rewrite,/用户要求重新设计排版时/);assert.match(rewrite,/\n  - 标题：已修改标题\n    - 图片：配图/);}assert.equal(draw.prompt,request.prompt);assert.ok(draw.endpoint.endsWith('/images/generations'));assert.equal(draw.referenceImages,undefined);}
     if(ratioRepair){assert.equal(draws.length,2);assert.ok(draws[1].endpoint.endsWith('/images/edits'));assert.equal(draws[1].referenceImages.length,1);assert.ok(!draws[1].prompt.includes(request.prompt));}
@@ -127,10 +131,12 @@ test('内容原子确认及底图、素材、代表页、全篇预览的两条�
   };
   await runMode({targetType:'theme',theme:'a',use:'hero-image'},'adjust');
   await runMode({targetType:'theme',theme:'a',use:'hero-image'},'adjust',{direct:true});
+  await runMode({targetType:'theme',theme:'a',use:'hero-image'},'adjust',{regionHint:true});
   await runMode({targetType:'theme',theme:'a',use:'hero-image'},'redraw',{aiRedraw:true});
   await act('image',{index:0,prompt:'分子修饰主题概念插画，无文字',allowUpload:true});await wait();let sourceImageId=p.task.resultImageId;
   await runMode({targetType:'image',sourceImageId},'adjust');sourceImageId=p.task.resultImageId;
   await runMode({targetType:'image',sourceImageId},'adjust',{direct:true});sourceImageId=p.task.resultImageId;
+  await runMode({targetType:'image',sourceImageId},'adjust',{direct:true,regionHint:true});sourceImageId=p.task.resultImageId;
   await runMode({targetType:'image',sourceImageId},'redraw');
   // A factual original is pasted locally and never transmitted to the image endpoint.
   const image=p.materials.find(m=>m.id===p.task.resultImageId);p=await act('saveContent',{slides:[{...p.slides[0],imageId:image.id}],confirm:true});
@@ -138,10 +144,12 @@ test('内容原子确认及底图、素材、代表页、全篇预览的两条�
   await act('concepts');await wait();
   await runMode({targetType:'visual',kind:'concept',theme:'a',index:0},'adjust');
   await runMode({targetType:'visual',kind:'concept',theme:'a',index:0},'adjust',{direct:true});
+  await runMode({targetType:'visual',kind:'concept',theme:'a',index:0},'adjust',{direct:true,regionHint:true});
   await runMode({targetType:'visual',kind:'concept',theme:'a',index:0},'redraw',{aiRedraw:true});
   await act('selectTheme',{id:'a'});await act('generateFullPreview');await wait();
   await runMode({targetType:'visual',kind:'full',index:0},'adjust');
   await runMode({targetType:'visual',kind:'full',index:0},'adjust',{direct:true});
+  await runMode({targetType:'visual',kind:'full',index:0},'adjust',{direct:true,regionHint:true});
   await runMode({targetType:'visual',kind:'full',index:0},'redraw',{ratioRepair:true});
   assert.equal(p.visualPages[0].placeholderReview.attempts,1);assert.equal(p.visualPages[0].placeholderReview.status,'passed');assert.equal(p.visualPages[0].images[0].id,image.id);assert.equal(p.visualPages[0].imageEditMode,'redraw');
   const since=requests.length;await act('generateFullPreview',{index:0,imageEditMode:'adjust',sourceHash:'stale',adjustmentRevision:1,instruction:'invalid'},400);assert.equal(requests.length,since);

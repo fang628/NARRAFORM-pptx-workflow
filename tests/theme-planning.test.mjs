@@ -18,20 +18,16 @@ test('主体只引用原始材料的现有证据编号，禁用页型不强求�
   const valid=validateThemePlanning(direction,p);assert.equal(valid.subjectSources.heroSubject.evidence.quote,p.materials[0].text);
   const raw=fixtureDirections().map(d=>({...direction,...d,styleSelection:{matchingPresetIds:['A','B','D'],reason:'符合研究主题'}}));
   const planned=validateThemeDirections(raw,p,{requirePlanning:true});assert.equal(planned[0].subjectSources.heroSubject.evidenceId,'F1');
-  for(const materialId of ['generated','missing'])assert.throws(()=>validateThemePlanning({...direction,subjectSources:{...direction.subjectSources,heroSubject:{materialId,element:'其他对象',evidenceId:'F1'}}},p),/材料主体来源/);
-  assert.throws(()=>validateThemePlanning({...direction,subjectSources:{...direction.subjectSources,heroSubject:{materialId:'report',element:'肽链',evidenceId:'F99'}}},p),/证据编号不存在/);
+  for(const materialId of ['generated','missing'])assert.equal(validateThemePlanning({...direction,subjectSources:{...direction.subjectSources,heroSubject:{materialId,element:'抽象光带',evidenceId:'F1'}}},p).subjectSources.heroSubject.materialId,undefined);
+  assert.equal(validateThemePlanning({...direction,subjectSources:{...direction.subjectSources,heroSubject:{materialId:'report',element:'抽象光带',evidenceId:'F99'}}},p).subjectSources.heroSubject.evidenceId,undefined);
   p.brief.cover=false;p.brief.toc=false;
   assert.deepEqual(Object.keys(validateThemePlanning({...direction,subjectSources:{contentSubject:direction.subjectSources.contentSubject}},p).subjectSources),['contentSubject']);
 });
 
-test('新规划在登记和生图前核对全篇主体，并保留判断依据供后续复用',()=>{
-  const {p,direction}=fixture();
-  assert.throws(()=>validateThemePlanning(direction,p,{requireDeckScope:true}),error=>error.code==='BACKGROUND_SUBJECT_NOT_DECK_WIDE');
-  const subjectSources=Object.fromEntries(Object.entries(direction.subjectSources).map(([k,s])=>[k,{...s,scope:'whole-deck',scopeReason:'全篇章节都围绕肽链及其改造展开'}]));
-  const planned=validateThemePlanning({...direction,subjectSources},p,{requireDeckScope:true});
-  assert.equal(planned.subjectSources.heroSubject.scope,'whole-deck');assert.equal(planned.subjectSources.tocSubject.scopeReason,subjectSources.tocSubject.scopeReason);
-  subjectSources.heroSubject.scope='section-only';
-  assert.throws(()=>validateThemePlanning({...direction,subjectSources},p,{requireDeckScope:true}),error=>error.code==='BACKGROUND_SUBJECT_NOT_DECK_WIDE');
+test('艺术意象可以来自全材料的主题启发，不要求实物证据；保留全篇主线说明',()=>{
+  const {p,direction}=fixture(),inspiration='以连续流动表达肽链改造、性能与应用的全篇主线';
+  const raw={...direction,heroSubject:'流动光带',tocSubject:'交织薄片',subjectSources:{heroSubject:{kind:'artistic',element:'流动光带',inspiration}}};
+  const planned=validateThemePlanning(raw,p);assert.equal(planned.subjectSources.heroSubject.inspiration,inspiration);assert.equal(planned.subjectSources.heroSubject.kind,'artistic');assert.equal(planned.subjectSources.heroSubject.materialId,undefined);
 });
 
 test('匹配预设时禁止无依据原创，允许均不匹配、明确指定或沿用预设登记',()=>{
@@ -63,7 +59,7 @@ test('登记的材料对象进入短提示词，同时允许陪衬且维持清�
     const prompt=themeAssetPrompt(p,d,use);
     const source=d.subjectSources[use==='hero-image'?'heroSubject':'tocSubject'];
     assert.equal(source.materialId,'report');assert.equal(source.evidence.quote,p.materials[0].text);
-    assert.ok(prompt.includes('主体：'+source.element));assert.match(prompt,/单一具象主体占满视觉区/);
+    assert.match(prompt,/主体：/);assert.match(prompt,use==='hero-image'?/艺术主视觉占满视觉区/:/艺术主视觉位于边侧/);
     assert.match(prompt,/可配少量主题点缀/);assert.doesNotMatch(prompt,/取自材料|明显可见/);
     assert.ok(prompt.length<=400,prompt.length);assert.doesNotMatch(prompt,/F1|report|evidenceId|匹配预设/);
   }

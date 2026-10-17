@@ -16,6 +16,26 @@ test('整页接受较小的 16:9，等比规范化；其他比例拒绝',()=>{
   }
   const square=path.join(dir,'square.png');execFileSync(python,['-c',create,square,'1024','1024'],{windowsHide:true});assert.throws(()=>execFileSync(python,['tools/visual_assets.py','normalize',square,path.join(dir,'bad.png')],{windowsHide:true,stdio:'pipe'}),/16:9/);assert.equal(fs.existsSync(path.join(dir,'bad.png')),false);
 });
+
+test('容忍像素取整误差，等比保留完整画面并延展边缘，不拉伸或裁切',()=>{
+  const dir=fs.mkdtempSync(path.resolve('work','preview-rounding-')),python=path.resolve('.venv/Scripts/python.exe');
+  const create='from PIL import Image,ImageDraw;import sys;w,h=int(sys.argv[2]),int(sys.argv[3]);im=Image.new("RGBA",(w,h),(90,110,150,255));d=ImageDraw.Draw(im);d.rectangle((0,0,8,h-1),fill=(255,0,0,255));d.rectangle((w-9,0,w-1,h-1),fill=(0,0,255,255));d.ellipse((w//2-100,h//2-100,w//2+100,h//2+100),fill=(255,242,56,255));im.save(sys.argv[1])';
+  for(const [w,h] of [[1672,941],[1920,1079],[1919,1080],[1928,1080]]){
+    const src=path.join(dir,`${w}-${h}.png`),dest=src.replace('.png','-normalized.png');execFileSync(python,['-c',create,src,String(w),String(h)],{windowsHide:true});
+    const original=fs.readFileSync(src),report=JSON.parse(execFileSync(python,['tools/visual_assets.py','normalize',src,dest],{windowsHide:true,encoding:'utf8'}));
+    assert.equal(report.width,1920);assert.equal(report.height,1080);assert.ok(report.aspectRelativeError<=.005);assert.equal(report.normalization,'contain-edge-pad');assert.deepEqual(fs.readFileSync(src),original);
+    const verify='from PIL import Image;import sys,json;src=Image.open(sys.argv[1]);out=Image.open(sys.argv[2]);b=json.loads(sys.argv[3]);expected=src.resize((b["w"],b["h"]),Image.Resampling.LANCZOS);assert out.size==(1920,1080);assert out.crop((b["x"],b["y"],b["x"]+b["w"],b["y"]+b["h"])).tobytes()==expected.tobytes();assert out.getpixel((0,540))==(255,0,0,255);assert out.getpixel((1919,540))==(0,0,255,255)';
+    execFileSync(python,['-c',verify,src,dest,JSON.stringify(report.contentBox)],{windowsHide:true});
+  }
+});
+
+test('明显比例错误仍拒绝，Windows编码设置下中文错误保持UTF-8可读',()=>{
+  const dir=fs.mkdtempSync(path.resolve('work','preview-invalid-ratio-')),python=path.resolve('.venv/Scripts/python.exe');
+  for(const [w,h] of [[1024,1024],[1500,900],[1930,1080]]){
+    const src=path.join(dir,`${w}.png`),dest=src.replace('.png','-out.png');execFileSync(python,['-c','from PIL import Image;import sys;Image.new("RGB",(int(sys.argv[2]),int(sys.argv[3]))).save(sys.argv[1])',src,String(w),String(h)],{windowsHide:true});
+    assert.throws(()=>execFileSync(python,['tools/visual_assets.py','normalize',src,dest],{windowsHide:true,encoding:'utf8',stdio:'pipe',env:{...process.env,PYTHONIOENCODING:'gbk'}}),error=>{assert.match(error.stderr,/整页生图需接近 16:9/);assert.match(error.stderr,/比例偏差/);assert.doesNotMatch(error.stderr,/\uFFFD/);return true;});assert.equal(fs.existsSync(dest),false);
+  }
+});
 test('仅明确拒绝尺寸时降为 auto；权限与普通错误不重试，服务器异常有界重试',async t=>{
   const previous=process.env.PPT_AGENT_TEST;process.env.PPT_AGENT_TEST='1';let mode='size',requests=[];
   const server=http.createServer(async(req,res)=>{let raw='';for await(const c of req)raw+=c;const b=JSON.parse(raw);requests.push(b);res.setHeader('content-type','application/json');
