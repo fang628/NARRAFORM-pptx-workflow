@@ -1,6 +1,6 @@
 export const defaultProgressTitles=['背景与目标','内容与思路','方案与过程','成果与分析','总结与展望'];
 export function validateProgressSections(value){
-  if(!Array.isArray(value)||![5,6].includes(value.length))throw Error('进度条须为 5 或 6 段');
+  if(!Array.isArray(value)||![4,5,6].includes(value.length))throw Error('进度条须为 4、5 或 6 段');
   const titles=value.map(item=>typeof item==='string'?item.trim():String(item?.title||'').trim());
   if(titles.some(t=>!t||t.length>24))throw Error('每个进度章节名称须为 1–24 字');
   if(new Set(titles).size!==titles.length)throw Error('进度章节名称不能重复');
@@ -10,7 +10,7 @@ export function progressSectionsOf(p){
   try{return validateProgressSections(p?.progressSections);}catch{}
   const source=p?.analysis?.outline||p?.slides?.filter(s=>s.kind==='section')||[];
   const titles=[...new Set(source.map(s=>s.title?.trim()).filter(t=>t&&t.length<=24))].slice(0,6);
-  const count=titles.length===6?6:5;
+  const count=[4,6].includes(titles.length)?titles.length:5;
   for(const title of defaultProgressTitles)if(titles.length<count&&!titles.includes(title))titles.push(title);
   return validateProgressSections(titles);
 }
@@ -18,7 +18,7 @@ const h=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;',
 export function progressSectionFields(sections){return sections.map((s,i)=>`<label class="progress-section-item"><span class="progress-section-index" aria-hidden="true">${String(i+1).padStart(2,'0')}</span><input data-progress-section="${i}" aria-label="进度章节 ${i+1}" value="${h(s.title)}" maxlength="24" required><span class="progress-section-track" aria-hidden="true"></span></label>`).join('');}
 export function progressSectionsEditor(p){
   const sections=progressSectionsOf(p);
-  return `<fieldset class="progress-sections-editor"><legend>页顶进度章节</legend><div class="progress-sections-heading"><p>按章节串联全篇<span>理解材料后自动建议，名称可直接编辑</span></p><label class="progress-section-count"><span>章节数量</span><select id="progressSectionCount" aria-label="进度章节数量"><option value="5" ${sections.length===5?'selected':''}>5 段</option><option value="6" ${sections.length===6?'selected':''}>6 段</option></select></label></div><div class="progress-section-fields" data-progress-section-fields>${progressSectionFields(sections)}</div></fieldset>`;
+  return `<fieldset class="progress-sections-editor"><legend>页顶进度章节</legend><div class="progress-sections-heading"><p>按章节串联全篇<span>理解材料后自动建议，名称可直接编辑</span></p><label class="progress-section-count"><span>章节数量</span><select id="progressSectionCount" aria-label="进度章节数量"><option value="4" ${sections.length===4?'selected':''}>4 段</option><option value="5" ${sections.length===5?'selected':''}>5 段</option><option value="6" ${sections.length===6?'selected':''}>6 段</option></select></label></div><div class="progress-section-fields" data-progress-section-fields>${progressSectionFields(sections)}</div></fieldset>`;
 }
 export function pageProgressSelector(p,s){
   if(p.brief.progress===false||['cover','toc'].includes(s.kind))return '';

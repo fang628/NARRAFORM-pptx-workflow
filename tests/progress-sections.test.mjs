@@ -15,17 +15,22 @@ import {slideImagePrompt,effectiveSlideImagePrompt} from '../lib/slide-image-pro
 const names=['研究背景','主要问题','方法方案','实验结果','总结展望'];
 const project=()=>({brief:{title:'研究',progress:true,cover:true,toc:true},progressSections:validateProgressSections(names),materials:[],slides:[{kind:'cover',title:'封面',body:[],sources:[]},{kind:'toc',title:'目录',body:[],sources:[]},...Array.from({length:18},(_,i)=>({kind:'content',title:'内容'+i,body:[],sources:[],progressSectionId:'section-'+(Math.floor(i/4)+1)}))]});
 
-test('01提供5或6个可编辑章节，非法段数或重名不落盘',()=>{
-  for(const n of [1,4,7,30])assert.throws(()=>validateProgressSections(Array(n).fill('章节')),/5 或 6/);
+test('01提供4、5或6个可编辑章节，非法段数或重名不落盘',()=>{
+  for(const n of [1,2,3,7,30])assert.throws(()=>validateProgressSections(Array(n).fill('章节')),/4、5 或 6/);
   assert.throws(()=>validateProgressSections(['背景','背景','方法','结果','总结']),/重复/);
-  const p=project(),html=progressSectionsEditor(p);assert.equal((html.match(/data-progress-section=/g)||[]).length,5);assert.match(html,/5 段/);assert.match(html,/6 段/);
+  const p=project(),html=progressSectionsEditor(p);assert.equal((html.match(/data-progress-section=/g)||[]).length,5);assert.match(html,/4 段/);assert.match(html,/5 段/);assert.match(html,/6 段/);
   assert.equal(suggestProgressSections(['不完整'],[{title:'材料主题'}]).length,5);
   const six=validateProgressSections([...names,'后续安排']);assert.equal((progressSectionsEditor({...p,progressSections:six}).match(/data-progress-section=/g)||[]).length,6);
   assert.match(pageProgressSelector(p,p.slides[2]),/value="section-1" selected/);
   p.materials=[{id:'doc',name:'材料.txt',kind:'document',text:'原文'}];
+  assert.doesNotMatch(materialPanel(p,()=>'',[],''),/progress-sections-editor|id="progressSectionCount"/,'理解材料前不展示默认章节填写栏');
+  p.task={label:'识别与理解材料',status:'failed',message:'临时失败'};
+  assert.doesNotMatch(materialPanel(p,()=>'',[],''),/progress-sections-editor/,'仅有失败记录不提前展示章节栏');
+  p.analysisCurrent=true;p.analysis={summary:'已完成材料理解',readings:[],outline:[],questions:[]};
   const intake=materialPanel(p,()=>'',[],'');
   assert.ok(intake.indexOf('class="progress-sections-editor"')>intake.indexOf('id="materialAnalysis"'),'进度章节在01的02材料理解框内');
   assert.equal((intake.match(/id="progressSectionCount"/g)||[]).length,1);
+  p.analysisCurrent=false;assert.doesNotMatch(materialPanel(p,()=>'',[],''),/progress-sections-editor/,'材料变化后等待重新理解，保留已有章节数据');assert.equal(p.progressSections.length,5);
 });
 
 test('20页只用5段，多页共用所属章节；改页标题不改章节名，改章节名不使材料理解过期',()=>{
@@ -36,6 +41,20 @@ test('20页只用5段，多页共用所属章节；改页标题不改章节名�
   p.progressSections[0].title='修改后的研究背景';assert.equal(materialStamp(p),stamp);assert.notEqual(pageDesignStamp(p,2),design);
   const native=scene(p.slides[2],themes[0],2,p.slides.length,progressSceneBrief(p,2));assert.equal(native.filter(n=>n.role==='navigation').length,5);assert.ok(native.filter(n=>n.role==='navigation').every(n=>n.y+n.h<100));
   p.brief.progress=false;assert.deepEqual(navigationTexts(p,2),[]);
+});
+
+test('4段配置贯通编辑器、自动建议、预览提示词和原生重建，不补成5段',()=>{
+  const p=project(),four=names.slice(0,4);p.progressSections=validateProgressSections(four);assignProgressSections(p);
+  const html=progressSectionsEditor(p);assert.match(html,/value="4" selected/);assert.equal((html.match(/data-progress-section=/g)||[]).length,4);
+  assert.equal(suggestProgressSections(four).length,4);assert.equal(suggestProgressSections(null,four.map(title=>({title}))).length,4);
+  for(let i=2;i<p.slides.length;i++){
+    const nav=navigationTexts(p,i);assert.equal(nav.length,4);assert.equal(nav.filter(n=>n.current).length,1);
+    const native=scene(p.slides[i],themes[0],i,p.slides.length,progressSceneBrief(p,i));assert.equal(native.filter(n=>n.role==='navigation').length,4);
+    assert.ok(native.filter(n=>n.role==='navigation').every(n=>n.x+n.w<=1600&&n.y+n.h<100));
+  }
+  const direction={id:'a',style:'白色与蓝色',coreColor:'#FFFFFF'};p.pageDesigns={2:{plan:{nodes:[],logic:'并列',layoutIntent:'并列展示'}}};
+  const prompt=slideImagePrompt(p,2,direction,[]);assert.match(prompt,/共4段/);assert.doesNotMatch(prompt,/共5段|section-5/);
+  assert.deepEqual(navigationTexts(p,0),[]);assert.deepEqual(navigationTexts(p,1),[]);
 });
 
 test('预览提示词只包含当前01章节，旧稿中的逐页导航会被替换而非叠加',()=>{
@@ -49,7 +68,7 @@ test('真实HTTP：材料理解自动建议章节，01修改保存后重新理�
   const mock=http.createServer(async(req,res)=>{
     const b=await fixtureRequest(req),content=b.messages?.at(-1)?.content,prompt=typeof content==='string'?content:content?.[0]?.text||'';let result;
     if(prompt.includes('识别与理解单份材料'))result={category:'报告',summary:'背景、问题、方法与结果',keyPoints:['背景','方法'],facts:[],questions:[]};
-    else if(prompt.includes('汇总材料理解')){assert.match(prompt,/progressSections/);result={summary:'研究内容',outline:[{title:'研究主题',sourceIds:[]}],questions:[],pageCountSuggestion:{pages:8},progressSections:names};}
+    else if(prompt.includes('汇总材料理解')){assert.match(prompt,/progressSections/);result={summary:'研究内容',outline:[{title:'研究主题',sourceIds:[]}],questions:[],pageCountSuggestion:{pages:8},progressSections:names.slice(0,4)};}
     else if(prompt.startsWith('根据材料写恰好')){assert.match(prompt,/不按页数或逐页标题生成节点/);assert.match(prompt,/进度章节/);result={slides:Array.from({length:8},(_,i)=>({kind:'content',title:'单页'+i,body:[],sources:[],progressSectionId:i<4?'section-1':'section-2'}))};}
     res.setHeader('content-type','application/json');res.end(JSON.stringify(result?{choices:[{message:{content:JSON.stringify(result)}}]}:fixtureReply(b)));
   });await new Promise(r=>mock.listen(0,'127.0.0.1',r));t.after(()=>{mock.closeAllConnections();mock.close();});
@@ -62,7 +81,9 @@ test('真实HTTP：材料理解自动建议章节，01修改保存后重新理�
   const wait=async()=>{for(let i=0;i<700;i++){p=await call(prefix);if(p.task.status!=='running'){assert.equal(p.task.status,'done',p.task.message);return;}await new Promise(r=>setTimeout(r,20));}throw Error('任务超时');};
   await act('configure',{text:{baseURL:'http://127.0.0.1:'+mock.address().port+'/v1',key:'synthetic',model:'mock'}});
   p=await call(prefix+'/materials',{name:'source.txt',base64:Buffer.from('研究背景、主要问题、方法与实验结果。').toString('base64')});await act('requirements',{brief:p.brief});
-  await act('analyzeMaterials');await wait();assert.deepEqual(p.progressSections.map(s=>s.title),names);assert.equal(p.analysisCurrent,true);
+  assert.doesNotMatch(materialPanel(p,()=>'',[],''),/progress-sections-editor/);
+  await act('analyzeMaterials');await wait();assert.deepEqual(p.progressSections.map(s=>s.title),names.slice(0,4));assert.equal(p.analysisCurrent,true);
+  const understood=materialPanel(p,()=>'',[],'' );assert.match(understood,/progress-sections-editor/);assert.equal((understood.match(/data-progress-section=/g)||[]).length,4);for(const title of names.slice(0,4))assert.ok(understood.includes('value="'+title+'"'));
   p=await act('approveAnalysis');const approved=p.analysis.approvedAt,material=p.analysis.stamp;
   const edited=[...names,'后续研究'];edited[0]='项目缘起';p=await act('requirements',{brief:p.brief,progressSections:edited});assert.equal(p.analysisCurrent,true);assert.equal(p.analysis.stamp,material);assert.equal(p.analysis.approvedAt,approved);assert.deepEqual(p.analysis.progressSections.map(s=>s.title),edited);
   await act('requirements',{brief:p.brief,progressSections:['错误']},400);p=await call(prefix);assert.equal(p.progressSections.length,6);
@@ -71,4 +92,7 @@ test('真实HTTP：材料理解自动建议章节，01修改保存后重新理�
   const saved=JSON.parse(fs.readFileSync(path.join(data,p.id,'project.json'),'utf8'));assert.equal(saved.progressSections.length,6);assert.equal(saved.progressSectionsManual,true);
   p=await act('saveContent',{slides:p.slides.map((s,i)=>i===0?{...s,progressSectionId:'section-3'}:s)});assert.equal(p.slides[0].progressSectionId,'section-3');assert.equal(navigationTexts(p,0).find(n=>n.current).text,edited[2]);
   assert.ok(validateSlides(p.slides).every(s=>s.progressSectionId));
+  p=await act('requirements',{brief:p.brief,progressSections:names.slice(0,4)});assert.equal(p.progressSections.length,4);
+  await act('analyzeMaterials');await wait();assert.deepEqual(p.progressSections.map(s=>s.title),names.slice(0,4));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(data,p.id,'project.json'),'utf8')).progressSections.length,4);
 });

@@ -1,6 +1,6 @@
 {
   "source": "pptx-workflow",
-  "version": "30bf61c51380fd29",
+  "version": "97046e0a1f2404b2",
   "copiedAt": "2026-10-10T14:38:43.158Z",
   "files": [
     {
@@ -25,8 +25,8 @@
     },
     {
       "file": "shared/design-principles.md",
-      "sha256": "7524ddcfdd0b1f54f1903873be8974d1453fb1012ad0bc09971d7a55270b21c6",
-      "bytes": 6535
+      "sha256": "f4f017c147c55f16261908b3b437546daf3c0da4c5987f5f31d9fc6f35f50b09",
+      "bytes": 6539
     },
     {
       "file": "shared/image-generation.md",
@@ -310,7 +310,7 @@
     },
     {
       "file": "stages/13-design/references/gen-prompt-scope.md",
-      "sha256": "9f89eec97c3bfed3488e5fce099387922e746718d6ba916079395b16f12d9a87",
+      "sha256": "3e230598af0a15491c39dd07a7dfae1a16a7c1152e96c9186f87550eedb497c0",
       "bytes": 6066
     },
     {
