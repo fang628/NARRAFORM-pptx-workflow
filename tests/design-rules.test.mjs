@@ -51,13 +51,13 @@ test('图注缺口在设计稿阶段提示，原图底色不归入新增装饰�
   const pages=project.slides.map(()=>({designChecks:checks(),previewReview:{status:'passed',issues:[]}}));assert.equal(designAcceptance(project,pages).passed,true);
   pages[0].previewReview={status:'needs_revision',issues:['文字遮挡']};assert.equal(designAcceptance(project,pages).passed,false);assert.match(designAcceptance(project,pages).issues.join('；'),/文字遮挡/);
 });
-test('页顶导航沿用实际章节原名，封面和目录省略，章节名变化使依赖设计稿失效',()=>{
+test('页顶导航固定章节段，封面和目录省略，章节名变化使依赖设计稿失效',()=>{
   const project=p();assert.deepEqual(navigationTexts(project,0),[]);assert.deepEqual(navigationTexts(project,1),[]);
   assert.equal(navigationTexts(project,3)[0].text,'研究方法');assert.equal(navigationTexts(project,3)[0].current,true);
   const stamp=pageDesignStamp(project,3);project.slides[2].title='实验方法';assert.notEqual(pageDesignStamp(project,3),stamp);
   const s=project.slides[3],nodes=canonicalTexts(s,project,3),audit=nodes.map((n,i)=>({key:'text-'+i,type:'text',nodeId:n.nodeId,text:n.text,x:50,y:20,w:600,h:60,size:25,color:'272727',bold:true}));
-  assert.equal(validateAudit(audit,s,[],project,3).length,2);
-  assert.throws(()=>validateAudit(audit.filter(e=>e.nodeId!=='navigation-2'),s,[],project,3),/遗漏/);
+  assert.equal(validateAudit(audit,s,[],project,3).length,6);
+  assert.throws(()=>validateAudit(audit.filter(e=>e.nodeId!=='navigation-section-1'),s,[],project,3),/遗漏/);
   audit[1].y=800;assert.throws(()=>validateAudit(audit,s,[],project,3),/顶部/);
 });
 test('学术填充与字号建议依场景区分，生图不发送具体字号',()=>{

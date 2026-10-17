@@ -1,6 +1,6 @@
 {
   "source": "pptx-workflow",
-  "version": "bde6112f8337d7c5",
+  "version": "4f7ed238fd764067",
   "copiedAt": "2026-10-10T14:38:43.158Z",
   "files": [
     {
@@ -25,8 +25,8 @@
     },
     {
       "file": "shared/design-principles.md",
-      "sha256": "2ac804e1c941e992c3866dff5342125e3526cb175df12a4776c07a7293f050a2",
-      "bytes": 5163
+      "sha256": "63b71dfe22b1c2dc27d902179ceb4876446513a0eb27c71fa134426c429bc352",
+      "bytes": 5840
     },
     {
       "file": "shared/image-generation.md",
@@ -50,8 +50,8 @@
     },
     {
       "file": "shared/preview-contract.md",
-      "sha256": "4a0cc4d20f6e231221a14392dee61814d327fba4e547d32e0341a9b5df0f7a3d",
-      "bytes": 3521
+      "sha256": "2d5276035eee20c24d24a6f9035ddd439d969cec47892e0f423efb28cf3e0ce1",
+      "bytes": 3606
     },
     {
       "file": "shared/references/splits/arc-horizontal-dome.png",
@@ -305,13 +305,13 @@
     },
     {
       "file": "stages/13-design/references/content-page.md",
-      "sha256": "efaca4b3566eeeb32e16016092a74bc3b910123d7224955e32d8eeea29fcb928",
-      "bytes": 5451
+      "sha256": "6f46c5937131da3a73744813277466da9563b4d6516bae54b75f4ae5547dce23",
+      "bytes": 5724
     },
     {
       "file": "stages/13-design/references/gen-prompt-scope.md",
-      "sha256": "e2a5ce12ff7e2c26e63fe7e2e3c8e57a6c2104707e65c67be5ca84cf992714ae",
-      "bytes": 5394
+      "sha256": "f88688187a1df5a8f548de3afa4b4266482f7261607d2724ac09fb85bda25b29",
+      "bytes": 5766
     },
     {
       "file": "stages/13-design/references/layout-guide.md",

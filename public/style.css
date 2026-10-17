@@ -482,6 +482,7 @@ footer::before{width:145px;height:8px;background:var(--line-array)}
 .circuit-tree .element-settings{grid-template-columns:minmax(0,1fr) minmax(80px,130px)}
 .circuit-tree .tree-image-content{grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr)}
 .circuit-tree .tree-image-captions{min-width:0}
+.circuit-tree .tree-image-annotation{display:flex;align-items:flex-start;gap:8px;min-width:0}.circuit-tree .tree-image-annotation .tree-annotation-role{flex:0 0 90px;width:90px!important;margin:0!important;padding:4px 5px!important;color:#716443!important;font-size:11px!important}.circuit-tree .tree-image-annotation .tree-caption-inline{flex:1;width:0}
 .circuit-tree .element-node .tree-caption-inline{display:block;width:100%;min-width:0;min-height:25px;max-height:160px;box-sizing:border-box;margin:0!important;padding:2px 4px!important;border:1px solid #b8af8b!important;background:#faf8ef!important;box-shadow:none!important;color:#625b40!important;font-size:12px!important;line-height:1.7!important;resize:none;overflow:auto;overflow-wrap:anywhere;transition:border-color .15s,background .15s}
 .circuit-tree .element-node .tree-caption-inline::placeholder{font-size:11px;color:#8c8260}
 .circuit-tree .element-node .tree-caption-inline:hover{border-color:#a99d73!important}
@@ -1006,3 +1007,29 @@ button:is(.close,.danger,[data-delete],[data-delete-project],[data-delete-style]
 .visual-treatment-options:disabled{opacity:.65}
 
 .visual-treatment-footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;width:100%}.visual-treatment-footer p{flex:1;min-width:180px}.visual-treatment-footer button{font-size:12px;white-space:nowrap}
+
+/* Chapter rail: editable segments on a quiet technical surface. */
+.progress-sections-editor{position:relative;z-index:1;min-width:0;margin:24px 0;padding:16px 20px 20px;border:1px solid #b7b7ad;border-left:3px solid #9c9984;background:linear-gradient(110deg,#eeeeeaad,#e5e5df85);color:#34342f}
+.progress-sections-editor legend{padding:0 9px 0 7px;font-size:13px;font-weight:650;letter-spacing:.04em;color:#373730}
+.progress-sections-editor legend::before{content:"";display:inline-block;width:6px;height:6px;margin-right:8px;background:var(--yellow);vertical-align:2px}
+.progress-sections-editor::after{content:"";position:absolute;right:12px;bottom:8px;width:20px;height:3px;background:var(--yellow);pointer-events:none}
+.progress-sections-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}
+.progress-sections-heading p{margin:0;font-size:13px;font-weight:550;color:#44443d;line-height:1.6}
+.progress-sections-heading p>span{display:block;margin-top:3px;font-size:11px;font-weight:400;color:#74746b}
+.progress-sections-heading .progress-section-count{display:flex;align-items:center;gap:10px;flex-shrink:0;margin:0;color:#69695f;font-size:11px}
+.progress-section-count select{width:74px;min-height:34px;margin:0;padding:5px 8px;background:#f3f3ed;border-color:#c2c2b6;color:#424237;font-size:12px;cursor:pointer}
+.progress-section-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px 14px;min-width:0}
+.progress-section-fields .progress-section-item{position:relative;display:grid;grid-template-columns:24px minmax(0,1fr);align-items:center;gap:0 6px;min-width:0;margin:0;padding:12px 10px 15px;background:#f5f5ef91;transition:background .22s ease-out,box-shadow .22s ease-out}
+.progress-section-index{align-self:center;font:11px var(--mono);color:#77776b;letter-spacing:.02em}
+.progress-section-fields input{width:100%;min-width:0;margin:0;padding:5px 3px;border:1px solid transparent;background:transparent;color:#34342e;font-size:13px;line-height:1.6;text-overflow:ellipsis;transition:background .2s ease-out,border-color .2s ease-out}
+.progress-section-track{position:absolute;left:10px;right:10px;bottom:6px;height:2px;background:#c3c3b5;transition:background .22s ease-out}
+.progress-section-track::before{content:"";position:absolute;left:0;top:-1px;width:4px;height:4px;background:#a5a58f}
+.progress-section-item:hover{background:#f7f7ef}
+.progress-section-item:focus-within{background:#faf8e7;box-shadow:inset 0 0 0 1px #c9bd61}
+.progress-section-item:focus-within .progress-section-index{color:#625b2b}
+.progress-section-item:focus-within .progress-section-track,.progress-section-item:focus-within .progress-section-track::before{background:#c7b72a}
+.progress-section-fields input:hover{border-color:#c8c8ba}
+.progress-section-fields input:focus{outline:none;border-color:#b5a64c;background:#fffef5}
+@media(max-width:700px){.progress-sections-editor{padding:12px 14px 16px}.progress-sections-heading{gap:12px;margin-bottom:15px}.progress-section-fields{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.progress-sections-heading p>span{max-width:190px}.progress-section-fields .progress-section-item{padding-left:8px;padding-right:8px}}
+@media(max-width:420px){.progress-sections-heading{align-items:flex-start;flex-wrap:wrap}.progress-sections-heading .progress-section-count{margin-left:auto}.progress-section-fields{grid-template-columns:minmax(0,1fr)}}
+@media(prefers-reduced-motion:reduce){.progress-section-fields .progress-section-item,.progress-section-fields input,.progress-section-track{transition:none}}

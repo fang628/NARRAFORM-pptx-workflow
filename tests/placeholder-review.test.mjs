@@ -27,7 +27,7 @@ test('先复查再决定修正，比例接近即停止；最多2次修正后放�
   }
 });
 
-test('占位框2%要求与原图5%适配分离，修框上限之后仍可小幅贴满',async()=>{
+test('占位框2%检查与原图铺满分离，修框上限之后仍按实际框贴满',async()=>{
   const r=await repairPlaceholders({initial:0,inspect:async()=>[image(1.04)],regenerate:async(_,checks,attempt)=>attempt});
   assert.equal(r.review.status,'exhausted');assert.equal(r.review.attempts,2);assert.equal(r.review.tolerance,.02);assert.equal(r.review.checks[0].passed,false);
   const [fit]=fittedImagePlans(r.images);assert.equal(fit.imageFit,'fill');assert.ok(Math.abs(fit.aspectAdjustment-.04)<1e-9);assert.equal(fit.w,r.images[0].w);assert.equal(fit.h,r.images[0].h);
