@@ -50,7 +50,7 @@ def build(source, output):
         if page["evidence"]:
             ending += [Spacer(1, 9), para("材料索引：" + "；".join(material_names.get(m, m) for m in page["evidence"]), meta)]
         story.append(KeepTogether(ending))
-    doc = SimpleDocTemplate(str(output), pagesize=A4, rightMargin=49, leftMargin=49, topMargin=61, bottomMargin=51, title=data["title"] + " · 演讲稿", author="PPT Agent")
+    doc = SimpleDocTemplate(str(output), pagesize=A4, rightMargin=49, leftMargin=49, topMargin=61, bottomMargin=51, title=data["title"] + " · 演讲稿", author="NARRAFORM")
     count = [0]
     def decorate(c, doc):
         count[0] += 1

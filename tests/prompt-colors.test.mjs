@@ -45,5 +45,6 @@ test('阶段注入使用Agent简化口径，不注入历史九项或强制复述
   const context=workflowPageContext(p,0),styles=workflowStyleContext();
   assert.match(context,/## Agent 七项分点结构/);assert.match(styles,/## Agent 配色与风格/);
   assert.doesNotMatch(context,/必须用 Markdown 顶层列表组织以下九项|必须含“简约要求”和“紧密排版要求”|逐字包含“文本框底色/);
-  assert.match(context,/底图是锁定背景层/);assert.match(context,/在内容、排版、配图三处强调各图具体宽高比/);
+  assert.match(context,/保持原底图颜色、结构、装饰和排布不变/);assert.match(context,/在内容、排版、配图三处强调/);
+  assert.match(context,/只用自然语言说明哪些具体内容之间添加哪种箭头、表示什么联系/);assert.match(context,/并列不连箭头/);
 });

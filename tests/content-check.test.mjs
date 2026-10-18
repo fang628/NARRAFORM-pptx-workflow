@@ -7,6 +7,7 @@ import {validateSlides,scene,themes} from '../lib/scene.mjs';
 import {checkContentPages,contentCheckState,contentLayoutAdvice} from '../lib/content-check.mjs';
 import {pageDesignInputCheck,pageDesignPrompt} from '../lib/page-design.mjs';
 import {fixtureReply} from './visual-fixture.mjs';
+import {Resvg} from '@resvg/resvg-js';
 
 test('多层小标题保留六段独立正文，各组标题与对应多文本共用对齐轴',()=>{
   const elements=[{id:'title',type:'text',role:'title',text:'研究方法',parentId:null},
@@ -32,8 +33,9 @@ function dense(doc='doc',photo='photo'){
   const elements=[{id:'title',type:'text',role:'title',text:'第4页：多层图文内容',parentId:null}];
   for(let i=0;i<6;i++)elements.push({id:'group'+i,type:'group',label:'主题'+i,parentId:'title'},
     {id:'text'+i,type:'text',role:'body',text:'依据材料保留研究条件与结论，采用图文分区表达。'.repeat(3),parentId:'group'+i},
-    {id:'image'+i,type:'image',label:'证据图'+i,materialId:photo,parentId:'text'+i});
-  return {kind:'content',title:'第4页',body:[],elements,sources:[doc,photo],sourceLinks:elements.filter(n=>n.type==='text'&&n.role==='body').map(n=>({materialId:doc,target:'element:'+n.id,excerptId:'E0001'}))};
+    {id:'image'+i,type:'image',label:'证据图'+i,materialId:Array.isArray(photo)?photo[i]:photo,parentId:'text'+i},
+    {id:'caption'+i,type:'text',role:'caption',text:'材料证据图'+i,parentId:'image'+i});
+  return {kind:'content',title:'第4页',body:[],elements,sources:[doc,...(Array.isArray(photo)?photo:[photo])],sourceLinks:elements.filter(n=>n.type==='text'&&n.role==='body').map(n=>({materialId:doc,target:'element:'+n.id,excerptId:'E0001'}))};
 }
 
 test('复杂内容结束检查保留所有文字、层级、原图，模板容量仅提示设计优化',()=>{
@@ -70,13 +72,16 @@ test('真实 HTTP：第4页模板溢出仍完成内容与设计，确认/修改/
   let p=await call('/api/projects',{brief:{title:'结束检查回归',pages:4,cover:false}},201);const prefix='/api/projects/'+p.id,act=(action,extra={},status=200)=>call(prefix+'/action',{action,...extra},status);
   const wait=async()=>{for(let i=0;i<500;i++){p=await call(prefix);if(p.task?.status!=='running')return;await new Promise(r=>setTimeout(r,20));}throw Error('任务超时');};
   p=await call(prefix+'/materials',{name:'材料.txt',base64:Buffer.from('依据材料保留研究条件与结论。').toString('base64')});doc=p.materials[0].id;
-  p=await call(prefix+'/materials',{name:'事实图.png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII='});photo=p.materials.at(-1).id;
+  photo=[];for(let i=0;i<6;i++){
+    const png=new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="80" height="50"><rect width="80" height="50" fill="rgb(${50+i*25},80,150)"/></svg>`).render().asPng();
+    p=await call(prefix+'/materials',{name:'事实图'+i+'.png',base64:png.toString('base64')});photo.push(p.materials.at(-1).id);
+  }
   const cfg={baseURL:`http://127.0.0.1:${mock.address().port}/v1`,key:'synthetic',model:'mock'};
   await act('configure',{text:cfg});await act('requirements',{brief:p.brief});await act('analyzeMaterials');await wait();assert.equal(p.task.status,'done',p.task.message);await act('approveAnalysis');
-  await act('content');await wait();assert.equal(p.task.status,'done',p.task.message);assert.equal(generationCalls,1);assert.equal(p.slides.length,4);assert.equal(p.slides[3].elements.length,19);assert.equal(p.contentChecks[3].nativeEstimate,'needs-layout');
+  await act('content');await wait();assert.equal(p.task.status,'done',p.task.message);assert.equal(generationCalls,1);assert.equal(p.slides.length,4);assert.equal(p.slides[3].elements.length,25);assert.equal(p.contentChecks[3].nativeEstimate,'needs-layout');
   assert.match(generationPrompt,/必须实际插入 elements 的 image 节点/);assert.match(generationPrompt,/不因旧格式 imageId 只能存一张而漏图/);
   assert.match(generationPrompt,/关键结论必须用一句完整的话/);assert.match(generationPrompt,/正文项建议15–45字/);assert.match(generationPrompt,/先逐组查找可用配图/);
-  assert.ok(generationPrompt.includes('"可用配图":[{"materialId":"'+photo+'"'));assert.equal((generationPrompt.match(/逐页主动匹配候选图片与内容/g)||[]).length,1);
+  assert.ok(generationPrompt.includes('"可用配图":[{"materialId":"'+photo[0]+'"'));assert.equal((generationPrompt.match(/逐页主动匹配候选图片与内容/g)||[]).length,1);
   assert.ok(p.task.progress.some(e=>e.message.includes('内容结构与来源检查已完成')));assert.match(designPrompt,/不代表实际 PPT 放不下/);assert.equal(Object.values(p.pageDesigns).filter(d=>d.current).length,4);
   const before=structuredClone(p.slides);p=await act('saveContent',{slides:p.slides,confirm:true});assert.deepEqual(p.slides,before);assert.equal(p.approvals.content,p.version);
   p=await act('approvePageDesign',{index:3});assert.equal(p.pageDesigns[3].approvedCurrent,true);

@@ -80,7 +80,7 @@ test('原文编号按材料独立解析，不接受不存在、越界或未经�
   assert.throws(()=>validate(p,[slide({excerptId:'E9999'})]),/编号不存在/);
   assert.deepEqual(sourceEvidenceCatalog({kind:'image',text:original}),[]);
   assert.equal(sourceEvidenceCatalog({kind:'image',text:original,ocrTextApprovedAt:'confirmed'})[0].text,original);
-  const long={kind:'document',text:'甲'.repeat(20500)};assert.equal(sourceEvidenceCatalog(long).at(-1).end,20000);
+  const long={kind:'document',text:'甲'.repeat(120500)};assert.equal(sourceEvidenceCatalog(long).at(-1).end,120000);
   assert.equal(evidenceCatalog(original)[0].text,original);
 });
 

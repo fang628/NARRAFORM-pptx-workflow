@@ -66,9 +66,10 @@ test('上传区只保留一个添加材料入口，同时说明可拖入文件�
 test('旧格式与结构化页面的进度条均位于页顶，关闭时移除',()=>{
   const base=validateSlides([{kind:'content',title:'进度测试',body:['正文'],sources:[]}])[0];
   for(const s of [base,{...base,elements:[{id:'title',type:'text',role:'title',text:base.title,parentId:null},{id:'body',type:'text',role:'body',text:'正文',parentId:null}]}]){
-    const t=themes[0],has=scene(s,t,1,4,{progress:true}).filter(e=>e.type==='rect'&&e.h===4);
-    assert.equal(has.length,1);assert.equal(has[0].y,16);assert.equal(has[0].w,710);
-    assert.equal(scene(s,t,1,4,{progress:false}).filter(e=>e.type==='rect'&&e.h===4).length,0);assert.equal(scene({...s,kind:'cover'},t,0,4,{progress:true}).filter(e=>e.type==='rect'&&e.h===4).length,0);assert.equal(scene(s,t,1,4,{progress:true,toc:true}).filter(e=>e.type==='rect'&&e.h===4).length,0);
+    const t=themes[0],has=scene(s,t,1,4,{progress:true}).filter(e=>e.managed==='progress');
+    assert.equal(has.filter(e=>e.key==='nf-progress-indicator').length,1);assert.ok(has.every(e=>e.y>=0&&e.y+e.h<150));
+    assert.equal(has.filter(e=>e.role==='navigation').length,5);assert.equal(has[0].shape,'hexagon');
+    assert.equal(scene(s,t,1,4,{progress:false}).filter(e=>e.managed==='progress').length,0);assert.equal(scene({...s,kind:'cover'},t,0,4,{progress:true}).filter(e=>e.managed==='progress').length,0);assert.equal(scene(s,t,1,4,{progress:true,toc:true}).filter(e=>e.managed==='progress').length,0);
   }
 });
 

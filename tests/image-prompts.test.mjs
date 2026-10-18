@@ -9,7 +9,7 @@ import {imageStyle} from '../lib/image-prompts.mjs';
 import {nestedContentList,deduplicateSlidePrompt} from '../lib/prompt-structure.mjs';
 import {initialElements,orderedElements} from '../lib/elements.mjs';
 import {registerStyleDirections} from '../lib/style-registry.mjs';
-import {roughLayoutImageGuidance} from '../lib/layout-guidance.mjs';
+import {roughLayoutImageGuidance,arrowInstructionsOnly} from '../lib/layout-guidance.mjs';
 
 function fixture(){
   const elements=[
@@ -46,27 +46,98 @@ test('整页提示词七项自足，原文与多层图片归属保留，工程�
   assert.doesNotMatch(prompt,/\*\*原图保真要求\*\*|实际排版要有创意，保留合理的组合与局部构图发挥空间。/);
   assert.doesNotMatch(prompt,/设计规范版本|restrained_decoration|floor\(N\/2\)|S01-|GEN-001|不应使用的重复长风格/);
   const layoutSection=prompt.split('- **排版要求**')[1].split('- **图片占位框比例**')[0];
-  assert.match(layoutSection,/创意方向：左右对照，证据紧邻所属观点/);assert.doesNotMatch(layoutSection,/只给粗略创意方向|具体形状、装饰与局部组合交给生图AI/);assert.ok(layoutSection.length<350);
+  assert.match(layoutSection,/左右对照，证据紧邻所属观点/);assert.doesNotMatch(layoutSection,/创意方向：|创意设计：/);assert.match(styleSection,/创意设计：.*特殊分块/);assert.doesNotMatch(layoutSection,/只给粗略创意方向|具体形状、装饰与局部组合交给生图AI/);assert.ok(layoutSection.length<350);
   assert.doesNotMatch(styleSection,/扇形、同心、波浪/,'分块要求不重复堆进风格项');
   assert.ok(prompt.length<1700,'短文案页面无需附加整段工作流');
 });
 
-test('创意形态按本页语义择一，真实逻辑用箭头；旧完整稿补全不重复',()=>{
+test('创意方向仍按语义选择，视觉关系只输出具体箭头；旧模板清理后不重复',()=>{
   const {p,d,images}=fixture();
   p.themeAssets={stamp:themeAssetsStamp(p),directions:[{...d,assets:{'content-background':{normalized:'bg.png',previewHash:'hash'}}}]};
-  for(const [logic,form] of [['样本处理流程，第一步进入第二步','箭形组合'],['三个等级分级，底层支撑上层','金字塔式'],['三个时期的发展历程','波浪走向']]){
-    Object.assign(p.pageDesigns[1].plan,{logic,layoutIntent:'按当前内容建立重点'});
-    const prompt=slideImagePrompt(p,1,d,images),layout=prompt.split('- **排版要求**：')[1].split(/\n- \*\*/)[0],relation=prompt.split('- **视觉关系要求**：')[1];
-    assert.match(layout,new RegExp(form));assert.match(relation,/直箭头、弯箭头或箭形/);assert.match(relation,/方向与起止/);
+  for(const [meaning,form,arrow] of [['样本处理流程，第一步进入第二步','箭形组合','箭形'],['三个等级分级，底层支撑上层','金字塔式','直箭头'],['三个时期的发展历程','波浪走向','弯箭头']]){
+    const arrangement='“LPS 刺激”与“TNF-α 检测结果”之间加'+arrow+'，表示处理后的检测流程。';
+    Object.assign(p.pageDesigns[1].plan,{logic:meaning+'。'+arrangement,layoutIntent:'按当前内容建立重点'});
+    const prompt=slideImagePrompt(p,1,d,images),style=prompt.split('- **风格要求**：')[1].split(/\n- \*\*/)[0],relation=prompt.split('- **视觉关系要求**：')[1];
+    assert.match(style,new RegExp(form));assert.match(style,/创意设计：/);assert.equal(relation,arrangement);
+    assert.doesNotMatch(relation,/逻辑联系|若有|图文对应|S01-|实际逻辑联系用/);
     assert.equal(effectiveSlideImagePrompt(p,1,d,images,'full',prompt),prompt);
-    const old=prompt.replace(/创意方向：[^\n]+/,'').replace(/；图文对应所属分组；[^\n]+/,'；图文对应所属分组，不新增因果箭头。');
+    const old=prompt.replace(/创意设计：[^。\n]+。/,'').replace(/- \*\*视觉关系要求\*\*：[^\n]+/,'- **视觉关系要求**：两组比较；图文对应所属分组；实际逻辑联系用直箭头、弯箭头或箭形连接，方向与起止对应内容；并列项不画成因果。');
     const repaired=effectiveSlideImagePrompt(p,1,d,images,'full',old);
-    assert.match(repaired,/创意方向：/);assert.match(repaired.split('- **视觉关系要求**：')[1],/直箭头、弯箭头或箭形/);
-    assert.equal(effectiveSlideImagePrompt(p,1,d,images,'full',repaired),repaired);
+    assert.match(repaired.split('- **风格要求**：')[1].split(/\n- \*\*/)[0],/创意设计：/);assert.match(repaired.split('- **视觉关系要求**：')[1],new RegExp('之间加'+arrow));
+    assert.doesNotMatch(repaired,/实际逻辑联系|方向与起止对应内容/);assert.equal(effectiveSlideImagePrompt(p,1,d,images,'full',repaired),repaired);
   }
   Object.assign(p.pageDesigns[1].plan,{logic:'两组并列，不宣称因果',layoutIntent:'左右对照'});
-  const parallel=slideImagePrompt(p,1,d,images).split('- **视觉关系要求**：')[1];
-  assert.match(parallel,/若有实际逻辑联系/);assert.match(parallel,/纯并列不强加方向/);
+  assert.equal(slideImagePrompt(p,1,d,images).split('- **视觉关系要求**：')[1],'不加箭头。');
+});
+
+test('自然语言箭头说明保留实际联系，普通并列和顺序不会自动制造箭头',()=>{
+  const {p,d,images}=fixture();
+  for(const logic of ['两种模型并列，不宣称因果','按页面顺序阅读，第一阶段与第二阶段采用两种独立流程','结论有两种数据支撑']){
+    p.pageDesigns[1].plan.logic=logic;
+    assert.equal(slideImagePrompt(p,1,d,images).split('- **视觉关系要求**：')[1],'不加箭头。');
+  }
+  const specific='“刺激条件”与“检测结果”之间用弯箭头，表示刺激后的测量流程。';
+  p.pageDesigns[1].plan.logic='本页展示处理与检测。'+specific;
+  const base=slideImagePrompt(p,1,d,images);assert.equal(base.split('- **视觉关系要求**：')[1],specific);
+  const edited=base.replace(specific,'“刺激条件”与“检测结果”之间用直箭头，表示处理后的检测流程。');
+  const next=effectiveSlideImagePrompt(p,1,d,images,'full',edited);
+  assert.match(next,/之间用直箭头，表示处理后的检测流程/);assert.doesNotMatch(next.split('- **视觉关系要求**：')[1],/弯箭头|本页展示|实际逻辑联系/);
+  assert.equal(effectiveSlideImagePrompt(p,1,d,images,'full',next),next);
+});
+
+test('旧排版创意迁入风格，缺失时按特殊分块补齐，人工创意保留且重复提交不膨胀',()=>{
+  const {p,d,images}=fixture();p.themeAssets={stamp:themeAssetsStamp(p),directions:[{...d,assets:{'content-background':{normalized:'bg.png',previewHash:'hash'}}}]};
+  const base=slideImagePrompt(p,1,d,images);
+  const missing=base.replace(/创意设计：[^。\n]+。/,'');
+  const legacy=missing.replace('- **排版要求**：','- **排版要求**：创意方向：以蜂窝组合分区呈现并列图文。');
+  for(const source of [missing,legacy]){
+    const result=effectiveSlideImagePrompt(p,1,d,images,'full',source);
+    const style=result.split('- **风格要求**：')[1].split(/\n- \*\*/)[0],layout=result.split('- **排版要求**：')[1].split(/\n- \*\*/)[0];
+    assert.match(style,/创意设计：/);assert.equal((result.match(/创意设计：/g)||[]).length,1);assert.doesNotMatch(layout,/创意设计：|创意方向：/);
+    assert.match(style,source===legacy?/蜂窝组合分区/:/特殊分块/);
+    assert.equal(effectiveSlideImagePrompt(p,1,d,images,'full',result),result);
+  }
+  const custom=base.replace(/创意设计：[^。\n]+。/,'创意设计：采用阶梯形特殊分块，图文穿插突出实验阶段。');
+  const revised=effectiveSlideImagePrompt(p,1,d,images,'full',custom);
+  assert.match(revised,/采用阶梯形特殊分块，图文穿插突出实验阶段/);assert.equal(revised,custom);
+});
+
+test('风格中的创意沿用已确认特殊分块，不把并列改成流程，不采用已否定的形态',()=>{
+  const {p,d,images}=fixture();
+  Object.assign(p.pageDesigns[1].plan,{logic:'两组并列，不宣称因果',layoutIntent:'采用蜂窝组合分区组织两组指标'});
+  let prompt=slideImagePrompt(p,1,d,images),style=prompt.split('- **风格要求**：')[1].split(/\n- \*\*/)[0];
+  assert.match(style,/创意设计：沿用已确认的蜂窝分区/);assert.doesNotMatch(style,/箭形|金字塔/);assert.equal(prompt.split('- **视觉关系要求**：')[1],'不加箭头。');
+  p.pageDesigns[1].plan.layoutIntent='避免使用蜂窝，左右对照';prompt=slideImagePrompt(p,1,d,images);style=prompt.split('- **风格要求**：')[1].split(/\n- \*\*/)[0];
+  assert.doesNotMatch(style,/蜂窝/);assert.match(style,/特殊分块|异形承载/);
+});
+
+test('斜切和弧线加入自动创意候选，遵循已确认选择与明确排除',()=>{
+  const {p,d,images}=fixture(),style=()=>slideImagePrompt(p,1,d,images).split('- **风格要求**：')[1].split(/\n- \*\*/)[0];
+  Object.assign(p.pageDesigns[1].plan,{logic:'两组并列对照',layoutIntent:'左右对照'});assert.match(style(),/以斜切分区组织对照/);
+  Object.assign(p.pageDesigns[1].plan,{logic:'中心结论与多项支撑',layoutIntent:'中心与支撑'});assert.match(style(),/以弧线围合组织中心与支撑/);
+  for(const form of ['斜切','弧线','弧形']){p.pageDesigns[1].plan.layoutIntent='采用'+form+'分区组织图文';assert.match(style(),new RegExp('沿用已确认的'+form+'分区'));}
+  Object.assign(p.pageDesigns[1].plan,{logic:'两组对照',layoutIntent:'不要斜切，采用交错分区'});assert.doesNotMatch(style(),/斜切/);
+  Object.assign(p.pageDesigns[1].plan,{logic:'中心与支撑',layoutIntent:'不用弧线，采用放射分区'});assert.doesNotMatch(style(),/弧线/);
+});
+
+test('适合的创意方向用明确采用指令，常规布局只用于设计稿已说明不适用的页面',()=>{
+  const {p,d,images}=fixture(),style=()=>slideImagePrompt(p,1,d,images).split('- **风格要求**：')[1].split(/\n- \*\*/)[0].split('创意设计：')[1];
+  for(const [logic,intent,form]of [['两组结果对照','左右对照','斜切分区'],['中心结论与多项支撑','中心与支撑','弧线围合'],['三个等级分级','分级信息','金字塔式'],['样本处理流程','按步骤阅读','箭形组合'],['两组指标并列','采用蜂窝分区','蜂窝分区']]){
+    Object.assign(p.pageDesigns[1].plan,{logic,layoutIntent:intent});const instruction=style();
+    assert.match(instruction,new RegExp(form));assert.match(instruction,/采用有表达作用/);assert.doesNotMatch(instruction,/可选|可尝试|可探索|探索有表达作用|或/);
+  }
+  Object.assign(p.pageDesigns[1].plan,{logic:'保留整幅大图的阅读空间',layoutIntent:'大图与原文需完整保留，不适合采用特殊分块，常规分区更利于阅读'});
+  assert.match(style(),/采用已确认的常规分区/);assert.doesNotMatch(style(),/特殊分块|斜切|金字塔/);
+});
+
+test('旧节点关系中的编号转成真实文案，清理箭头要求不截断引号内的句子',()=>{
+  const {p,d,images}=fixture();p.pageDesigns[1].plan.logic='呈现实验顺序';
+  p.pageDesigns[1].plan.nodes.find(n=>n.id==='S01-BODY').relation='S01-BODY 与 S01-IMAGE 之间加直箭头，表示处理后的指标检测。';
+  const prompt=slideImagePrompt(p,1,d,images),relation=prompt.split('- **视觉关系要求**：')[1];
+  assert.equal(relation,'“LPS 刺激 24 h，保留比较口径与限制。” 与 “TNF-α 检测结果” 之间加直箭头，表示处理后的指标检测。');
+  assert.doesNotMatch(relation,/S01-|实验条件/);assert.equal(deduplicateSlidePrompt(prompt),prompt);
+  const quoted='"若有刺激。保留限定条件"与"检测指标"之间加直箭头，表示条件后的检测。';
+  assert.equal(arrowInstructionsOnly(quoted),quoted);
 });
 
 test('内容项完整保留多层归属，排版项只给主要分组与大致区域',()=>{
@@ -80,7 +151,7 @@ test('内容项完整保留多层归属，排版项只给主要分组与大致�
   assert.match(content,/\n  - 标题：两种模型的评价结果\n    - 副标题：PEG-TP5，5 μmol\/L\n    - 小标题：巨噬细胞模型\n      - 正文：LPS/);
   assert.match(content,/\n      - 图片：TNF-α 检测结果\n        - 图注：原始检测与统计结果。/);
   assert.match(content,/\n    - 小标题：T 细胞模型\n      - 正文：比较细胞活性。\n        - 正文：相同处理条件。\n      - 正文：记录对照结果。/);
-  assert.match(content,/同一父项下的同级正文为并列/);assert.doesNotMatch(content,/页顶导航/);
+  assert.match(content,/同级正文分别作为独立分点/);assert.doesNotMatch(content,/页顶导航/);
   const layout=prompt.split('- **排版要求**')[1].split('- **图片占位框比例**')[0];
   assert.match(layout,/“T 细胞模型”：右侧/);assert.doesNotMatch(layout,/正文：“功能指标”|正文：“条件”/);
   assert.doesNotMatch(layout,/条件”；右侧；并列/,'过期设计稿的并列措辞不能覆盖内容树从属');
@@ -172,12 +243,14 @@ test('创意原则只用于编写，最终稿保留本页设计意图；旧稿�
     p.themeAssets={stamp:themeAssetsStamp(p),directions:[{...direction,assets:Object.fromEntries(['hero-image','toc-image','content-background'].map(use=>[use,{normalized:'bg.png',previewHash:'hash'}]))}]};
     const prompt=slideImagePrompt(p,1,direction,images,mode),layout=prompt.split('- **排版要求**：')[1].split(/\n- \*\*/)[0];
     assert.doesNotMatch(layout,/只给粗略创意方向|实际排版要有创意|具体形状、装饰与局部组合交给生图AI|异形文本框或色块|扇形、同心、波浪|文本框.{0,4}(?:宽度|高度|坐标)/);
-    if(!direction.presetDesign)assert.match(layout,/创意方向：左右对照，证据紧邻所属观点/);
+    if(!direction.presetDesign)assert.match(layout,/左右对照，证据紧邻所属观点/);
+    assert.doesNotMatch(layout,/创意方向：|创意设计：/);
     assert.ok(!prompt.includes(roughLayoutImageGuidance));assert.ok(prompt.includes(backgroundUse));
     if(direction.presetDesign)assert.match(layout,/在预设设计语言与已确认版式内发挥/);
     const legacy=prompt.replace('- **排版要求**：','- **排版要求**：'+roughLayoutImageGuidance+'实际排版要有创意，保留合理的组合与局部构图发挥空间。'),repaired=effectiveSlideImagePrompt(p,1,direction,images,mode,legacy);
     assert.equal(repaired,prompt);assert.equal(effectiveSlideImagePrompt(p,1,direction,images,mode,repaired),repaired);
-    assert.doesNotMatch(prompt.split('- **风格要求**：')[1].split(/\n- \*\*/)[0],/创意设计：/,'创意说明集中在排版项');
+    const style=prompt.split('- **风格要求**：')[1].split(/\n- \*\*/)[0];assert.match(style,/创意设计：/,'风格项必须包含创意要求');
+    if(direction.presetDesign)assert.match(style,/沿用预设的分块、框形与装饰/);else assert.match(style,/特殊分块、异形承载与图文组合/);
   }
 });
 

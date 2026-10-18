@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {partitionVisualIssues,previewReviewConclusion} from '../lib/lightweight-review.mjs';
-import {applicableDesignChecks} from '../lib/design-rules.mjs';
+import {partitionVisualIssues,previewReviewConclusion,lightweightReviewRule} from '../lib/lightweight-review.mjs';
+import {applicableDesignChecks,designRulesFor} from '../lib/design-rules.mjs';
 
 test('轻微审美意见只记录，严重遮挡与多余占位框仍须处理',()=>{
   const result=partitionVisualIssues(['轻微色调偏差','渐变不够克制','装饰遮挡了正文','存在多余图片占位框']);
@@ -19,4 +19,10 @@ test('装饰和学术填充不单独否决预览，实际原图损坏仍不通�
   assert.deepEqual(result.issues,[]);assert.ok(result.warnings.length);
   checks.image_integrity=false;checks.reason='原图被裁切，重要图例缺失';
   assert.ok(previewReviewConclusion(review,checks,keys).issues.length);
+});
+
+test('05复查采用已确认铺满参数，不再把5%等比旧闸门注入模型',()=>{
+  const p={brief:{progress:false},slides:[{kind:'content',title:'铺满预览',body:[],sources:[]}],materials:[]};
+  const prompt=designRulesFor(p,0,'review');
+  assert(prompt.includes(lightweightReviewRule));assert.match(prompt,/不限制显示比例或拉伸幅度/);assert.match(prompt,/不得重新以原始宽高比容差否决/);assert.doesNotMatch(prompt,/5%容差不放宽|原图等比贴回。/);
 });

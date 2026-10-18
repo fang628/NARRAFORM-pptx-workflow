@@ -73,7 +73,12 @@ def main():
     with Image.open(source) as raw:
         raw.load()
         image = raw.convert('RGBA')
-    if op == 'alpha':
+    if op == 'cutout':
+        from cutout_alpha import prepare_cutout
+        image, report = prepare_cutout(image)
+        image.save(target)
+        print(json.dumps(report))
+    elif op == 'alpha':
         extrema=image.getchannel('A').getextrema()
         print(json.dumps({'width':image.width,'height':image.height,'hasTransparency':extrema[0]<255,'hasVisiblePixels':extrema[1]>0}))
     elif op == 'inspect':
@@ -94,7 +99,9 @@ def main():
             ImageDraw.Draw(mask).polygon([(round(a*image.width),round(b*image.height)) for a,b in spec['mask']], fill=255)
             image.putalpha(mask)
         image.save(target)
-        print(json.dumps({'width':image.width,'height':image.height,'masked':bool(spec.get('mask'))}))
+        import hashlib
+        pixel_hash=hashlib.sha256(f'{image.width}x{image.height}:RGBA:'.encode()+image.tobytes()).hexdigest()
+        print(json.dumps({'width':image.width,'height':image.height,'masked':bool(spec.get('mask')),'pixelHash':pixel_hash}))
 
 if __name__ == '__main__':
     main()

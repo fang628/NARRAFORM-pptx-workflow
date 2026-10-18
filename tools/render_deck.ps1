@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$DeckPath,[Parameter(Mandatory=$true)][string]$OutputDir)
+param([Parameter(Mandatory=$true)][string]$DeckPath,[Parameter(Mandatory=$true)][string]$OutputDir,[string]$MotionSpec='')
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 function File-SHA256([string]$FilePath) {
@@ -10,6 +10,8 @@ $renderDir = [IO.Path]::GetFullPath($OutputDir)
 [IO.Directory]::CreateDirectory($renderDir) | Out-Null
 $app = $null
 $deck = $null
+$officeLock = $null
+. (Join-Path $PSScriptRoot 'office_lock.ps1')
 function Invoke-OfficeCall([scriptblock]$Operation) {
     for ($attempt = 0; $attempt -lt 6; $attempt++) {
         try { return (& $Operation) } catch {
@@ -19,8 +21,18 @@ function Invoke-OfficeCall([scriptblock]$Operation) {
     }
 }
 try {
+    $officeLock = Enter-NarraformOfficeRender
     $app = New-Object -ComObject PowerPoint.Application
-    $deck = Invoke-OfficeCall { $app.Presentations.Open($deckFile, -1, 0, 0) }
+    $readOnly = -1
+    if ($MotionSpec) { $readOnly = 0 }
+    $deck = Invoke-OfficeCall { $app.Presentations.Open($deckFile, $readOnly, 0, 0) }
+    . (Join-Path $PSScriptRoot 'slide_motion.ps1')
+    if ($MotionSpec) {
+        $motion = Get-Content -LiteralPath $MotionSpec -Raw -Encoding UTF8 | ConvertFrom-Json
+        $motionReport = Set-NarraformMotion $deck $motion
+        $deck.Save()
+        [IO.File]::WriteAllText((Join-Path $renderDir 'animation-manifest.json'), ($motionReport | ConvertTo-Json -Depth 12), [Text.UTF8Encoding]::new($false))
+    }
     if ([Math]::Abs($deck.PageSetup.SlideWidth / $deck.PageSetup.SlideHeight - 16.0 / 9.0) -gt 0.00001) { throw 'PPTX must be 16:9' }
     $pages = @()
     for ($index = 1; $index -le $deck.Slides.Count; $index++) {
@@ -33,7 +45,7 @@ try {
                 if ($shape.HasTextFrame -ne 0 -and $shape.TextFrame2.HasText -ne 0) {
                     $range = $shape.TextFrame2.TextRange
                     $texts += @{
-                        key = [string]$shape.Name
+                        key = Get-NarraformShapeKey $shape
                         x = [double]$shape.Left * $scale
                         y = [double]$shape.Top * $scale
                         w = [double]$shape.Width * $scale
@@ -58,6 +70,10 @@ try {
     [IO.File]::WriteAllText((Join-Path $renderDir 'render-manifest.json'),$json,[Text.UTF8Encoding]::new($false))
     Write-Output $json
 } finally {
-    if ($null -ne $deck) { $deck.Close(); [void][Runtime.InteropServices.Marshal]::ReleaseComObject($deck) }
-    if ($null -ne $app) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($app) }
+    try {
+        if ($null -ne $deck) { $deck.Close(); [void][Runtime.InteropServices.Marshal]::ReleaseComObject($deck) }
+    } finally {
+        try { if ($null -ne $app) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($app) } }
+        finally { Exit-NarraformOfficeRender $officeLock }
+    }
 }

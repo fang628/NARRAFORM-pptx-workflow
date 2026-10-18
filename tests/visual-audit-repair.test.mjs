@@ -3,12 +3,28 @@ import assert from 'node:assert/strict';
 import {visualTextStyle} from '../lib/visual-text-style.mjs';
 import {restoreAuditTexts,auditedElements,auditRepairLimit} from '../lib/visual-audit-repair.mjs';
 import {canonicalTexts,validateAudit} from '../lib/visual-model.mjs';
+import {prepareRebuildPresentation} from '../lib/rebuild-progress.mjs';
 
 const slide={title:'准确标题',body:['第一行\n第二行','重复文字','重复文字'],sources:[]};
 const make=()=>canonicalTexts(slide).map((n,i)=>({...n,key:'text-'+i,type:'text',x:50,y:100+i*100,w:800,h:80,size:30,color:'#272727',bold:i===0}));
 
+test('05只请求内容审计，漏返导航无需重试，多返旧导航也不会触发素材重建',async()=>{
+  const project={brief:{progress:true},slides:[slide],progressSections:['准确标题','方法','结果','结论'].map((title,i)=>({id:String(i),title})),concepts:[]};prepareRebuildPresentation(project);
+  let calls=0;
+  const result=await auditedElements({slide,project,index:0,images:[],request:async()=>{calls++;return {text:JSON.stringify({elements:[...make(),{key:'old-nav-svg',type:'svg',x:10,y:5,w:500,h:50,svg:'not a valid svg'},{key:'old-nav-text',type:'text',nodeId:'navigation-0',text:'改写的导航',x:10,y:5,w:100,h:40}]})};}});
+  assert.equal(calls,1);assert.equal(result.audit.filter(e=>e.nodeId?.startsWith('navigation-')).length,4);assert(!result.audit.some(e=>e.key?.startsWith('old-nav')));assert.equal(result.audit.find(e=>e.nodeId==='title').text,slide.title);
+});
+
+test('05纠错与截断恢复不要求模型拆解导航，正确正文仍保留',async()=>{
+  const project={brief:{progress:true},slides:[slide],concepts:[]};prepareRebuildPresentation(project);const prompts=[];
+  const result=await auditedElements({slide,project,index:0,images:[],request:async prompt=>{prompts.push(prompt);return {text:JSON.stringify({elements:prompts.length===1?make().slice(1):make()})};}});
+  assert.equal(result.auditValidation.attempts,1);assert.match(prompts[1],/页顶进度条不在拆解范围/);assert.doesNotMatch(prompts[1],/"nodeId":"navigation-|nf-progress-/);
+  const truncated='{"elements":['+JSON.stringify({key:'old-nav',type:'svg',x:10,y:10,w:500,h:40,svg:'<svg/>'})+','+JSON.stringify(make()[0])+',{"key":';
+  await assert.rejects(auditedElements({slide,project,index:0,images:[],request:async()=>({text:truncated})}),error=>{assert.deepEqual(error.partialAudit.map(e=>e.key),['text-0']);return true;});
+});
+
 test('原生文字兼容数字字符串、单位、字重及缺省样式，非法值明确定位',()=>{
-  for(const [input,size,bold] of [[{size:'28',bold:'false'},28,false],[{size:'24px',bold:'true'},24,true],[{size:'24pt',fontWeight:700},40,true],[{fontSize:30,fontWeight:'regular'},30,false],[{size:26,bold:1},26,true],[{},44,true],[{size:8,bold:400},12,false],[{size:140,bold:'600'},110,true]])assert.deepEqual(visualTextStyle({key:'a',...input},'title'),{size,bold});
+  for(const [input,size,bold] of [[{size:'28',bold:'false'},28,false],[{size:'24px',bold:'true'},24,true],[{size:'24pt',fontWeight:700},40,true],[{fontSize:30,fontWeight:'regular'},30,false],[{size:26,bold:1},26,true],[{},44,true],[{size:8,bold:400},20,false],[{size:140,bold:'600'},110,true]])assert.deepEqual(visualTextStyle({key:'a',...input},'title'),{size,bold});
   for(const input of [{size:'large'},{size:NaN},{size:Infinity},{size:0},{size:true},{size:{}},{bold:'maybe'},{bold:99}])assert.throws(()=>visualTextStyle({key:'bad-node',...input},'body'),e=>e.code==='INVALID_VISUAL_TEXT_STYLE'&&e.message.includes('bad-node'));
   const raw=make();raw[0].size='40';raw[0].bold='bold';assert.equal(validateAudit(raw,slide,[])[0].bold,true);
 });

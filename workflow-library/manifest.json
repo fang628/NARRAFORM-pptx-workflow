@@ -1,12 +1,12 @@
 {
   "source": "pptx-workflow",
-  "version": "97046e0a1f2404b2",
+  "version": "33fe7babef1f8876",
   "copiedAt": "2026-10-10T14:38:43.158Z",
   "files": [
     {
       "file": "README.md",
-      "sha256": "f46e7cd7af8a2d687d1aad449b616a57d14bcbc36258ebc3d08bb2d87393207d",
-      "bytes": 1552
+      "sha256": "ff2da6714b0ca92f0177ed5900bb0a46219c3998ba754a9d3497c2414fce49bf",
+      "bytes": 1573
     },
     {
       "file": "shared/artifact-contract.md",
@@ -19,34 +19,14 @@
       "bytes": 6310
     },
     {
-      "file": "shared/context-loading.md",
-      "sha256": "9172ec95408de96f218561e7d46432b744b71ca3ba3d2a8db6431f09f4e3dedb",
-      "bytes": 2587
-    },
-    {
       "file": "shared/design-principles.md",
-      "sha256": "f4f017c147c55f16261908b3b437546daf3c0da4c5987f5f31d9fc6f35f50b09",
-      "bytes": 6539
-    },
-    {
-      "file": "shared/image-generation.md",
-      "sha256": "f62a7a51f30c0b1bc8b841e399a269adf4f0f92edb123ed0b2d4094124607396",
-      "bytes": 5366
+      "sha256": "16d8c513a4e55c2fe84ce818809bdbd2e25e9bb95b1d6bbc870fee4e07db1ee8",
+      "bytes": 7851
     },
     {
       "file": "shared/incremental-rework.md",
       "sha256": "f4f848e94b3eb0fd3a3e4840f21f8a44f983430759778259d73497031593eec0",
       "bytes": 1252
-    },
-    {
-      "file": "shared/operations.md",
-      "sha256": "2e1b1031a57f9cf76a08b435b673fa111cc8d81b6787faba0235276a61cf93d8",
-      "bytes": 44040
-    },
-    {
-      "file": "shared/orchestration-rules.md",
-      "sha256": "d6438a6a6c7d1099eb6f5ecebd05c5ae1956056e4bb477210f51b0a71ba7aadf",
-      "bytes": 9957
     },
     {
       "file": "shared/preview-contract.md",
@@ -100,8 +80,8 @@
     },
     {
       "file": "shared/references/splits/index.json",
-      "sha256": "b25a99d03c64c5bebb03bbbdc519649fbd78aa0fb975dde0ded46c9f13eefbad",
-      "bytes": 7148
+      "sha256": "55073a268d78c5235972d8ab89efe8cdd6cb80eb512594a80e3e56fe087b02ca",
+      "bytes": 7076
     },
     {
       "file": "shared/references/splits/left-disc-right-band.png",
@@ -149,174 +129,14 @@
       "bytes": 6691
     },
     {
-      "file": "shared/schemas/ai-image-config.schema.json",
-      "sha256": "6d5fdc387f8cabbb67d8c149f5175a2842cdb7fce9d294d935ad0342b5b7c6e9",
-      "bytes": 2660
-    },
-    {
-      "file": "shared/schemas/approval.schema.json",
-      "sha256": "aa6eabcbf3fcea56e884eafd3d17e1059909d45e59e7246b3e460a5391f5fccf",
-      "bytes": 2158
-    },
-    {
-      "file": "shared/schemas/claim-map.schema.json",
-      "sha256": "5c27ad0cf29705dd91260e575609f7854c9ce9afb2043f0054922275f5cb0b9f",
-      "bytes": 1459
-    },
-    {
-      "file": "shared/schemas/content.schema.json",
-      "sha256": "0f1f98be3012459c30e816dbe094ff95fb357b8a9ab0f0efc8aa0ddc23192a25",
-      "bytes": 6244
-    },
-    {
-      "file": "shared/schemas/deck.schema.json",
-      "sha256": "c58bea0734a604c52b5c32abbb3bb7f639bdc4a9e63f640bd2a560fb4c77d85e",
-      "bytes": 15547
-    },
-    {
-      "file": "shared/schemas/generated-assets.schema.json",
-      "sha256": "af7b492580a8711c6b40c86b5ac13920b0b5a7126e00f43440bbbb58803bb26a",
-      "bytes": 2422
-    },
-    {
-      "file": "shared/schemas/generation-job.schema.json",
-      "sha256": "b76586b2ed5ca3e5939fb70929090dcc3d02b9b855c8b30b5e099a3ef53af645",
-      "bytes": 4412
-    },
-    {
-      "file": "shared/schemas/generation-ledger.schema.json",
-      "sha256": "16ec108963ca14d269dc03eda8863f142059ee31b0cab32a140ff184910da617",
-      "bytes": 5785
-    },
-    {
-      "file": "shared/schemas/image-intent-plan.schema.json",
-      "sha256": "fae7d684a191f1617027fffb022d628dcf2072d2687ad152b4f2a1448ad766aa",
-      "bytes": 2984
-    },
-    {
-      "file": "shared/schemas/image-plan.schema.json",
-      "sha256": "216dc725a3e6a59e84dfe1fe8cfcdd039e582e994d35441490754ec6033be4b4",
-      "bytes": 7119
-    },
-    {
-      "file": "shared/schemas/materials.schema.json",
-      "sha256": "fb20615f4175028ade3435a5c4bdd9b983f6a967756239bed1e36768747a3872",
-      "bytes": 668
-    },
-    {
-      "file": "shared/schemas/preview-pages.schema.json",
-      "sha256": "134d87f774190e4ced97dbfbb6ee6f9099d2f6b6c38b788211d708b3473eca01",
-      "bytes": 14989
-    },
-    {
-      "file": "shared/schemas/qa-review.schema.json",
-      "sha256": "3cb9ade825e7923fe17a9e88d5e78cfe7fe7538d0f7cf6c72b9194da74176d55",
-      "bytes": 4887
-    },
-    {
-      "file": "shared/schemas/render.schema.json",
-      "sha256": "7186dc090104353d698cef17976934642fa499f7ebe4f3d682c8cf6522280d6b",
-      "bytes": 1240
-    },
-    {
-      "file": "shared/schemas/review-manifest.schema.json",
-      "sha256": "0c670ba3a860b68b324a3fbf5ce920092799e40c059b1fd59787dd4afac2a663",
-      "bytes": 2084
-    },
-    {
-      "file": "shared/schemas/speaker-notes.schema.json",
-      "sha256": "e75fefe57bd640945bab26fdec185814adda791a797e94a32ee781aff3a7932e",
-      "bytes": 1333
-    },
-    {
-      "file": "shared/schemas/split-references.schema.json",
-      "sha256": "2d448fcd1b9cbf69a42e46facff082c13f5092dbaf925e705d6b92dd1b52ba96",
-      "bytes": 1248
-    },
-    {
-      "file": "shared/schemas/state.schema.json",
-      "sha256": "8d2f1b94e4c3ca77fca592071b8e82a28f927a3cf82067b57ee18a9eb5737f3e",
-      "bytes": 2150
-    },
-    {
-      "file": "shared/stage-contracts.md",
-      "sha256": "7066fe718b7a483ad9e7c06d935122107852d82503d847f9d7f59d2006e5be20",
-      "bytes": 8400
-    },
-    {
-      "file": "SKILL.md",
-      "sha256": "bf9eb16781d97b37a5777c6090b15a530dbe4a38754b606f40472c3d307a79a6",
-      "bytes": 4639
-    },
-    {
-      "file": "stages/00-init/SKILL.md",
-      "sha256": "22a4479afdcd2c2dc29368869cc0cc66c8792fe02eb14077c35752a8408243c5",
-      "bytes": 2772
-    },
-    {
-      "file": "stages/11-intake/assets/material-inventory.md",
-      "sha256": "1cfacf23016c75fda44210a21277b784c5361b5c5c4cc7d58592320d4072b24f",
-      "bytes": 1034
-    },
-    {
-      "file": "stages/11-intake/assets/project-brief.md",
-      "sha256": "8a31ece3e83c4ef8b3017cbe614787c643acabab296e9251637f4e5ba5cebdb1",
-      "bytes": 4233
-    },
-    {
-      "file": "stages/11-intake/SKILL.md",
-      "sha256": "52808f2b4c476b391c7825af9c64fb6cd49a8e085250594c65c72cee5fde30aa",
-      "bytes": 6458
-    },
-    {
-      "file": "stages/12-content/SKILL.md",
-      "sha256": "4cbe6b01bb496a6d4c5939198549337524d55b8e52fc489c1551186335310856",
-      "bytes": 939
-    },
-    {
-      "file": "stages/12-content/steps/copy.md",
-      "sha256": "3655e870a54f7ea6a1b3d88f8bfd93e10db9bd08ddc11820b34ccf4ea80ec35f",
-      "bytes": 7571
-    },
-    {
-      "file": "stages/12-content/steps/images.md",
-      "sha256": "309193e7f19bcb2f82727dd7906e20b304e493d9b5ce35a0261bb9ebf925c28c",
-      "bytes": 3024
-    },
-    {
-      "file": "stages/12-content/steps/verify.md",
-      "sha256": "738add2fce3423a503420d4dc99d6cb691bf4dff9ff41d3f473f8862a73dcff9",
-      "bytes": 1769
-    },
-    {
-      "file": "stages/13-design/assets/design-spec.md",
-      "sha256": "ad18b39b2bdd6bd8584b4a17e375eb1dea6effcdc82d0d27173e99221fcb6985",
-      "bytes": 29777
-    },
-    {
-      "file": "stages/13-design/assets/layouts.json",
-      "sha256": "07fa5c9a4fb25b1e6cc1487a3d5b8ac4204d3b4d026034d305f5e293de0e2b36",
-      "bytes": 1440
-    },
-    {
-      "file": "stages/13-design/assets/reference-layouts.json",
-      "sha256": "1f0815c4d21ef3308e8dce2a45f816354dc309320993acad276f3724c6a21145",
-      "bytes": 2793
-    },
-    {
       "file": "stages/13-design/references/content-page.md",
       "sha256": "6f46c5937131da3a73744813277466da9563b4d6516bae54b75f4ae5547dce23",
       "bytes": 5724
     },
     {
       "file": "stages/13-design/references/gen-prompt-scope.md",
-      "sha256": "3e230598af0a15491c39dd07a7dfae1a16a7c1152e96c9186f87550eedb497c0",
-      "bytes": 6066
-    },
-    {
-      "file": "stages/13-design/references/layout-guide.md",
-      "sha256": "2cc902ca27f1dee7d7f7b702d0f009fe6c4d249ccda2c68f560b028b51cdd3fb",
-      "bytes": 2660
+      "sha256": "c227633a69ad3a68baddb7649181cd1ef0df7c27d916d11ddbb0222e864f3972",
+      "bytes": 6531
     },
     {
       "file": "stages/13-design/references/layout-intent.md",
@@ -369,145 +189,10 @@
       "bytes": 7472
     },
     {
-      "file": "stages/13-design/SKILL.md",
-      "sha256": "a9071b50dea499a70dfecf052ad3043bebbccc90e4a122b69388b2d55af03e4d",
-      "bytes": 1010
-    },
-    {
-      "file": "stages/13-design/steps/copy-style-1.md",
-      "sha256": "85e553c503278dc5c80ee4e15c161af9209487afdf9ba4871b0c884c705cbc85",
-      "bytes": 13421
-    },
-    {
-      "file": "stages/13-design/steps/copy-style-2.md",
-      "sha256": "eb7efcde1b8c13bb89a3b622a4b78a934b47c2e572ecd99c9745474d61820e14",
-      "bytes": 1692
-    },
-    {
-      "file": "stages/13-design/steps/review.md",
-      "sha256": "cb6f132cc4d883a5ad5f711d18222fce58870f264786ab9f1a97165d0acd3ec2",
-      "bytes": 3216
-    },
-    {
-      "file": "stages/13-design/steps/structure.md",
-      "sha256": "93e455dba19ff720d79407774926150d691222d5e03c3f029eb90f1fce4262e4",
-      "bytes": 7572
-    },
-    {
-      "file": "stages/21-concepts/assets/concept-review.md",
-      "sha256": "c3ab99289836fe14c790dbfb7758ca8dee405614dba321ae653f5f89e247c2b0",
-      "bytes": 3034
-    },
-    {
-      "file": "stages/21-concepts/SKILL.md",
-      "sha256": "d7fee6a251406ba38ef72a158d975d9f352f0c6caa4562ba77ae0cbecc974a13",
-      "bytes": 950
-    },
-    {
-      "file": "stages/21-concepts/steps/approve.md",
-      "sha256": "922c0cac0fe26681b0576ab6a11a07fa6315702bf7dfd1abd50a0cd6a9ca1e45",
-      "bytes": 907
-    },
-    {
-      "file": "stages/21-concepts/steps/plan.md",
-      "sha256": "9b4e743e32bf072a1e0e9f18af94a7d11ad77d8da744d2f0e2ab2155f3153210",
-      "bytes": 4307
-    },
-    {
-      "file": "stages/21-concepts/steps/review.md",
-      "sha256": "1d620fcbeea09a554ce3d9679c7d8c6091064d7c4de3b4ca638f2d9d34299d4a",
-      "bytes": 7134
-    },
-    {
-      "file": "stages/22-full-preview/SKILL.md",
-      "sha256": "db5baa8e526294f8704b4d145d8d338cb948bfe3d1418ce71ce4bfb94934888b",
-      "bytes": 1023
-    },
-    {
-      "file": "stages/22-full-preview/steps/approve.md",
-      "sha256": "4b2218ddc4b9c013590d122e9a0518fd3f5dee8acecc28336900faed4c145fd7",
-      "bytes": 1023
-    },
-    {
-      "file": "stages/22-full-preview/steps/insert.md",
-      "sha256": "99099b87426927c29086056098ba560f1db5429ced89dc2ad65ea7f2504bb38a",
-      "bytes": 2411
-    },
-    {
-      "file": "stages/22-full-preview/steps/plan-generate.md",
-      "sha256": "d291f009e29e9cf1cf3115360d72d848d927fda47675319bc89f28abb78b7964",
-      "bytes": 5352
-    },
-    {
-      "file": "stages/22-full-preview/steps/review.md",
-      "sha256": "336708a79f9f53cc1fceaebb888509f7a2f6e6820c8ce945b55bb4ad38900096",
-      "bytes": 3337
-    },
-    {
-      "file": "stages/31-element-audit/assets/element-inventory.md",
-      "sha256": "89f86a88179c7023c7440214227dec3b7068d31cdf82775b5a9822fd5540e199",
-      "bytes": 2155
-    },
-    {
-      "file": "stages/31-element-audit/assets/slide-elements.md",
-      "sha256": "e1b1db6921e2e0ad922ba3f5298965ecfb2a446530aa3672c13bb5517c244f85",
-      "bytes": 1585
-    },
-    {
-      "file": "stages/31-element-audit/SKILL.md",
-      "sha256": "3efaafcf67afd4e6391ba388217235d68beed5695c51f1e446c56c5476573db3",
-      "bytes": 882
-    },
-    {
-      "file": "stages/31-element-audit/steps/inventory.md",
-      "sha256": "5124b177f0348fb6850cde04493e3156e709145d816635139890ac3d88f66284",
-      "bytes": 10532
-    },
-    {
-      "file": "stages/31-element-audit/steps/verify.md",
-      "sha256": "055a099b3cdd898a232bd4a981f4cc2f4befce51b1f3794bc65b2c43966e954e",
-      "bytes": 1226
-    },
-    {
-      "file": "stages/32-asset-rebuild/SKILL.md",
-      "sha256": "46c2ade144c2203a84394c239eda181f605477e24d15f2ec1f1e49f10b9534c1",
-      "bytes": 870
-    },
-    {
       "file": "stages/32-asset-rebuild/steps/rebuild.md",
-      "sha256": "5c9418ce1d43b9fcb4dd84eae3317992c2688615c3da122a0316f73c56ddf804",
-      "bytes": 8090
-    },
-    {
-      "file": "stages/32-asset-rebuild/steps/verify.md",
-      "sha256": "95b1e11457ed7bd15691c178a7c96d5c1c78cc28bff91f81ea229d414ba963f7",
-      "bytes": 1052
-    },
-    {
-      "file": "stages/33-build/SKILL.md",
-      "sha256": "e815dec1c937ac664aa9e5e8230eca37b453fd8f1e64430270cc24473e7d026f",
-      "bytes": 946
-    },
-    {
-      "file": "stages/33-build/steps/assemble.md",
-      "sha256": "bd5dfafeb080012ee4791566739258bafeb93314e408588098ecbede91cb3900",
-      "bytes": 10585
-    },
-    {
-      "file": "stages/33-build/steps/polish.md",
-      "sha256": "897b638e90c37cbc6ac4cad107dcc5a514bc7a6ac1d796341b3be5ba5290ad6d",
-      "bytes": 4195
-    },
-    {
-      "file": "stages/33-build/steps/release.md",
-      "sha256": "4d5603adab30f06f28ee525628b440dab180ad656bac4e1debe5d4f86e0c62ae",
-      "bytes": 774
-    },
-    {
-      "file": "stages/40-speaker-script/SKILL.md",
-      "sha256": "503f2db0dbe5523e3eeecce086eeac774b76d8c47d8b5d4c7f92a4969b9c0d58",
-      "bytes": 2801
+      "sha256": "df26d5d8acae84da0f1a7a984ba56f6177da7b8f00450f1ebcebc002e9d3b355",
+      "bytes": 2703
     }
   ],
-  "agentPolicyVersion": "agent-visual-v3"
+  "agentPolicyVersion": "agent-visual-v4"
 }

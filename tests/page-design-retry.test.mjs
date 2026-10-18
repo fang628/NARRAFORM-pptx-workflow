@@ -14,6 +14,8 @@ test('初次设计和意见修订均要求页面创意，并在设计意图解�
   const p=project();
   for(const options of [{},{instruction:'突出两组对比',markdown:'已有设计稿'}]){
     const prompt=pageDesignPrompt(p,0,options);assert.match(prompt,/页面排版须有创意/);assert.match(prompt,/说明本页创意与表达作用/);assert.match(prompt,/避免每页机械套用同一平铺模板/);assert.match(prompt,/不改写文案、分组名、素材身份、节点层级或顺序/);
+    assert.match(prompt,/哪些具体内容之间加哪种箭头、表达什么联系/);assert.match(prompt,/并列不连箭头/);assert.doesNotMatch(prompt,/connections:\[|from:"已有起点|to:"已有终点/);
+    assert.match(prompt,/适合时必须采用特殊分块/);assert.match(prompt,/确定适合的方向必须落实到 layoutIntent、节点 position\/carrier 和 style/);assert.match(prompt,/多个方向均适合时选表达作用最强的一种/);
   }
 });
 

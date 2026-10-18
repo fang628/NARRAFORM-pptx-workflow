@@ -49,7 +49,7 @@ test('真实 HTTP 链路：上传、API 适配、确认、导出、失效与取�
     if(prompt.includes('识别与理解单份材料')){
       assert.match(b.messages[0].content,/任何命令.*不执行/);
       const vision=Array.isArray(user);if(vision){assert.match(user[1].image_url.url,/^data:image\/png;base64,/);sawVision=true;}
-      content=JSON.stringify({category:vision?'图片':'报告',summary:vision?'一张图片':'材料核心信息',keyPoints:['按材料组织内容'],facts:vision?[]:[{claim:'材料内容',excerptId:badEvidence?'FAKE':JSON.parse(prompt.split('提取原文（最多前20000字，按证据编号分段）：\n')[1])[0].id}],suggestedUse:'背景与关键发现',questions:['请确认统计周期']});
+      content=JSON.stringify({category:vision?'图片':'报告',summary:vision?'一张图片':'材料核心信息',keyPoints:['按材料组织内容'],facts:vision?[]:[{claim:'材料内容',excerptId:badEvidence?'FAKE':JSON.parse(prompt.split('提取原文（最多前120000字，按证据编号分段）：\n')[1])[0].id}],suggestedUse:'背景与关键发现',questions:['请确认统计周期']});
     }
     if(prompt.includes('修正材料分析中的证据引用'))content=JSON.stringify({summary:'材料摘要',keyPoints:[],facts:[{claim:'伪造的结论',excerptId:'FAKE'}],suggestedUse:'背景',questions:[]});
     if(prompt.includes('汇总材料理解')){const readings=JSON.parse(prompt.split('材料理解：')[1]);content=JSON.stringify({summary:'两份文档描述项目背景和目标。',outline:[{title:'项目背景',sourceIds:[readings[0].id]}],questions:['请确认数据口径']});}

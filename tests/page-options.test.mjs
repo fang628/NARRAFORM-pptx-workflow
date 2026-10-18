@@ -26,12 +26,12 @@ test('无标题页时目录前移，正文导航和渲染不丢失第二页',()=
   const p={brief:{cover:false,toc:true,progress:true},materials:[],slides:[{kind:'toc',title:'目录',body:['核心内容']},{kind:'content',title:'核心内容',body:['具体内容']}]};
   assert.equal(isTOCPage(p.slides[0],0,p.brief),true);assert.equal(isTOCPage(p.slides[1],1,p.brief),false);
   assert.equal(pageNeedsImage(p,0),false);assert.equal(pageNeedsImage(p,1),true);
-  assert.deepEqual(navigationTexts(p,0),[]);assert.deepEqual(navigationTexts(p,1).map(n=>n.text),['核心内容']);
-  assert.ok(scene(p.slides[1],themes[0],1,2,p.brief).some(e=>e.type==='rect'&&e.y===16));
-  assert.ok(!scene(p.slides[0],themes[0],0,2,p.brief).some(e=>e.type==='rect'&&e.y===16));
-  p.brief.toc=false;assert.equal(pageNeedsImage(p,1),true);assert.equal(navigationTexts(p,1).length,1);
+  assert.deepEqual(navigationTexts(p,0),[]);assert.equal(navigationTexts(p,1).length,5);assert.equal(navigationTexts(p,1).filter(n=>n.current).length,1);
+  assert.ok(scene(p.slides[1],themes[0],1,2,p.brief).some(e=>e.managed==='progress'));
+  assert.ok(!scene(p.slides[0],themes[0],0,2,p.brief).some(e=>e.managed==='progress'));
+  p.brief.toc=false;assert.equal(pageNeedsImage(p,1),true);assert.equal(navigationTexts(p,1).length,5);
   const structured=validateSlides([{title:'第二页',body:['正文']}])[0];structured.elements=[{id:'title',type:'text',role:'title',text:'第二页',parentId:null},{id:'body',type:'text',role:'body',text:'正文',parentId:'title'}];structured.kind='content';
-  assert.ok(scene(structured,themes[0],1,2,{cover:false,toc:true,progress:true}).some(e=>e.type==='rect'&&e.y===16));
+  assert.ok(scene(structured,themes[0],1,2,{cover:false,toc:true,progress:true}).some(e=>e.managed==='progress'));
 });
 
 test('标题页选项在真实服务中保存，约束内容与底图，旧项目默认不重置',async t=>{

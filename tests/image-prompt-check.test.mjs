@@ -5,6 +5,18 @@ import {imagePromptCheck,preservePromptText,preservePlaceholderRatios,validImage
 import {generatedImage} from '../lib/provider.mjs';
 import {roughLayoutImageGuidance} from '../lib/layout-guidance.mjs';
 
+test('发送前保留整页风格项的创意要求，底图不注入信息层特殊分块',async t=>{
+  const previous=process.env.PPT_AGENT_TEST;process.env.PPT_AGENT_TEST='1';t.after(()=>{if(previous===undefined)delete process.env.PPT_AGENT_TEST;else process.env.PPT_AGENT_TEST=previous;});
+  const requests=[],server=http.createServer(async(req,res)=>{
+    const chunks=[];for await(const c of req)chunks.push(c);requests.push(JSON.parse(Buffer.concat(chunks)).messages.at(-1).content);
+    res.setHeader('content-type','application/json');res.end(JSON.stringify({choices:[{message:{content:JSON.stringify({passed:true,issues:[],correctedPrompt:null})}}]}));
+  });await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeAllConnections();server.close();});
+  const config={baseURL:'http://127.0.0.1:'+server.address().port+'/v1',key:'synthetic',model:'mock'},signal=new AbortController().signal;
+  for(const stage of ['整页预览','单张底图'])await imagePromptCheck({config,system:'JSON',stage},signal)('仅当前单页，16:9。');
+  assert.match(requests[0],/风格要求中保留一句针对本页的创意设计/);assert.match(requests[0],/特殊分块规范/);assert.match(requests[0],/排版项仅说明内容分组与区域，不重复创意段/);
+  assert.doesNotMatch(requests[1],/风格要求中保留一句针对本页的创意设计|特殊分块规范/);
+});
+
 test('整页发送前清理模板重复，局部调整稿与底图稿保持独立路径',async()=>{
   const prompt='- **内容要求**：\n  - 标题：导航示例\n  - 页顶导航（独立于正文结构）：\n    - 页顶导航：研究背景\n- **排版要求**：保持分组，1.5:1。\n- **图片占位框比例**：每张登记原图仅画一个等比、平坦无字占位块。\n  - “结果图”：右侧，宽高比必须为 1.5:1，平坦无字占位块。\n- **进度条要求**：页顶且仅一条粗分段进度条，逐段写“研究背景”。';
   const signal=new AbortController().signal;

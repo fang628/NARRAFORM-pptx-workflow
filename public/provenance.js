@@ -1,4 +1,6 @@
+import {themePhotoSelector,themePhotoCandidates,photoThemePrompt,themePhotoEligible} from './theme-photo-policy.js';
 import {initImageEditRegion,sameImageEditRegion} from './material-images.js';
+import {imageReviewIssues,imageReviewKey} from './image-review-edit.js';
 import {crossImageChoices,crossImageTarget,crossImageSelection,crossImageRequest} from './theme-cross-edit.js';
 import {crossThemePrompt,crossPreviewPrompt} from './theme-cross-model.js';
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -165,7 +167,7 @@ export function setPromptInput(input,value,{reset=false,onChange}={}){
 }
 
 export function initAIImageEditor({getProject,act,busy,openAPI,onError}){
-  document.body.insertAdjacentHTML('beforeend',`<dialog id="aiImageEditDialog"><form id="aiImageEditForm"><div class="modal-heading"><div><span class="eyebrow">REVISION SHEET / IMAGE</span><h2 id="aiEditTitle">修改 AI 图片</h2></div><button type="button" class="close" data-edit-close aria-label="关闭图片修改">×</button></div><div class="ai-edit-body"><div class="ai-edit-context"><div id="aiEditRegionStage" class="ai-edit-region-stage"><img id="aiEditImage" alt="当前 AI 图片" draggable="false"><div id="aiEditRegionSelection" hidden><span class="ai-edit-region-label">定位提示</span>${['nw','n','ne','e','se','s','sw','w'].map(handle=>`<span class="crop-handle crop-handle-${handle}" data-edit-region-handle="${handle}" aria-hidden="true"></span>`).join('')}</div></div><div class="ai-edit-context-meta"><p id="aiEditContext"></p><div id="aiEditRegionTools" class="ai-edit-region-tools"><button type="button" id="aiEditRegionToggle" class="secondary" aria-pressed="false">框选修改位置</button><button type="button" id="aiEditRegionClear" class="text-button action-delete" disabled>清除框选 ×</button><small id="aiEditRegionState" role="status"></small></div></div></div><div class="ai-edit-image-history" role="group" aria-label="图片版本"><button type="button" id="aiEditImageUndo" class="text-button" hidden>↶ 撤回图片修改</button><button type="button" id="aiEditImageRedo" class="text-button" hidden>↷ 重做图片修改</button></div><div class="prompt-modes" role="group" aria-label="图片修改方式"><button type="button" data-edit-mode="adjust">图生图小修改</button><button type="button" data-edit-mode="redraw">文生图重绘</button><button type="button" data-edit-mode="cross" hidden>交叉修改</button></div><div id="aiEditCrossFields" hidden><label>参考另一方向的结构<select id="aiEditCrossTarget"></select></label><div id="aiEditCrossReference"></div><p id="aiEditCrossDestination"></p></div><p id="aiEditHint" class="subtle"></p><label><span id="aiEditInputName">修改意见</span><textarea id="aiEditInstruction" rows="7" maxlength="3000" placeholder="例如：缩小右侧主体，标题区域增加留白。"></textarea></label><div class="prompt-edit-tools" role="group" aria-label="提示词版本"><button type="button" id="aiEditPromptUndo" class="text-button">↶ 撤回提示词</button><button type="button" id="aiEditPromptRedo" class="text-button">↷ 重做提示词</button><button type="button" id="aiEditPrepare" class="secondary">AI 整理调整意见</button></div><details id="aiEditCrossDetails" class="theme-cross-prompt" hidden><summary>查看实际调整指令</summary><p id="aiEditCrossPrompt"></p></details><p id="aiEditState" class="subtle" role="status"></p></div><div class="modal-actions"><label class="checkbox"><input type="checkbox" id="aiEditConsent">确认将本次指令发送给配置的生图供应商并消耗额度</label><button type="submit" id="aiEditGenerate" class="primary">确认并图生图小修改 ↗</button></div></form></dialog>`);
+  document.body.insertAdjacentHTML('beforeend',`<dialog id="aiImageEditDialog"><form id="aiImageEditForm"><div class="modal-heading"><div><span class="eyebrow">REVISION SHEET / IMAGE</span><h2 id="aiEditTitle">修改 AI 图片</h2></div><button type="button" class="close" data-edit-close aria-label="关闭图片修改">×</button></div><div class="ai-edit-body"><div class="ai-edit-context"><div id="aiEditRegionStage" class="ai-edit-region-stage"><img id="aiEditImage" alt="当前 AI 图片" draggable="false"><div id="aiEditRegionSelection" hidden><span class="ai-edit-region-label">定位提示</span>${['nw','n','ne','e','se','s','sw','w'].map(handle=>`<span class="crop-handle crop-handle-${handle}" data-edit-region-handle="${handle}" aria-hidden="true"></span>`).join('')}</div></div><div class="ai-edit-context-meta"><p id="aiEditContext"></p><div id="aiEditRegionTools" class="ai-edit-region-tools"><button type="button" id="aiEditRegionToggle" class="secondary" aria-pressed="false">框选修改位置</button><button type="button" id="aiEditRegionClear" class="text-button action-delete" disabled>清除框选 ×</button><small id="aiEditRegionState" role="status"></small></div></div></div><div class="ai-edit-image-history" role="group" aria-label="图片版本"><button type="button" id="aiEditImageUndo" class="text-button" hidden>↶ 撤回图片修改</button><button type="button" id="aiEditImageRedo" class="text-button" hidden>↷ 重做图片修改</button></div><div class="prompt-modes" role="group" aria-label="图片修改方式"><button type="button" data-edit-mode="adjust">图生图小修改</button><button type="button" data-edit-mode="redraw">文生图重绘</button><button type="button" data-edit-mode="cross" hidden>交叉修改</button><button type="button" data-edit-mode="photo" hidden>照片主体重绘</button></div><p id="aiEditCrossAvailability" class="subtle" hidden></p><div id="aiEditCrossFields" hidden><label>参考另一方向的结构<select id="aiEditCrossTarget"></select></label><div id="aiEditCrossReference"></div><p id="aiEditCrossDestination"></p></div><div id="aiEditPhotoFields" hidden></div><p id="aiEditHint" class="subtle"></p><section id="aiEditReview" class="ai-edit-review" hidden><details><summary>当前图片的审查问题 · <span id="aiEditReviewCount"></span></summary><ul id="aiEditReviewIssues"></ul></details><button type="button" id="aiEditFromReview" class="secondary">根据审查问题生成修改建议</button></section><label><span id="aiEditInputName">修改意见</span><textarea id="aiEditInstruction" rows="7" maxlength="3000" placeholder="例如：缩小右侧主体，标题区域增加留白。"></textarea></label><div class="prompt-edit-tools" role="group" aria-label="提示词版本"><button type="button" id="aiEditPromptUndo" class="text-button">↶ 撤回提示词</button><button type="button" id="aiEditPromptRedo" class="text-button">↷ 重做提示词</button><button type="button" id="aiEditPrepare" class="secondary">AI 整理调整意见</button></div><details id="aiEditCrossDetails" class="theme-cross-prompt" hidden><summary>查看实际调整指令</summary><p id="aiEditCrossPrompt"></p></details><p id="aiEditState" class="subtle" role="status"></p></div><div class="modal-actions"><label class="checkbox"><input type="checkbox" id="aiEditConsent">确认将本次指令发送给配置的生图供应商并消耗额度</label><button type="submit" id="aiEditGenerate" class="primary">确认并图生图小修改 ↗</button></div></form></dialog>`);
   const dialog=document.querySelector('#aiImageEditDialog'),$=s=>dialog.querySelector(s),histories=new Map();let ctx=null,mode='adjust',seen=0,pending=null,textHistory=null,crossState=null;
   const regionSelections=new Map(),regionKey=()=>ctx?ctx.projectId+':'+ctx.key+':'+ctx.sourceHash:null;
   const regionEditor=initImageEditRegion({stage:$('#aiEditRegionStage'),image:$('#aiEditImage'),overlay:$('#aiEditRegionSelection'),toggle:$('#aiEditRegionToggle'),clear:$('#aiEditRegionClear'),status:$('#aiEditRegionState'),onChange:region=>{if(ctx)regionSelections.set(regionKey(),region);$('#aiEditConsent').checked=false;}});
@@ -188,19 +190,46 @@ export function initAIImageEditor({getProject,act,busy,openAPI,onError}){
     $('#aiEditConsent').checked=false;updateCrossPrompt();refresh();
   }
   $('#aiEditCrossTarget').addEventListener('change',selectCrossTarget);
+  const executionMode=()=>mode==='photo'?'redraw':mode;
+  function photoPayload(){
+    if(mode!=='photo'||ctx?.target.targetType!=='theme'||!getProject().themePhotoReferenceEnabled||!themePhotoEligible(getProject()))return ctx?.target.targetType==='theme'&&mode==='redraw'?{photoMaterialId:null}:{};
+    const photo=themePhotoCandidates(getProject()).find(m=>m.id===ctx.photoMaterialId);return {photoMaterialId:photo?.id||null,...(photo?{photoSourceHash:photo.sha256}:{})};
+  }
+  function refreshPhotoChoice(){
+    const p=getProject(),html=ctx.target.targetType==='theme'?themePhotoSelector(p,{theme:ctx.target.theme,use:ctx.target.use,photoMaterialId:ctx.photoMaterialId,attribute:'data-ai-edit-photo',emptyLabel:'请选择一张材料照片'}):'';
+    $('#aiEditPhotoFields').innerHTML=html;$('#aiEditPhotoFields').hidden=mode!=='photo'||!html;
+    $('[data-edit-mode="photo"]').hidden=!html;
+    const photo=mode==='photo'&&photoPayload().photoMaterialId;
+    if(mode==='redraw'||mode==='photo'){
+      $('#aiEditHint').textContent=photo?'仅附上选中的材料照片，以其主体重新生成底图；当前底图不作为参考。输入框是最终提示词，AI 协助修改为可选。':'只发送输入框中的完整最终提示词，直接文生图重绘；AI 可将框内草稿与修改意见整理为最终稿。';
+      $('#aiEditGenerate').textContent=mode==='photo'?'确认并按照片主体重生成 ↗':'确认并文生图重绘 ↗';
+      if(mode==='photo'&&!photo)$('#aiEditHint').textContent='选择一张材料照片，使用其主体重新生成底图；当前底图不作为参考。';
+    }
+  }
+  $('#aiEditPhotoFields').addEventListener('change',event=>{
+    const select=event.target.closest('[data-ai-edit-photo]');if(!select||pending||mode!=='photo')return;
+    ctx.photoMaterialId=select.value||null;const photo=themePhotoCandidates(getProject()).find(m=>m.id===ctx.photoMaterialId),d=getProject().themeAssets.directions.find(d=>d.id===ctx.target.theme);
+    $('#aiEditInstruction').value=textHistory.record(photoThemePrompt($('#aiEditInstruction').value,photo,d[ctx.target.use==='hero-image'?'heroSubject':'tocSubject']));$('#aiEditConsent').checked=false;refreshPhotoChoice();refresh();
+  });
   function setMode(next){
     if(next==='cross'&&!availableCrossReferences().length)return;
+    if(next==='photo'&&(ctx.target.targetType!=='theme'||!themePhotoSelector(getProject(),{theme:ctx.target.theme,use:ctx.target.use})))return;
     mode=next;pending=null;seen=getProject()?.aiImageEditDrafts?.[ctx.key]?.revision||0;
     $('[data-edit-mode="adjust"]').setAttribute('aria-pressed',String(mode==='adjust'));
     $('[data-edit-mode="redraw"]').setAttribute('aria-pressed',String(mode==='redraw'));
     $('[data-edit-mode="cross"]').setAttribute('aria-pressed',String(mode==='cross'));
-    $('[data-edit-mode="cross"]').hidden=!availableCrossReferences().length;
+    const crossButton=$('[data-edit-mode="cross"]'),crossApplicable=ctx.target.targetType==='theme'||ctx.target.targetType==='visual'&&ctx.target.kind==='concept',crossAvailable=availableCrossReferences().length>0;
+    crossButton.hidden=!crossApplicable;crossButton.disabled=!crossAvailable;
+    crossButton.setAttribute('aria-describedby','aiEditCrossAvailability');
+    $('#aiEditCrossAvailability').hidden=!crossApplicable||crossAvailable;
+    $('#aiEditCrossAvailability').textContent='交叉修改需先生成另一方向的同类底图或同页预览图，生成后重新打开即可选择。';
+    $('[data-edit-mode="photo"]').setAttribute('aria-pressed',String(mode==='photo'));
     $('#aiEditRegionTools').hidden=mode!=='adjust';
     $('#aiEditCrossFields').hidden=mode!=='cross';$('#aiEditCrossDetails').hidden=mode!=='cross';$('#aiEditPrepare').hidden=mode==='cross';
     const key=ctx.projectId+':'+ctx.key+':'+ctx.sourceHash+':'+mode,draft=getProject()?.aiImageEditDrafts?.[ctx.key];
     if(!histories.has(key)){
-      const applicable=draft?.mode===mode&&draft.sourceHash===ctx.sourceHash;
-      const history=createPromptHistory(applicable&&draft.previousText!==undefined?draft.previousText:mode==='redraw'?ctx.prompt||'':'');
+      const applicable=draft?.mode===executionMode()&&draft.sourceHash===ctx.sourceHash&&(!['redraw','photo'].includes(mode)||ctx.target.targetType!=='theme'||(draft.photoMaterialId||null)===(photoPayload().photoMaterialId||null))&&(!draft.fromReview||draft.reviewKey===imageReviewKey(ctx.image));
+      const history=createPromptHistory(applicable&&draft.previousText!==undefined?draft.previousText:executionMode()==='redraw'?ctx.prompt||'':'');
       if(applicable)history.record(mode==='adjust'?draft.instruction:draft.prompt);
       histories.set(key,history);
     }
@@ -212,6 +241,7 @@ export function initAIImageEditor({getProject,act,busy,openAPI,onError}){
     $('#aiEditPrepare').textContent=mode==='adjust'?'AI 整理调整意见（可选）':'AI 协助修改完整提示词';
     $('#aiEditGenerate').textContent=mode==='adjust'?'确认并图生图小修改 ↗':'确认并文生图重绘 ↗';
     $('#aiEditHint').textContent=mode==='adjust'?'附上当前图片，直接发送下方修改意见；也可先用 AI 整理，再自行修改。':'只发送输入框中的完整最终提示词，直接文生图重绘；AI 可将框内草稿与修改意见整理为最终稿。';
+    refreshPhotoChoice();
     if(mode==='cross'){
       $('#aiEditInstruction').maxLength=3000;$('#aiEditInstruction').placeholder='可选：参考所选图片的构图，保持当前方向的配色与材质。';$('#aiEditInputName').textContent='补充调整意见（可选）';
       $('#aiEditGenerate').textContent='确认并交叉修改 ↗';$('#aiEditHint').textContent='保持当前方向的配色与视觉风格，参考另一方向图片的主体结构、形状和构图。';
@@ -223,15 +253,24 @@ export function initAIImageEditor({getProject,act,busy,openAPI,onError}){
   }
   function refresh(){
     if(!dialog.open||!ctx)return;const p=getProject();if(p?.id!==ctx.projectId){dialog.close();return;}
+    let reviewed;try{reviewed=imageEditTarget(p,ctx.target).image;}catch{}
+    const sameImage=!!reviewed&&(reviewed.previewHash||reviewed.sha256)===ctx.sourceHash;
+    const issues=sameImage?imageReviewIssues(reviewed):[];
+    $('#aiEditReview').hidden=mode!=='adjust'||!issues.length;
+    $('#aiEditReviewCount').textContent=String(issues.length);
+    $('#aiEditReviewIssues').innerHTML=issues.map(v=>'<li>'+h(v)+'</li>').join('');
     const draft=p.aiImageEditDrafts?.[ctx.key];
-    if(pending&&draft?.revision>seen&&draft.mode===mode&&draft.sourceHash===ctx.sourceHash&&sameImageEditRegion(draft.editRegion,pending.editRegion)){
+    if(pending&&(!sameImage||pending.fromReview&&pending.reviewKey!==imageReviewKey(reviewed))){
+      pending=null;$('#aiEditState').textContent='图片或审查结果已变化，请重新获取修改建议。';
+    }
+    if(pending&&draft?.revision>seen&&draft.mode===executionMode()&&draft.sourceHash===ctx.sourceHash&&!!draft.fromReview===!!pending.fromReview&&(!pending.fromReview||draft.reviewKey===pending.reviewKey)&&(draft.photoMaterialId||null)===(pending.photoMaterialId||null)&&sameImageEditRegion(draft.editRegion,pending.editRegion)){
       seen=draft.revision;pending=null;
       $('#aiEditInstruction').value=textHistory.record(mode==='adjust'?draft.instruction:draft.prompt);
-      $('#aiEditConsent').checked=false;$('#aiEditState').textContent=mode==='adjust'?'AI 已整理到修改意见中，可继续编辑，核对后直接生成。':'AI 已整理，请核对下方实际发送内容，再确认生成。';
+      $('#aiEditConsent').checked=false;$('#aiEditState').textContent=draft.fromReview?'修改建议已填入，可编辑或撤回；确认提交后才会生图。':mode==='adjust'?'AI 已整理到修改意见中，可继续编辑，核对后直接生成。':'AI 已整理，请核对下方实际发送内容，再确认生成。';
     }else if(pending&&!busy()){$('#aiEditState').textContent=p.task?.message||'整理未完成，请重试';pending=null;}
     regionEditor.setEnabled(mode==='adjust'&&!pending);
-    const running=busy();$('#aiEditPrepare').disabled=running;$('#aiEditGenerate').disabled=!!pending||running&&!p.imageTaskQueueEnabled;
-    $('#aiEditInstruction').disabled=!!pending;
+    const running=busy();$('#aiEditFromReview').disabled=running||!!pending||!issues.length;$('#aiEditPrepare').disabled=running||!!pending;$('#aiEditGenerate').disabled=!!pending||running&&!p.imageTaskQueueEnabled;
+    $('#aiEditInstruction').disabled=!!pending;const photoSelect=$('[data-ai-edit-photo]');if(photoSelect)photoSelect.disabled=!!pending;
     $('#aiEditPromptUndo').disabled=!!pending||!textHistory?.canUndo;$('#aiEditPromptRedo').disabled=!!pending||!textHistory?.canRedo;
     let current;try{current=imageEditTarget(p,mode==='cross'?crossImageTarget(p,ctx.target,crossState.targetTheme):ctx.target).image;}catch{current=mode==='cross'?{}:ctx.image;}
     const history=current.editHistory||{past:current.repairHistory||[],future:[]};
@@ -244,15 +283,22 @@ export function initAIImageEditor({getProject,act,busy,openAPI,onError}){
     if(busy()||pending)throw Error('请等待当前任务完成后恢复图片');
 
     const target=ctx.target;await act('restoreAIImage',{...target,sourceHash:ctx.sourceHash,sourceRevision:ctx.image.jobFile||ctx.image.file,direction:b.id==='aiEditImageUndo'?'undo':'redo'});
-    const value=imageEditTarget(getProject(),target);ctx={...ctx,...value,sourceHash:value.image.previewHash||value.image.sha256};
-    for(const editMode of ['adjust','redraw'])histories.delete(ctx.projectId+':'+ctx.key+':'+ctx.sourceHash+':'+editMode);
+    const value=imageEditTarget(getProject(),target);ctx={...ctx,...value,photoMaterialId:value.image.photoReference?.materialId||null,sourceHash:value.image.previewHash||value.image.sha256};
+    for(const editMode of ['adjust','redraw','photo'])histories.delete(ctx.projectId+':'+ctx.key+':'+ctx.sourceHash+':'+editMode);
     $('#aiEditImage').src=value.url;regionSelections.set(regionKey(),null);regionEditor.reset();setMode(mode);$('#aiEditState').textContent='已恢复图片及对应提示词，无需重新生图。';
-  });else if(b.id==='aiEditPrepare')run(async()=>{
+  });else if(['aiEditPrepare','aiEditFromReview'].includes(b.id))run(async()=>{
     const p=getProject();if(!p.apiReady){openAPI();return;}if(busy())throw Error('请等待当前任务完成');
-    const instruction=$('#aiEditInstruction').value;if(!instruction.trim())throw Error('请填写修改意见');
+    if(pending)throw Error('请等待 AI 整理完成');
+    const fromReview=b.id==='aiEditFromReview';
+    if(fromReview&&mode!=='adjust')return;
+    if(mode==='photo'&&!photoPayload().photoMaterialId)throw Error('请先选择一张材料照片');
+    const instruction=$('#aiEditInstruction').value;if(!instruction.trim()&&!fromReview)throw Error('请填写修改意见');
+    const image=imageEditTarget(p,ctx.target).image,reviewKey=imageReviewKey(image);
+    if((image.previewHash||image.sha256)!==ctx.sourceHash)throw Error('图片已变化，请重新打开编辑器');
+    if(fromReview&&!imageReviewIssues(image).length)throw Error('当前图片没有可用于修改的审查问题');
     textHistory.record(instruction);
-    pending={instruction,editRegion:mode==='adjust'?regionEditor.value:null};regionEditor.setEnabled(false);$('#aiEditInstruction').disabled=true;$('#aiEditGenerate').disabled=true;$('#aiEditConsent').checked=false;$('#aiEditState').textContent='AI 正在整理，尚未发送生图请求…';
-    try{await act('prepareAIImageEdit',{...ctx.target,imageEditMode:mode,sourceHash:ctx.sourceHash,...(mode==='adjust'&&regionEditor.value?{editRegion:regionEditor.value}:{}),instruction:mode==='adjust'?instruction:'将输入框中的草稿与修改意见整理为可独立文生图的完整最终提示词，保留未要求改变的内容。',prompt:mode==='redraw'?instruction:undefined});refresh();}catch(e){pending=null;refresh();throw e;}
+    pending={instruction,fromReview,reviewKey,...photoPayload(),editRegion:mode==='adjust'?regionEditor.value:null};regionEditor.setEnabled(false);$('#aiEditInstruction').disabled=true;$('#aiEditGenerate').disabled=true;$('#aiEditConsent').checked=false;$('#aiEditState').textContent=fromReview?'AI 正在根据审查问题生成修改建议，尚未发送生图请求…':'AI 正在整理，尚未发送生图请求…';
+    try{await act('prepareAIImageEdit',{...ctx.target,imageEditMode:executionMode(),sourceHash:ctx.sourceHash,...photoPayload(),...(fromReview?{fromReview:true,reviewKey}:{}),...(mode==='adjust'&&regionEditor.value?{editRegion:regionEditor.value}:{}),instruction:mode==='adjust'?instruction:mode==='photo'?'将输入框中的草稿与修改意见整理为基于所选照片主体重生成底图的完整最终提示词，保留未要求改变的内容。':'将输入框中的草稿与修改意见整理为可独立文生图的完整最终提示词，保留未要求改变的内容。',prompt:executionMode()==='redraw'?instruction:undefined});refresh();}catch(e){pending=null;refresh();throw e;}
   });});
   $('#aiEditInstruction').addEventListener('input',()=>{textHistory?.record($('#aiEditInstruction').value);$('#aiEditConsent').checked=false;updateCrossPrompt();refresh();});
   $('#aiImageEditForm').addEventListener('submit',e=>{e.preventDefault();e.stopPropagation();run(async()=>{
@@ -260,11 +306,13 @@ export function initAIImageEditor({getProject,act,busy,openAPI,onError}){
     const element=['element','supplement','scientific'].includes(ctx.image.purpose)||ctx.target.elementId;if(!(element?p.elementImageReady:p.imageReady)){openAPI();return;}
     if(!$('#aiEditConsent').checked)throw Error('请确认发送本次指令');
     if(pending)throw Error('请等待 AI 整理完成');
+    refreshPhotoChoice();
     if(mode==='cross'){const {action,...extra}=crossImageRequest(p,ctx.target,crossState,$('#aiEditInstruction').value);await act(action,extra);dialog.close();return;}
+    if(mode==='photo'&&!photoPayload().photoMaterialId)throw Error('请先选择一张材料照片');
     if(!$('#aiEditInstruction').value.trim())throw Error(mode==='adjust'?'请填写修改意见':'请填写完整的重绘提示词');
-    const {action,...request}=ctx.request,extra={...request,imageEditMode:mode,sourceHash:ctx.sourceHash,...(mode==='adjust'?{instruction:$('#aiEditInstruction').value,...(regionEditor.value?{editRegion:regionEditor.value}:{})}:{prompt:$('#aiEditInstruction').value})};
+    const {action,...request}=ctx.request,extra={...request,imageEditMode:executionMode(),sourceHash:ctx.sourceHash,...photoPayload(),...(mode==='adjust'?{instruction:$('#aiEditInstruction').value,...(regionEditor.value?{editRegion:regionEditor.value}:{})}:{prompt:$('#aiEditInstruction').value})};
     if(mode==='adjust'&&ctx.target.targetType==='theme')extra.prompt=ctx.prompt;
     await act(action,extra);dialog.close();
   });});
-  return {open(target){const p=getProject(),value=imageEditTarget(p,target);ctx={...value,target,projectId:p.id,sourceHash:value.image.previewHash||value.image.sha256};crossState=null;$('#aiEditTitle').textContent=target.targetType==='theme'?'修改底图':target.targetType==='visual'?'修改预览图':'修改 AI 图片';$('#aiEditImage').src=value.url;$('#aiEditContext').textContent=(target.targetType==='theme'?'主题底图':target.targetType==='visual'?'整页预览 · 第 '+(target.index+1)+' 页':'AI 素材')+' · '+(value.image.model||'已配置的生图模型');const draft=p.aiImageEditDrafts?.[ctx.key];regionEditor.reset(regionSelections.has(regionKey())?regionSelections.get(regionKey()):draft?.mode==='adjust'&&draft.sourceHash===ctx.sourceHash?draft.editRegion:null);dialog.showModal();setMode('adjust');},refresh,close(){dialog.close();ctx=null;}};
+  return {open(target){const p=getProject(),value=imageEditTarget(p,target);ctx={...value,target,photoMaterialId:value.image.photoReference?.materialId||null,projectId:p.id,sourceHash:value.image.previewHash||value.image.sha256};crossState=null;$('#aiEditTitle').textContent=target.targetType==='theme'?'修改底图':target.targetType==='visual'?'修改预览图':'修改 AI 图片';$('#aiEditImage').src=value.url;$('#aiEditContext').textContent=(target.targetType==='theme'?'主题底图':target.targetType==='visual'?'整页预览 · 第 '+(target.index+1)+' 页':'AI 素材')+' · '+(value.image.model||'已配置的生图模型');const draft=p.aiImageEditDrafts?.[ctx.key];regionEditor.reset(regionSelections.has(regionKey())?regionSelections.get(regionKey()):draft?.mode==='adjust'&&draft.sourceHash===ctx.sourceHash?draft.editRegion:null);dialog.showModal();setMode('adjust');},refresh,close(){dialog.close();ctx=null;}};
 }

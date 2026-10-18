@@ -102,7 +102,7 @@ test('按页确认、生图、自由重建、实际 PowerPoint 渲染及 release
   assert.match(p.visualPages[0].redrawPrompt,/\*\*内容要求\*\*/,'完整重绘稿与局部修正指令独立保留');
   await act('generateFullPreview',{index:0,prompt:p.visualPages[0].redrawPrompt+'\n保留这条用户修改：蓝色细线。'});p=await wait();assert.equal(p.task.status,'done',p.task.message);assert.match(p.visualPages[0].prompt,/保留这条用户修改：蓝色细线/);assert.ok(!p.visualPages[0].prompt.includes('设计规范版本：'));assert.ok(!p.visualPages[0].prompt.includes('【本次生成边界】'));await act('approvePreview',{},400);for(let i=0;i<3;i++)await act('reviewPreviewPage',{index:i,checked:true});await act('approvePreview');await act('release',{},400);await call(prefix+'/download',undefined,400);
   badAudit=true;await act('reconstructPreview');p=await wait();assert.equal(p.task.status,'failed');assert.equal(p.reconstruction,null);badAudit=false;
-  await act('build');p=await wait();assert.equal(p.task.status,'done',p.task.message);assert.equal(p.visualReconstructionCurrent,true);assert.equal(p.candidate.status,'failed');assert.equal(p.candidate.structure.passed,true);assert.equal(p.candidate.renderer,'Microsoft PowerPoint');assert.equal(p.output,null);assert.ok(p.reconstruction.assets.length>=9);await act('release',{},400);await call(prefix+'/download',undefined,400);
+  await act('build');p=await wait();assert.equal(p.task.status,'done',p.task.message);assert.equal(p.visualReconstructionCurrent,true);assert.equal(p.candidate.status,'failed');assert.equal(p.candidate.structure.passed,true);assert.equal(p.candidate.renderer,'Microsoft PowerPoint');assert.equal(p.output,null);assert.equal(p.reconstruction.assets.length,3,'三页相同的两种SVG与一份抠图分别复用');await act('release',{},400);await call(prefix+'/download',undefined,400);
   assert.equal(p.candidateDownload.available,true,'视觉不通过仍可下载最后实际渲染版');
   const draftURL=prefix+'/candidate-download?candidate='+p.candidate.id,draft=await fetch(base+draftURL+'&type=pptx');assert.equal(draft.status,200);assert.match(draft.headers.get('content-disposition'),/review-required/);assert.equal(draft.headers.get('x-ppt-agent-status'),'review-required');assert.ok((await JSZip.loadAsync(await draft.arrayBuffer())).file('ppt/slides/slide1.xml'));
   const draftPDF=await fetch(base+draftURL+'&type=pdf');assert.equal(draftPDF.status,200);assert.ok(Buffer.from(await draftPDF.arrayBuffer()).subarray(0,5).equals(Buffer.from('%PDF-')));
@@ -111,6 +111,16 @@ test('按页确认、生图、自由重建、实际 PowerPoint 渲染及 release
   assert.deepEqual(p.reconstruction.slides.map(s=>s.background.use),['hero-image','content-background','content-background']);
   assert.ok(p.reconstruction.slides.every(s=>s.background.theme==='b'&&p.candidate.assetIds.includes(s.background.id)));
   assert.ok(requests.filter(b=>b.messages?.at(-1)?.content?.[0]?.text?.startsWith('自由元素审计：')).every(b=>b.messages.at(-1).content.filter(c=>c.type==='image_url').length===2));
+  for(const request of requests.filter(b=>b.messages?.at(-1)?.content?.[0]?.text?.startsWith('自由元素审计：'))){
+    const prompt=request.messages.at(-1).content[0].text;
+    assert.match(prompt,/页顶进度条不在拆解范围/);
+    const texts=JSON.parse(prompt.split('准确文字：')[1].split('\n登记原图计划：')[0]);assert(texts.every(n=>n.role!=='navigation'));
+  }
+  for(const page of p.reconstruction.slides.slice(1)){
+    const geometryInput=JSON.parse(fs.readFileSync(path.join(dir,p.id,page.geometry.record,'input.json'),'utf8'));
+    assert(geometryInput.exclude.some(e=>e.x===0&&e.y===0&&e.w===1600&&e.h>=68),'导航不应参与素材几何候选');
+    assert(page.elements.some(e=>e.key==='nf-progress-track-0'&&e.shape==='hexagon'));
+  }
   assert.ok(p.candidate.structure.slides.every(s=>s.background),'实际PowerPoint文件通过背景身份和哈希校验');
   assert.equal(p.styleRegistry.length,3,'整页方案复用底图的三个已登记原创方向');assert.ok(p.styleRegistry.every(s=>s.origin==='custom'));
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir,p.id,p.candidate.dir,'style-registry.json'),'utf8')),p.styleRegistry,'交付证据保留风格登记');

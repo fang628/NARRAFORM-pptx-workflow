@@ -1,3 +1,5 @@
+import {themePhotoSelector,themePhotoCandidates,photoThemePrompt} from './theme-photo-policy.js';
+import {initArtifactStorage} from './artifact-storage.js';
 import {progressSectionFields,progressSectionsOf,validateProgressSections,pageProgressSelector} from './progress-sections.js';
 import {optionalPageCount} from './page-count.js';
 import {materialLimits,pageLimits,supplementInfo,supplementImageDialog,supplementImageRequests} from './material-images.js';
@@ -32,6 +34,8 @@ const sameBrief=b=>!!p&&Object.keys(p.brief).every(k=>p.brief[k]===b[k])&&(p.bri
 let sourceEditor=null,promptEditor=null,promptEditMode='direct';
 document.body.insertAdjacentHTML('beforeend',provenanceDialogs+visualDialogs+materialImageDialog+themeAssetDialogs+imageTaskDialog+rebuildRegionDialog+supplementImageDialog);
 const rebuildRegionEditor=initRebuildRegionEditor({getProject:()=>p,busy:()=>p?.task?.status==='running',act,onError:toast});
+initArtifactStorage({getProject:()=>p,request:api,act,onError:toast});
+document.addEventListener('change',event=>{if(event.target.matches('[data-delivery-motion]'))safe(()=>act('setDeliveryMotion',{settings:{...(p.deliveryMotion||{}),enabled:event.target.checked}}));if(event.target.matches('[data-delivery-progress-layout]'))safe(()=>act('setDeliveryMotion',{settings:{...(p.deliveryMotion||{}),progressLayout:event.target.value}}));});
 document.addEventListener('toggle',e=>{rememberMaterialReportExpansion(e.target);rememberSourceExpansion(e.target);rememberDesignExpansion(e.target);},true);
 document.addEventListener('change',e=>{if(e.target.name==='visualTreatment'){const button=$('[data-theme-assets-generate]');if(button)button.textContent=e.target.value!==(p.visualTreatment||'flat')?'按所选类型规划三种风格 ↗':'规划 / 核对三种风格与底图 ↗';}if(e.target.id==='materialReaderSelect')safe(()=>readMaterial(e.target.value));});
 let previewApprovalContext=null;
@@ -110,7 +114,7 @@ function render({keepView=false}={}){
   if(view)view.drafts=[...new Map([...liveDraftRecovery,...view.drafts].map(d=>[d.key,d])).values()];
   nav();main.classList.remove('page-enter');
   main.innerHTML=[intake,content,concepts,fullPreview,delivery][tab]();
-  const reuse=p?.downstreamReuse;if(reuse?.pending)main.insertAdjacentHTML('afterbegin',`<section class="downstream-update notice" role="status"><div><strong>前置内容已更新</strong><p>可以按新要求重新生成，也可以沿用原布局与图片，仅同步最新文案。</p></div><button class="secondary" data-action="reuseDownstream">跳过重生成 · 同步文案 →</button></section>`);else if(reuse?.last)main.insertAdjacentHTML('afterbegin',`<section class="downstream-update notice"><div><strong>已沿用原布局与图片</strong><p>新文案已同步到设计稿${reuse.last.nativeTextSynced?'和可编辑元素':''}。旧整页图仅作布局参考，最终以最新文字的 PPT 渲染为准。</p>${reuse.last.skipped.length?`<details><summary>部分页面需另行处理</summary><ul>${reuse.last.skipped.map(s=>`<li>${h(s)}</li>`).join('')}</ul></details>`:''}</div></section>`);
+  const reuse=p?.downstreamReuse;if(reuse?.pending)main.insertAdjacentHTML('afterbegin',`<section class="downstream-update notice" role="status"><div><strong>已有结果待同步</strong><p>内容或规范版本变化后，可重新生成，也可保留原布局与图片，同步当前文案。</p></div><button class="secondary" data-action="reuseDownstream">跳过重生成 · 同步文案 →</button></section>`);else if(reuse?.last)main.insertAdjacentHTML('afterbegin',`<section class="downstream-update notice"><div><strong>已沿用原布局与图片</strong><p>新文案已同步到设计稿${reuse.last.nativeTextSynced?'和可编辑元素':''}。旧整页图仅作布局参考，最终以最新文字的 PPT 渲染为准。</p>${reuse.last.skipped.length?`<details><summary>部分页面需另行处理</summary><ul>${reuse.last.skipped.map(s=>`<li>${h(s)}</li>`).join('')}</ul></details>`:''}</div></section>`);
   $$('#main .panel').forEach((panel,i)=>{
     const label=['FORM / FIELD','LINE / SURFACE','GRID / STUDY','FRAME / SEQUENCE'][i%4];
     const strip=document.createElement('div');strip.className='dossier-strip';strip.setAttribute('aria-hidden','true');
@@ -175,6 +179,16 @@ function schedulePoll(){
   },busy()||hasQueuedImages()?1100:3000);
 }
 async function create(brief,demo=false,progressSections){if(!demo&&progressSections===undefined&&$('[data-progress-section-fields]'))progressSections=progressSectionsDraft();projectRequestRevision++;activeTaskOrigin=null;p=await api('/api/projects',{brief,demo,...(progressSections?{progressSections}:{})});localStorage.setItem('ppt-agent-project',p.id);tab=demo?2:0;render();await refreshProjects();}
+function themePhotoPayload(root){
+  const select=root?.querySelector('[data-theme-photo-reference]');if(!select)return {};
+  const photo=themePhotoCandidates(p).find(m=>m.id===select.value);return {photoMaterialId:photo?.id||null,...(photo?{photoSourceHash:photo.sha256}:{})};
+}
+document.addEventListener('change',event=>{
+  const select=event.target.closest('[data-theme-photo-reference]');if(!select)return;
+  const root=select.closest('[data-theme-review]')||$('#themeAssetPhotoFields').parentElement,photo=themePhotoCandidates(p).find(m=>m.id===select.value),d=p.themeAssets.directions.find(d=>d.id===select.dataset.theme),field=select.dataset.use==='hero-image'?'heroSubject':'tocSubject';
+  const input=root.querySelector('[data-theme-review-prompt]')||$('#themeAssetPromptText');setPromptInput(input,photoThemePrompt(input.value,photo,d[field]));
+  const preview=root.querySelector('[data-theme-photo-preview]');preview.innerHTML=photo?`<img src="/api/projects/${p.id}/assets/${h(photo.id)}" alt="照片主体参考"><span>${h(photo.name)}</span>`:'';
+});
 function openThemePromptReview(){
   const pending=p.themeAssetPrompts.filter(e=>e.status!=='generated');
   $('#themePromptReviewBody').innerHTML=themePromptReview(p,pending.length?pending:p.themeAssetPrompts);
@@ -187,9 +201,12 @@ function finishThemePromptRewrite(){
   themeAssetEdit.revision=entry.revision;
   if(themeAssetEdit.batch){
     const item=$$('[data-theme-review]').find(el=>el.dataset.themeReview===entry.theme+':'+entry.use);if(!item)return;
-    const input=item.querySelector('[data-theme-review-prompt]');setPromptInput(input,entry.prompt);input.dataset.revision=entry.revision;
+    const input=item.querySelector('[data-theme-review-prompt]');input.dataset.revision=entry.revision;
+    if((themePhotoPayload(item).photoMaterialId||null)!==themeAssetEdit.photoMaterialId){item.querySelector('[data-theme-review-state]').textContent='参考照片已变化，未覆盖当前提示词；可重新整理后确认';return;}
+    setPromptInput(input,entry.prompt);
     item.querySelector('[data-theme-review-instruction]').value='';item.querySelector('[data-theme-review-state]').textContent='AI 已补充完整提示词，请核对后确认';
   }else if($('#themeAssetPromptDialog').open){
+    if((themePhotoPayload($('#themeAssetPhotoFields')).photoMaterialId||null)!==themeAssetEdit.photoMaterialId){$('#themeAssetPromptState').textContent='参考照片已变化，未覆盖当前提示词；请重新核对';return;}
     setPromptInput($('#themeAssetPromptText'),entry.prompt);$('#themeAssetInstruction').value='';$('#themeAssetPromptState').textContent='AI 已补充完整提示词，请核对或直接编辑后确认';
   }
 }
@@ -371,6 +388,7 @@ document.addEventListener('click',e=>safe(async()=>{
     const entry=p.themeAssetPrompts.find(e=>e.theme===b.dataset.themeAssetPrompt&&e.use===b.dataset.themeAssetUse);
     if(!entry)throw Error('请先准备底图提示词');themeAssetEdit={theme:entry.theme,use:entry.use,revision:entry.revision};
     const d=p.themeAssets.directions.find(d=>d.id===entry.theme);
+    $('#themeAssetPhotoFields').innerHTML=themePhotoSelector(p,entry);
     $('#themeAssetPromptTitle').textContent=d.name+' · 底图提示词';setPromptInput($('#themeAssetPromptText'),entry.prompt,{reset:true});$('#themeAssetInstruction').value='';
     $('#themeAssetPromptState').textContent='确认后仅发送上方完整提示词，以文生图重新生成。';$('#themeAssetPromptDialog').showModal();return;
   }
@@ -379,8 +397,8 @@ document.addEventListener('click',e=>safe(async()=>{
     const item=b.closest('[data-theme-review]'),input=item?.querySelector('[data-theme-review-prompt]'),instruction=item?item.querySelector('[data-theme-review-instruction]').value:$('#themeAssetInstruction').value;
     if(input)themeAssetEdit={theme:input.dataset.theme,use:input.dataset.use,revision:Number(input.dataset.revision),batch:true};
     if(!themeAssetEdit)throw Error('请重新打开底图提示词');
-    const prompt=input?input.value:$('#themeAssetPromptText').value;
-    await act('rewriteThemeAssetPrompt',{theme:themeAssetEdit.theme,use:themeAssetEdit.use,revision:themeAssetEdit.revision,prompt,instruction},2);
+    const prompt=input?input.value:$('#themeAssetPromptText').value;themeAssetEdit.photoMaterialId=themePhotoPayload(item||$('#themeAssetPhotoFields')).photoMaterialId||null;
+    await act('rewriteThemeAssetPrompt',{theme:themeAssetEdit.theme,use:themeAssetEdit.use,revision:themeAssetEdit.revision,prompt,instruction,...themePhotoPayload(item||$('#themeAssetPhotoFields'))},2);
     if(item)item.querySelector('[data-theme-review-state]').textContent='AI 正在补充完整提示词…';else $('#themeAssetPromptState').textContent='AI 正在补充完整提示词…';return;
   }
   if(b.id==='regenerateThemeAsset'||b.id==='confirmThemePrompts'){
@@ -388,7 +406,7 @@ document.addEventListener('click',e=>safe(async()=>{
     const batch=b.id==='confirmThemePrompts';
     const state=$(batch?'#themePromptReviewState':'#themeAssetPromptState');
     if(batch?$$('[data-theme-review-instruction]').some(el=>el.value.trim()):$('#themeAssetInstruction').value.trim()){state.textContent='修改意见尚未应用，请先点击“AI 补充完整提示词”，核对新稿后确认';return;}
-    const entries=batch?$$('[data-theme-review-prompt]').map(el=>({theme:el.dataset.theme,use:el.dataset.use,revision:Number(el.dataset.revision),prompt:el.value})):[{theme:themeAssetEdit.theme,use:themeAssetEdit.use,revision:themeAssetEdit.revision,prompt:$('#themeAssetPromptText').value}];
+    const entries=batch?$$('[data-theme-review-prompt]').map(el=>({theme:el.dataset.theme,use:el.dataset.use,revision:Number(el.dataset.revision),prompt:el.value,...themePhotoPayload(el.closest('[data-theme-review]'))})):[{theme:themeAssetEdit.theme,use:themeAssetEdit.use,revision:themeAssetEdit.revision,prompt:$('#themeAssetPromptText').value,...themePhotoPayload($('#themeAssetPhotoFields'))}];
     const form=$('#briefForm');if(form&&!busy()&&!sameBrief(readBrief(form)))throw Error('需求已修改，请先保存并重新规划提示词');
     try{await act('generateThemeAssets',{confirmed:true,prompts:entries},2);}catch(e){state.textContent=e.message;throw e;}
     $(batch?'#themePromptReviewDialog':'#themeAssetPromptDialog').close();return;
@@ -480,6 +498,10 @@ document.addEventListener('click',e=>safe(async()=>{
 
   if(b.dataset.suggestRemoveAsset!==undefined){
     const field=$(`[data-rebuild-asset-instruction="${Number(b.dataset.assetPage)}"]`),line='删除非事实元素「'+b.dataset.suggestRemoveAsset+'」。';if(field){field.value=[field.value.trim(),line].filter(Boolean).join('\n');field.focus();field.dispatchEvent(new Event('input',{bubbles:true}));}return;
+  }
+  if(b.dataset.retryRebuildPage!==undefined){
+    if(!p.rebuildReady){openAPI();toast('请配置支持视觉输入的主模型，或选填独立高性能视觉模型');return;}
+    await act('retryRebuildPage',{index:Number(b.dataset.retryRebuildPage)});return;
   }
   if(b.dataset.reviseRebuildAssets!==undefined){
     const index=Number(b.dataset.reviseRebuildAssets),request=rebuildFeedbackRequest(p,index,$(`[data-rebuild-asset-instruction="${index}"]`)?.value);await act(request.action,request.payload);return;

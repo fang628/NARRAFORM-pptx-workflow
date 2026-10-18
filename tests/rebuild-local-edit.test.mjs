@@ -8,11 +8,16 @@ import {visualStamp,validateAudit} from '../lib/visual-model.mjs';
 import {expectedRebuildText,splitHeadingNumber} from '../lib/rebuild-text-parts.mjs';
 import {regionFromPoints,logicalRegionPoint} from '../public/visual-ui.js';
 import {rebuildAssetsPanel,visualDelivery,rebuildFeedbackRequest} from '../public/visual-ui.js';
+import {prepareRebuildPresentation,rebuildPresentationStamp} from '../lib/rebuild-progress.mjs';
 
 const text=(key,nodeId,value,y)=>({key,type:'text',nodeId,text:value,x:50,y,w:800,h:70,size:30,bold:false,color:'272727',align:'left'});
 const slide={title:'准确标题',body:['准确正文'],sources:[]};
 const elements=()=>[text('title','title',slide.title,80),text('body','body-0',slide.body[0],250),{key:'icon',type:'image',id:'old',implementation:'svg',x:1100,y:650,w:100,h:100,description:'平面图标'},{key:'block',type:'rect',x:1000,y:450,w:200,h:100,fill:'EEEEEE',color:'333333',strokeWidth:0,opacity:1}];
 function project(){const p={id:'test',version:1,brief:{progress:false},slides:[slide],concepts:[],visualPages:[{images:[],previewHash:'preview'}],materials:[{id:'old',kind:'image'}],approvals:{preview:1},task:{status:'done'}};p.reconstruction={mode:'free',stamp:visualStamp(p),slides:[{index:0,elements:elements()}],assets:['old']};return p;}
+test('动画设置变化后单页撤回不能复用旧动画交付，必须按当前设置重新渲染',()=>{
+  const p=project();prepareRebuildPresentation(p);p.candidate={id:'old-motion',presentationStamp:rebuildPresentationStamp(p)};rememberRebuildEdit(p,'第 1 页修改',0);p.reconstruction.slides[0].elements[0].x=100;p.deliveryMotion={enabled:false};
+  const result=undoRebuildEdit(p,0);assert.equal(result.requiresRender,true);assert.equal(p.candidate,null);assert.equal(p.reconstruction.slides[0].elements[0].x,50);assert.equal(p.deliveryMotion.enabled,false);
+});
 async function toolEdit(p,review,commands){let turns=0;const records=[],requests=[];const result=await repairRebuiltPage({p,index:0,review,round:1,env:{system:'JSON',credentials:new Map([[p.id,{text:{key:'fixture',model:'main'}}]])},reference:'reference',rendered:'rendered',background:'background',createAsset:async()=>({id:'new',sha256:'hash',kind:'image'}),renderScene:async()=>'',record:r=>records.push(structuredClone(r)),requestModel:async(c,e,b)=>{requests.push(b);return {choices:[{message:turns++===0?{content:null,tool_calls:commands.map(([name,args],i)=>({id:'tool-'+i,type:'function',function:{name,arguments:JSON.stringify(args)}}))}:{content:'{"done":true}'}}]};}});return {result,records,requests};}
 
 test('单元素修改在工具层拒绝旁改、增删、重排，SVG替换保留key和其他元素',async()=>{

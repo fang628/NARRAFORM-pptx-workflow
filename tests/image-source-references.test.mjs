@@ -7,6 +7,7 @@ import {validateSlides} from '../lib/scene.mjs';
 import {validateSourceReferences} from '../lib/source-references.mjs';
 import {contentWithEvidence} from '../lib/content-evidence.mjs';
 import {fixtureReply} from './visual-fixture.mjs';
+import {Resvg} from '@resvg/resvg-js';
 
 const original='真实研究结论。';
 const project=()=>({materials:[{id:'doc',kind:'document',name:'论文.txt',text:original},{id:'a',kind:'image',name:'第一张.png'},{id:'b',kind:'image',name:'第二张.png'},{id:'c',kind:'image',name:'未使用.png'},{id:'ai',kind:'image',name:'生成图.png',generated:true}]});
@@ -60,7 +61,9 @@ test('真实接口：多图逐页生成、单页修改、重复保存与冲突�
   let doc,photos=[],contentPrompt='',revisePrompt='';
   const resultSlide=i=>{
     const s=draft([{materialId:photos[1],target:'element:first',note:'错误配图'},{materialId:photos[0],target:'element:first',note:'重复记录'},{materialId:doc,target:'element:body',excerptId:'E0001'}],{kind:'content',sources:[doc,...photos]});
-    s.elements[0].text='发现'+i;s.elements[2].materialId=photos[0];s.elements[3].materialId=photos[1];return s;
+    s.elements[0].text='发现'+i;s.elements[2].materialId=photos[0];s.elements[3].materialId=photos[1];
+    s.elements.push({id:'first-caption',type:'text',role:'caption',text:'第一张材料图',parentId:'first'},{id:'second-caption',type:'text',role:'caption',text:'第二张材料图',parentId:'second'});
+    return s;
   };
   const mock=http.createServer(async(req,res)=>{
     let raw='';for await(const c of req)raw+=c;const request=JSON.parse(raw),prompt=request.messages.at(-1).content;let result;
@@ -75,8 +78,10 @@ test('真实接口：多图逐页生成、单页修改、重复保存与冲突�
   let p=await call('/api/projects',{brief:{title:'多图关系回归',pages:3,cover:false}},201);const prefix='/api/projects/'+p.id,act=(action,extra={},status=200)=>call(prefix+'/action',{action,...extra},status);
   const wait=async()=>{for(let i=0;i<400;i++){p=await call(prefix);if(p.task?.status!=='running')return;await new Promise(r=>setTimeout(r,20));}throw Error('任务超时');};
   p=await call(prefix+'/materials',{name:'论文.txt',base64:Buffer.from(original).toString('base64')});doc=p.materials[0].id;
-  const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=';
-  for(const name of ['第一张.png','第二张.png']){p=await call(prefix+'/materials',{name,base64:png});photos.push(p.materials.at(-1).id);}
+  for(const [i,name] of ['第一张.png','第二张.png'].entries()){
+    const png=new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="80" height="50"><rect width="80" height="50" fill="${i?'#808080':'#FFFF80'}"/></svg>`).render().asPng();
+    p=await call(prefix+'/materials',{name,base64:png.toString('base64')});photos.push(p.materials.at(-1).id);
+  }
   await act('configure',{text:{baseURL:`http://127.0.0.1:${mock.address().port}/v1`,key:'synthetic',model:'mock'}});await act('requirements',{brief:p.brief});await act('analyzeMaterials');await wait();assert.equal(p.task.status,'done',p.task.message);
   await act('approveAnalysis');await act('content');await wait();assert.equal(p.task.status,'done',p.task.message);assert.match(contentPrompt,/图片来源索引由程序/);
   for(const s of p.slides){assert.equal(s.sourceLinks.length,3);assert.deepEqual(s.sourceLinks.filter(l=>l.target!=='element:body').map(l=>[l.target,l.materialId]),[['element:first',photos[0]],['element:second',photos[1]]]);}

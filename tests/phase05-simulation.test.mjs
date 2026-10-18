@@ -12,6 +12,7 @@ import {fixtureReply,fixtureRequest} from './visual-fixture.mjs';
 test('05五页故障模拟：异常样式、文案改写、ID遗漏、节点遗漏、截断JSON → 真PPT渲染 → release与下载',async t=>{
   const attempts=new Map(),requests=[],reviewCounts=new Map(),formatCounts=new Map(),toolModels=[],observedLive=[];
   let persistReviewFailure=false;
+  const nativeGradient={type:'linear',angle:30,stops:[{position:0,color:'1144AA'},{position:1,color:'33CCAA'}]};
   const mock=http.createServer(async(req,res)=>{
     try{
       const body=await fixtureRequest(req),content=body.messages?.at(-1)?.content,prompt=typeof content==='string'?content:content?.[0]?.text||'';requests.push({prompt:body.prompt||prompt,image:!!body.prompt,referenceCount:body.referenceImages?.length||0,referenceHashes:body.referenceImages?.map(r=>r.sha256)||[]});
@@ -23,7 +24,7 @@ test('05五页故障模拟：异常样式、文案改写、ID遗漏、节点遗�
         else{
           const scene=JSON.parse(first.split('当前场景：')[1].split('\n准确文案与层级：')[0]);let commands=[
             ['inspect_page',{}],
-            ['apply_page_patch',{edits:scene.elements.filter(e=>e.type==='text'&&e.nodeId!=='title'&&!e.nodeId.startsWith('navigation-')).map(e=>({key:e.key,properties:{size:30,color:'272727'}})),remove:scene.elements.filter(e=>/^(native|vector|generated|cutout)-r/.test(e.key)||(first.includes('用户素材增删意见：删除非事实元素「audit-cutout」')&&e.key==='audit-cutout')).map(e=>e.key),add:[{key:'native-r'+round,type:'shape',shape:'hexagon',x:200,y:650,w:250,h:70,fill:'EEEEEE',color:'BBBBBB',strokeWidth:1},...(first.includes('用户素材增删意见：删除非事实元素「audit-cutout」')?[{key:'feedback-line',type:'line',x:200,y:600,w:250,h:1,color:'555555',strokeWidth:2}]:[])]}],
+            ['apply_page_patch',{edits:scene.elements.filter(e=>e.type==='text'&&e.nodeId!=='title'&&!e.nodeId.startsWith('navigation-')).map(e=>({key:e.key,properties:{size:30,color:'272727'}})),remove:scene.elements.filter(e=>/^(native|vector|generated|cutout)-r/.test(e.key)||(first.includes('用户素材增删意见：删除非事实元素「audit-cutout」')&&e.key==='audit-cutout')).map(e=>e.key),add:[{key:'native-r'+round,type:'shape',shape:'hexagon',x:200,y:650,w:250,h:70,fill:'EEEEEE',color:'BBBBBB',strokeWidth:1,gradient:nativeGradient},...(first.includes('用户素材增删意见：删除非事实元素「audit-cutout」')?[{key:'feedback-line',type:'line',x:200,y:600,w:250,h:1,color:'555555',strokeWidth:2}]:[])]}],
             ['create_visual_asset',{method:'svg',key:'vector-r'+round,x:700,y:650,w:60,h:60,svg:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60"><path d="M5 5L55 5L55 55L5 55Z" fill="#eeeeee" stroke="#556677"/></svg>',description:'独立矢量几何'}],
             ['create_visual_asset',{method:'cutout',key:'cutout-r'+round,x:900,y:650,w:80,h:80,sourceBox:{x:700,y:750,w:100,h:80},prompt:'抠取随附局部的独立装饰主体，保持细节，移除背景',description:'AI透明抠图'}],
             ['render_page',{}]
@@ -49,8 +50,9 @@ test('05五页故障模拟：异常样式、文案改写、ID遗漏、节点遗�
       if(initial||correction){
         const raw=JSON.parse(reply.choices[0].message.content),texts=raw.elements.filter(e=>e.type==='text'),page=Number(texts.find(e=>e.nodeId==='title').text.slice(0,2)),count=(attempts.get(page)||0)+1;attempts.set(page,count);
         for(const e of texts){e.fontFace=e.nodeId==='title'?'SimSun':'Microsoft YaHei';e.italic=e.nodeId==='caption';}
+        if(page===1)texts.find(e=>e.nodeId==='title').gradient=nativeGradient;
         if(page===1)raw.elements.push({key:'audit-cutout',type:'cutout',x:1150,y:700,w:120,h:100,sourceBox:{x:700,y:750,w:120,h:100},prompt:'保留随附局部装饰的轮廓和纹理，移除背景',nonFactual:true});
-        if(page===3)raw.elements.unshift({key:'body-carrier',type:'shape',shape:'roundRect',x:80,y:190,w:1000,h:80,fill:'EEEEEE',color:'BBBBBB',strokeWidth:1});
+        if(page===3)raw.elements.unshift({key:'body-carrier',type:'shape',shape:'roundRect',x:80,y:190,w:1000,h:80,fill:'EEEEEE',color:'BBBBBB',strokeWidth:1,gradient:nativeGradient});
         if(page===1&&initial)texts[0].text='模型自行改写的封面';
         if(page===2)for(const e of texts){e.size=String(e.size)+'px';e.bold=e.bold?'700':'400';e.color='rgb(39,39,39)';}
         if(page===3&&initial)delete texts.find(e=>e.nodeId==='body-0').nodeId;
@@ -87,7 +89,10 @@ test('05五页故障模拟：异常样式、文案改写、ID遗漏、节点遗�
   const imageRequests=requests.filter(r=>r.image).length,previewHashes=project.slides.map((_,i)=>project.visualPages[i].previewHash);
   await act('build');await wait();assert.equal(project.visualReconstructionCurrent,true);assert.equal(project.candidate.status,'awaiting_review');assert.equal(project.candidate.structure.passed,true);assert.equal(project.candidate.renderer,'Microsoft PowerPoint');
   assert.deepEqual([...attempts.entries()].sort((a,b)=>a[0]-b[0]),[[1,1],[2,1],[3,1],[4,2],[5,3]]);
-  assert.equal(requests.filter(r=>r.image).length,imageRequests+6,'初次审计抠图1次；修正工具仅抠图：第一轮4页×1，第二轮1页×1');assert.deepEqual(project.slides.map((_,i)=>project.visualPages[i].previewHash),previewHashes,'不重绘已批准预览');
+  assert.equal(requests.filter(r=>r.image).length,imageRequests+2,'初次审计抠图1次；四页和后续轮次相同局部只抠图1次，其余复用');assert.deepEqual(project.slides.map((_,i)=>project.visualPages[i].previewHash),previewHashes,'不重绘已批准预览');
+  assert.equal(new Set(project.materials.map(m=>m.id)).size,project.materials.length,'共享素材仅登记一次');
+  assert.equal(new Set(project.reconstruction.slides.slice(1).map(s=>s.elements.find(e=>e.key.startsWith('vector-r'))?.id)).size,1,'跨页SVG复用同一素材');
+  assert.equal(new Set(project.reconstruction.slides.slice(1).map(s=>s.elements.find(e=>e.key.startsWith('cutout-r'))?.id)).size,1,'跨页抠图复用同一素材');
   assert(requests.some(r=>r.prompt.includes('对随附局部装饰用图生图抠图')&&r.referenceCount===1),'初次重建的抠图真实附带局部参考图');
   assert.equal(project.candidate.visualRepair.rounds,2);assert.equal(project.candidate.visualRepair.status,'passed');assert.deepEqual(project.candidate.visualRepair.history.map(r=>r.failed),[[1,2,3,4],[3],[]]);assert.ok(toolModels.every(m=>m==='synthetic-05'),'工具由主模型调用');
   assert(observedLive.some(s=>s.pages.some(p=>p.source==='scene')),'任务未结束时已展示修改场景');assert(observedLive.some(s=>s.pages.some(p=>p.source==='powerpoint')),'任务未结束时已展示实际PPT渲染');assert(observedLive.some(s=>s.round>=1),'能看到后续修正轮次');
@@ -109,7 +114,10 @@ test('05五页故障模拟：异常样式、文案改写、ID遗漏、节点遗�
   const download=await fetch(base+prefix+'/download');assert.equal(download.status,200);const bytes=Buffer.from(await download.arrayBuffer()),zip=await JSZip.loadAsync(bytes);assert.equal(Object.keys(zip.files).filter(n=>/^ppt\/slides\/slide\d+\.xml$/.test(n)).length,5);
   const titlePage=await zip.file('ppt/slides/slide1.xml').async('string');assert.match(titlePage,/typeface="SimSun"/,'识别字体写入可编辑PPT文字');assert.match(titlePage,/sz="2400"/,'40逻辑字号转换为24pt');
   assert.match(await zip.file('ppt/slides/slide3.xml').async('string'),/<a:prstGeom prst="roundRect"/,'独立文本承载形状写入PPT，而非遗漏或烘焙成图');
-  const imagePage=await zip.file('ppt/slides/slide4.xml').async('string'),photo=(imagePage.match(/<p:pic>[\s\S]*?<\/p:pic>/g)||[]).find(e=>e.includes('name="image-0"')),photoSize=photo?.match(/<a:ext cx="(\d+)" cy="(\d+)"/);assert.ok(photoSize,'登记图片仍为独立原生图片对象');assert.ok(Math.abs(Number(photoSize[1])/Number(photoSize[2])-1.5)<.00001,'图片维持原图600×400比例，而非占位区域比例');assert.match(imagePage,/<a:prstGeom prst="hexagon"/,'原生图形真实写入PPTX');
+  assert.match(titlePage,/<a:gradFill/,'AI审计的文字渐变成为原生字形填充');
+  assert.match(await zip.file('ppt/slides/slide3.xml').async('string'),/<a:gradFill/,'AI审计的简单渐变承载保持原生形状');
+  const imagePage=(await zip.file('ppt/slides/slide4.xml').async('string')).replace(/name="!!nf-page-\d+--/g,'name="'),photo=(imagePage.match(/<p:pic>[\s\S]*?<\/p:pic>/g)||[]).find(e=>/name="(?:!!nf-page-\d+--)?image-0"/.test(e)),photoSize=photo?.match(/<a:ext cx="(\d+)" cy="(\d+)"/);assert.ok(photoSize,'登记图片仍为独立原生图片对象');const plan=project.visualPages[3].images[0];assert.ok(Math.abs(Number(photoSize[1])/Number(photoSize[2])-plan.w/plan.h)<.00001,'原图保持独立并完整铺满已确认占位框');assert.match(imagePage,/<a:prstGeom prst="hexagon"/,'原生图形真实写入PPTX');
+  assert.match(imagePage,/<a:gradFill/,'主模型工具新增或修正的渐变真实写入PPTX');
   assert(imagePage.includes('name="text-2-number"'));assert(imagePage.includes('name="text-2-label"'),'小标题编号和文字为两个独立PPT对象');
   const rasterCheck='from PIL import Image;import sys,json;im=Image.open(sys.argv[1]).convert("RGB");points=[(x,y) for y in range(140,380) for x in range(1320,1800) if (lambda c:c[0]>245 and c[1]>235 and c[2]<100)(im.getpixel((x,y)))];print(json.dumps([max(x for x,y in points)-min(x for x,y in points)+1,max(y for x,y in points)-min(y for x,y in points)+1]))';
   const circle=JSON.parse(execFileSync(path.resolve('.venv/Scripts/python.exe'),['-c',rasterCheck,path.join(dir,project.id,project.candidate.dir,'S04.png')],{encoding:'utf8',windowsHide:true}));assert.ok(Math.abs(circle[0]-circle[1])<=2,'实际PowerPoint渲染中的原图圆形仍为圆形');
@@ -134,8 +142,8 @@ test('05五页故障模拟：异常样式、文案改写、ID遗漏、节点遗�
   await act('reviseRebuildElement',{index:0,key:target.key,instruction:'仅调整此图标的颜色'});await wait();
   await act('extractRebuildRegion',{index:1,previewHash:project.visualPages[1].previewHash,region:{x:1400,y:800,w:25,h:25},instruction:'补拆遗漏的蜂窝色块、平面图标和写实主体'});await wait();
   const secondEdited=structuredClone(project.reconstruction.slides[1]);await act('undoRebuildEdit',{index:0});await wait();assert.deepEqual(project.reconstruction.slides[0],beforeLocal.slides[0]);assert.deepEqual(project.reconstruction.slides[1],secondEdited);assert.equal(project.candidate.visualRepair.limit,0,'撤回只更新渲染和导出，不再次工具修改页面');
-  const mixedDownload=await fetch(base+prefix+'/candidate-download?candidate='+project.candidate.id+'&type=pptx');assert.equal(mixedDownload.status,200);const mixedZip=await JSZip.loadAsync(await mixedDownload.arrayBuffer());assert((await mixedZip.file('ppt/slides/slide2.xml').async('string')).includes('name="region-block"'),'撤回第1页后第2页新增素材仍写入导出');
-  await act('undoRebuildEdit',{index:1});await wait();assert.deepEqual(project.reconstruction.slides,beforeLocal.slides);const restoredDownload=await fetch(base+prefix+'/candidate-download?candidate='+project.candidate.id+'&type=pptx');assert.equal(restoredDownload.status,200);const restoredZip=await JSZip.loadAsync(await restoredDownload.arrayBuffer());assert(!(await restoredZip.file('ppt/slides/slide2.xml').async('string')).includes('name="region-block"'));releasedEvidence.perPageUndoPreservesOtherPages=true;
+  const mixedDownload=await fetch(base+prefix+'/candidate-download?candidate='+project.candidate.id+'&type=pptx');assert.equal(mixedDownload.status,200);const mixedZip=await JSZip.loadAsync(await mixedDownload.arrayBuffer());assert((await mixedZip.file('ppt/slides/slide2.xml').async('string')).match(/name="(?:!!nf-page-\d+--)?region-block"/),'撤回第1页后第2页新增素材仍写入导出');
+  await act('undoRebuildEdit',{index:1});await wait();assert.deepEqual(project.reconstruction.slides,beforeLocal.slides);const restoredDownload=await fetch(base+prefix+'/candidate-download?candidate='+project.candidate.id+'&type=pptx');assert.equal(restoredDownload.status,200);const restoredZip=await JSZip.loadAsync(await restoredDownload.arrayBuffer());assert(!(await restoredZip.file('ppt/slides/slide2.xml').async('string')).match(/name="(?:!!nf-page-\d+--)?region-block"/));releasedEvidence.perPageUndoPreservesOtherPages=true;
   persistReviewFailure=true;await act('build');await wait();
   assert.equal(project.candidate.visualRepair.rounds,4);assert.equal(project.candidate.visualRepair.status,'exhausted');assert.equal(project.candidate.status,'failed');assert.equal(project.candidateDownload.available,true);assert.equal(project.releaseCurrent,false);
   assert.equal(project.rebuildLive.status,'done');assert(project.rebuildLive.pages.every(p=>p.source==='powerpoint'&&p.round===4),'保留第四轮实际PPT结果');

@@ -10,6 +10,7 @@ import {imageEditTarget,initAIImageEditor,createPromptHistory} from '../public/p
 import {imageTaskRequest} from '../lib/image-task-queue.mjs';
 import {digest} from '../lib/visual-model.mjs';
 import {imageEditRegionPrompt} from '../lib/image-edit-region.mjs';
+import {imageReviewKey} from '../public/image-review-edit.js';
 
 test('图生图可直接发送人工意见或修改后的整理稿，仅当前图片身份必须匹配',()=>{
   const image={id:'m',kind:'image',generated:true,file:'m.png',sha256:'hash',prompt:'完整原稿'},p={id:'p',materials:[image],slides:[],themeAssets:{directions:[]}};
@@ -38,19 +39,26 @@ test('图片修改弹窗只有一个输入框，人工直接提交与 AI 回填�
     const image={id:'m',kind:'image',generated:true,file:'m.png',sha256:'hash',prompt:'完整旧稿'},p={id:'p',apiReady:true,imageReady:true,imageTaskQueueEnabled:true,materials:[image],slides:[]},target={targetType:'image',sourceImageId:'m'};
     const editor=initAIImageEditor({getProject:()=>p,busy:()=>running,openAPI:()=>errors.push('API'),onError:e=>errors.push(e),act:async(action,b)=>{
       calls.push({action,...b});
-      if(action==='prepareAIImageEdit')p.aiImageEditDrafts={[aiImageTarget(p,target).key]:{mode:b.imageEditMode,sourceHash:'hash',revision:(p.aiImageEditDrafts?.[aiImageTarget(p,target).key]?.revision||0)+1,instruction:'AI 整理后的意见',prompt:'AI 整理后的完整稿'}};
+      if(action==='prepareAIImageEdit')p.aiImageEditDrafts={[aiImageTarget(p,target).key]:{mode:b.imageEditMode,sourceHash:'hash',revision:(p.aiImageEditDrafts?.[aiImageTarget(p,target).key]?.revision||0)+1,...(b.fromReview?{fromReview:true,reviewKey:b.reviewKey}:{}),instruction:b.fromReview?'增大正文并调整间距，其他内容不变。':'AI 整理后的意见',prompt:'AI 整理后的完整稿'}};
     }});
     const flush=()=>new Promise(r=>setImmediate(r)),input=field('#aiEditInstruction'),consent=field('#aiEditConsent');
     const submit=async()=>{field('#aiImageEditForm').handlers.submit({preventDefault(){},stopPropagation(){}});await flush();};
     const click=async key=>{dialog.handlers.click({stopPropagation(){},target:field(key)});await flush();};
     assert.equal((html.match(/<textarea\b/g)||[]).length,1);
-    editor.open(target);assert.equal(field('#aiEditGenerate').disabled,false);
+    editor.open(target);assert.equal(field('#aiEditGenerate').disabled,false);assert.equal(field('#aiEditReview').hidden,true);
     input.value='  直接调整主体\n保留留白。  ';input.handlers.input();consent.checked=true;await submit();
     assert.equal(calls.length,1);assert.equal(calls[0].action,'image');assert.equal(calls[0].instruction,input.value);assert.equal(calls[0].adjustmentRevision,undefined);
+    image.previewReview={status:'needs_revision',issues:['正文过小','正文过小','右侧文字间距不足']};
+    editor.open(target);assert.equal(field('#aiEditReview').hidden,false);assert.equal(field('#aiEditReviewCount').textContent,'2');
+    input.value='';input.handlers.input();const beforeSuggestions=calls.length;await click('#aiEditFromReview');
+    assert.equal(calls.length,beforeSuggestions+1);assert.equal(calls.at(-1).action,'prepareAIImageEdit');assert.equal(calls.at(-1).fromReview,true);assert.equal(calls.at(-1).reviewKey,imageReviewKey(image));
+    assert.equal(input.value,'增大正文并调整间距，其他内容不变。');assert.equal(consent.checked,false);
+    await click('#aiEditPromptUndo');assert.equal(input.value,'');await click('#aiEditPromptRedo');assert.equal(input.value,'增大正文并调整间距，其他内容不变。');
+    input.value+='保留配图。';input.handlers.input();consent.checked=true;await submit();assert.equal(calls.at(-1).action,'image');assert.equal(calls.at(-1).instruction,input.value);
     editor.open(target);input.value='整理这段';await click('#aiEditPrepare');assert.equal(input.value,'AI 整理后的意见');
     await click('#aiEditPromptUndo');assert.equal(input.value,'整理这段');await click('#aiEditPromptRedo');assert.equal(input.value,'AI 整理后的意见');
     input.value+='，再缩小一点';input.handlers.input();consent.checked=true;await submit();assert.equal(calls.at(-1).instruction,input.value);
-    editor.open(target);field('[data-edit-mode="redraw"]').dataset.editMode='redraw';await click('[data-edit-mode="redraw"]');assert.equal(input.value,'完整旧稿');
+    editor.open(target);field('[data-edit-mode="redraw"]').dataset.editMode='redraw';await click('[data-edit-mode="redraw"]');assert.equal(input.value,'完整旧稿');assert.equal(field('#aiEditReview').hidden,true);
     input.value='改过的完整稿，主体靠右';await click('#aiEditPrepare');assert.equal(calls.at(-1).prompt,'改过的完整稿，主体靠右');assert.equal(input.value,'AI 整理后的完整稿');
     input.value+='，最终人工修订';input.handlers.input();await click('#aiEditPromptUndo');assert.equal(input.value,'AI 整理后的完整稿');await click('#aiEditPromptRedo');assert.equal(input.value,'AI 整理后的完整稿，最终人工修订');
     consent.checked=true;await submit();assert.equal(calls.at(-1).prompt,input.value);assert.equal(calls.at(-1).instruction,undefined);
@@ -115,7 +123,7 @@ test('内容原子确认及底图、素材、代表页、全篇预览的两条�
       assert.equal(draw.referenceImages[0].sha256,digest(fs.readFileSync(path.join(data,p.id,before.sourceFile))));
       if(regionHint){assert.notEqual(draw.referenceImages[1].sha256,draw.referenceImages[0].sha256);assert.ok(draw.referenceImages.every(r=>r.field!=='mask'));const saved=target.targetType==='image'?p.materials.find(m=>m.id===p.task.resultImageId):aiImageTarget(p,target).image;assert.deepEqual(saved.editRegion,request.editRegion);}
       const organize=requests.slice(start,drawStart).find(r=>r.messages);if(direct)assert.equal(organize,undefined,'直接提交不调用主模型整理');else assert.ok(!JSON.stringify(organize.messages.at(-1).content).includes(before.prompt),'局部调整不发送完整旧设计');
-    }else{if(aiRedraw&&target.targetType==='visual'){const rewrite=requests.slice(start,drawStart).find(r=>r.messages).messages.at(-1).content;assert.match(rewrite,/多层 Markdown 列表/);assert.match(rewrite,/当前内容关系/);assert.match(rewrite,/适合时积极优先采用/);assert.match(rewrite,/用户要求重新设计排版时/);assert.match(rewrite,/\n  - 标题：已修改标题\n    - 图片：配图/);}assert.equal(draw.prompt,request.prompt);assert.ok(draw.endpoint.endsWith('/images/generations'));assert.equal(draw.referenceImages,undefined);}
+    }else{if(aiRedraw&&target.targetType==='visual'){const rewrite=requests.slice(start,drawStart).find(r=>r.messages).messages.at(-1).content;assert.match(rewrite,/多层 Markdown 列表/);assert.match(rewrite,/当前内容关系/);assert.match(rewrite,/适合内容时必须采用/);assert.match(rewrite,/用户要求重新设计排版时/);assert.match(rewrite,/\n  - 标题：已修改标题\n    - 图片：配图/);}assert.equal(draw.prompt,request.prompt);assert.ok(draw.endpoint.endsWith('/images/generations'));assert.equal(draw.referenceImages,undefined);}
     if(ratioRepair){assert.equal(draws.length,2);assert.ok(draws[1].endpoint.endsWith('/images/edits'));assert.equal(draws[1].referenceImages.length,1);assert.ok(!draws[1].prompt.includes(request.prompt));}
     if(target.targetType!=='image'){
       const after=structuredClone(aiImageTarget(p,target).image),count=requests.length;

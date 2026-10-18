@@ -34,11 +34,11 @@ test('移除分块分类不能掩盖真实质量问题或缺失的看图结论',
 test('设计阶段先评估特殊分块适配性并积极采用，审核不恢复分块门槛',()=>{
   const project=p(),prompt=pageDesignPrompt(project,3);
   assert.match(prompt,/先判断本页是流程、对比、层级、并列还是中心与支撑关系/);
-  assert.match(prompt,/适合时积极优先采用/);assert.match(prompt,/文字体量、图片比例与阅读顺序/);
+  assert.match(prompt,/适合时必须采用/);assert.match(prompt,/文字体量、图片比例与阅读顺序/);
   assert.match(prompt,/layoutIntent 用1–2句说明本页关系、选择的形态及表达作用/);
   assert.match(prompt,/采用常规布局时简述为何更合适/);assert.match(prompt,/落实到对应节点位置和 carrier/);
-  assert.match(prompt,/不能把并列画成层级或因果/);assert.match(prompt,/主动探索斜切、弧线以外的形态/);
-  assert.match(prompt,/严格过半仅为创作要求/);
+  assert.match(prompt,/不能把并列画成层级或因果/);assert.match(prompt,/斜切可用于对照/);assert.match(prompt,/弧线可用于历程串联/);
+  assert.doesNotMatch(prompt,/严格过半/);assert.match(prompt,/不设特殊分块页数配额/);
   const review=designRulesFor(project,3,'review');
   assert.doesNotMatch(review,/特殊分块选择：|适合时积极优先采用|严格过半|floor\(N\/2\)/);
   assert.match(review,/不因常规布局或特殊分块不足而判 failed/);
