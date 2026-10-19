@@ -44,6 +44,16 @@ try {
             try {
                 if ($shape.HasTextFrame -ne 0 -and $shape.TextFrame2.HasText -ne 0) {
                     $range = $shape.TextFrame2.TextRange
+                    $lineCount = 0
+                    $lineSpacing = 0
+                    $characterSpacing = 0
+                    $maxLineCharacters = 0
+                    try {
+                        $lineCount = [int]$range.Lines().Count
+                        for ($lineIndex = 1; $lineIndex -le $lineCount; $lineIndex++) { $maxLineCharacters = [Math]::Max($maxLineCharacters, ([string]$range.Lines($lineIndex,1).Text).TrimEnd([char]13,[char]10).Length) }
+                        if ($lineCount -gt 1) { $lineSpacing = ([double]$range.Lines(2,1).BoundTop - [double]$range.Lines(1,1).BoundTop) * $scale }
+                        try { $characterSpacing = [double]$range.Font.Spacing / 0.6 } catch { }
+                    } catch { } # Optional metrics never suppress usable text bounds.
                     $texts += @{
                         key = Get-NarraformShapeKey $shape
                         x = [double]$shape.Left * $scale
@@ -53,6 +63,10 @@ try {
                         boundWidth = [double]$range.BoundWidth * $scale
                         boundHeight = [double]$range.BoundHeight * $scale
                         fontSize = [double]$range.Font.Size / 0.6
+                        maxLineCharacters = $maxLineCharacters
+                        lineCount = $lineCount
+                        lineSpacing = $lineSpacing
+                        charSpacing = $characterSpacing
                     }
                 }
             } catch {
