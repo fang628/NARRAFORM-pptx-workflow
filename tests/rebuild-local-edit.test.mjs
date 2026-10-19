@@ -20,6 +20,16 @@ test('动画设置变化后单页撤回不能复用旧动画交付，必须按�
 });
 async function toolEdit(p,review,commands){let turns=0;const records=[],requests=[];const result=await repairRebuiltPage({p,index:0,review,round:1,env:{system:'JSON',credentials:new Map([[p.id,{text:{key:'fixture',model:'main'}}]])},reference:'reference',rendered:'rendered',background:'background',createAsset:async()=>({id:'new',sha256:'hash',kind:'image'}),renderScene:async()=>'',record:r=>records.push(structuredClone(r)),requestModel:async(c,e,b)=>{requests.push(b);return {choices:[{message:turns++===0?{content:null,tool_calls:commands.map(([name,args],i)=>({id:'tool-'+i,type:'function',function:{name,arguments:JSON.stringify(args)}}))}:{content:'{"done":true}'}}]};}});return {result,records,requests};}
 
+test('单项原生斜体修正真正应用字体回退，未指定元素不随选字发生变化',async()=>{
+  const p=project(),before=structuredClone(p.reconstruction.slides[0].elements);
+  await toolEdit(p,{targetKey:'body',issues:[]},[['apply_page_patch',{edits:[{key:'body',properties:{fontFace:'Missing Sans Fixture',italic:true}}]}],['render_page',{}]]);
+  const page=p.reconstruction.slides[0],body=page.elements.find(e=>e.key==='body');
+  assert.notEqual(body.fontFace,'Missing Sans Fixture');assert.equal(body.italic,true);
+  assert.equal(body.requestedFontFace,'Missing Sans Fixture');assert.equal(body.fontSubstitution.used,body.fontFace);
+  assert.deepEqual(page.elements.filter(e=>e.key!=='body'),before.filter(e=>e.key!=='body'));
+  assert.ok(page.fontSubstitutions.some(e=>e.key==='body'));
+});
+
 test('单元素修改在工具层拒绝旁改、增删、重排，SVG替换保留key和其他元素',async()=>{
   const p=project(),before=structuredClone(p.reconstruction.slides[0].elements),ctx={slide,project:p,index:0,originalPage:p.reconstruction.slides[0],assets:p.materials,targetKey:'block'};
   const next=patchRebuiltScene(before,{edits:[{key:'block',properties:{fill:'FFF137'}}]},ctx);assert.equal(next[3].fill,'FFF137');assert.deepEqual(next.slice(0,3),before.slice(0,3));

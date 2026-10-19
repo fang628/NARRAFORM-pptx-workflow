@@ -373,6 +373,8 @@ if(designBatchPending){toast('正在保存并确认内容与设计，请稍候')
     if(!$('#previewApprovalConsent').checked)throw Error('请先确认已核对预览');
     if(previewApprovalPending)return;previewApprovalPending=true;b.disabled=true;try{await confirmPreviewForDelivery({getProject:()=>p,action:act,context:previewApprovalContext});$('#previewApprovalDialog').close();}catch(error){$('#previewApprovalMessage').textContent=error.message;throw error;}finally{previewApprovalPending=false;b.disabled=!$('#previewApprovalConsent').checked;}return;
   }
+  if(b.dataset.favoriteStyle){await act('favoriteStyle',{styleId:b.dataset.favoriteStyle});toast('已收藏，可跨项目选用');return;}
+  if(b.dataset.unfavoriteStyle){await act('removeFavoriteStyle',{favoriteId:b.dataset.unfavoriteStyle});toast('已取消收藏；已采用此风格的项目保留');return;}
   if(b.dataset.deleteStyle){await act('deleteRegisteredStyle',{styleId:b.dataset.deleteStyle});toast('风格已删除；已生成方案与历史记录保留');return;}
   if(b.hasAttribute('data-theme-assets-batch')){
     const selected=$('#themeAssets input[name=visualTreatment]:checked')?.value;

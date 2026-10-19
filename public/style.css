@@ -1099,3 +1099,9 @@ button:is(.close,.danger,[data-delete],[data-delete-project],[data-delete-style]
 .rebuild-asset-instances code{min-width:0;overflow-wrap:anywhere}
 
 .progress-sections-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap}.progress-sections-actions .progress-regenerate{min-height:34px;padding:6px 11px;font-size:12px;white-space:nowrap}@media(max-width:640px){.progress-sections-heading{align-items:flex-start;flex-wrap:wrap}.progress-sections-actions{justify-content:flex-start}}
+
+/* Shared custom styles: a compact yellow star, matching the existing library. */
+.style-star{display:inline-flex;align-items:center;gap:5px;margin:0 10px;padding:5px 9px;color:#625e47;background:#e7e4d7;white-space:nowrap;font-size:12px;vertical-align:middle}
+.style-star span{font-size:19px;line-height:1}.style-star.is-starred{background:#fff238;color:#343326}.style-star:hover{background:#fff676;color:#25251f}.style-star:focus-visible{outline:2px solid #8d8140;outline-offset:3px}
+.style-favorites{margin:20px 0;padding-top:16px;border-top:1px solid #b1afa066}.style-favorites h4{font-size:14px}.style-favorites h4 small{margin-left:8px;font:12px var(--mono);opacity:.65}
+.favorite-style-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:12px}.favorite-style-grid article{padding:14px;background:#e9e7df;border-left:3px solid #e8da5a}.favorite-style-grid article>div{display:flex;align-items:center;gap:8px}.favorite-style-grid i{width:12px;height:18px;flex:none;background:var(--swatch)}.favorite-style-grid strong{font-size:13px;overflow-wrap:anywhere}.favorite-style-grid button{margin-left:auto;font-size:11px;white-space:nowrap}.favorite-style-grid p{font-size:12px;line-height:1.7;overflow-wrap:anywhere}.favorite-style-grid summary{font-size:12px;cursor:pointer}

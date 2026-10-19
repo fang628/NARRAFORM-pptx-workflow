@@ -35,7 +35,7 @@ test('底图先确认提示词，AI/手工稿原样文生图，生成后不检�
   await act('rewriteThemeAssetPrompt',{...initial,instruction:'把主体放右下，减淡颜色'});await wait();
   assert.equal(p.task.status,'done',p.task.message);assert.equal(requests.filter(r=>r.prompt).length,0,'自然语言修改不调用生图');
   const rewriteInput=requests.find(r=>r.messages?.at(-1)?.content?.startsWith?.('按自然语言修改无字主题底图提示词')).messages.at(-1).content;
-  assert.match(rewriteInput,/主体描述用一个短语，通常10–25字/);assert.match(rewriteInput,/不要扩写微观结构/);assert.match(rewriteInput,/用户明确要求的细节保留/);
+  assert.match(rewriteInput,/描述用短语/);assert.match(rewriteInput,/不扩写技术参数/);assert.match(rewriteInput,/用户指定细节保留/);
   assert.match(rewriteInput,/单段通常100–220字，不设凑字数下限/);assert.doesNotMatch(rewriteInput,/250–400字|简约要求：/);
   const draft=p.themeAssetPrompts.find(r=>r.theme===initial.theme);assert.equal(draft.prompt,rewritten);assert.equal(draft.revision,initial.revision+1);
   await act('configure',{image:config});
