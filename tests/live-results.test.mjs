@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {projectResultKey,captureLiveView,restoreLiveView} from '../public/task-progress.js';
+import {automaticViewTab} from '../public/automatic-mode.js';
 import {previewImageURL} from '../public/visual-ui.js';
 
 test('进度日志不重绘正文，内容、设计稿、图片与任务状态变化会同步',()=>{
@@ -33,7 +34,7 @@ test('刷新只恢复未提交输入、勾选、展开与光标，未修改字�
 
 function pollingHarness(p,tab=1){
   const source=fs.readFileSync('public/app.js','utf8'),code=source.slice(source.indexOf('function schedulePoll(){'),source.indexOf('async function create('));
-  const ctx={p:structuredClone(p),tab,pollTimer:null,projectRequestRevision:0,renderedResultKey:projectResultKey(p),projectResultKey,activeTaskOrigin:{id:p.task.id,tab},renders:[],toasts:[],timers:[],visualEdit:null,themeAssetEdit:null,readerMaterialId:null,
+  const ctx={p:structuredClone(p),tab,pollTimer:null,projectRequestRevision:0,renderedResultKey:projectResultKey(p),projectResultKey,automaticViewTab,activeTaskOrigin:{id:p.task.id,tab},renders:[],toasts:[],timers:[],visualEdit:null,themeAssetEdit:null,readerMaterialId:null,
     setTimeout(fn,delay){ctx.timers.push({fn,delay});return ctx.timers.length;},clearTimeout(){},api:async()=>structuredClone(ctx.response),busy:()=>ctx.p?.task?.status==='running',hasQueuedImages:()=>false,
     aiImageEditor:{refresh(){}},finishPromptTask(){},toast:v=>ctx.toasts.push(v),nav(){},syncImageLibrary(){},$:()=>({open:false}),
     render(options){ctx.renders.push({options,p:structuredClone(ctx.p),tab:ctx.tab});ctx.renderedResultKey=projectResultKey(ctx.p);}};

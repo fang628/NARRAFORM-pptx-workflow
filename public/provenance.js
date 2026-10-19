@@ -89,7 +89,7 @@ function sourceExcerptHTML(m,group){
   return richSourceHTML((m.text||'').slice(start,end),{spans,structures});
 }
 export function sourcePanel(p,s,i,readonly=false,scope=readonly?'read':'edit'){
-  const links=s.sourceLinks||[],linked=new Set(links.filter(l=>!l.stale&&(['title','subtitle','notes'].includes(l.target)||l.target.startsWith('body:')||(l.target.startsWith('element:')&&s.elements?.find(n=>n.id===l.target.slice(8))?.type==='text'))).map(l=>l.target)),legacy=(s.sources||[]).filter(id=>!links.some(l=>l.materialId===id));
+  const links=s.sourceLinks||[],linked=new Set(links.filter(l=>!l.stale&&(['title','subtitle','notes'].includes(l.target)||l.target.startsWith('body:')||(l.target.startsWith('element:')&&['text','table'].includes(s.elements?.find(n=>n.id===l.target.slice(8))?.type)))).map(l=>l.target)),legacy=(s.sources||[]).filter(id=>!links.some(l=>l.materialId===id));
   const key=p.id+':'+i+':'+scope;
   const grouped=groupSourceLinks(p,links);
   return '<details class="source-relations" data-source-panel="'+h(key)+'" '+(sourceExpansion.get(key)?'open':'')+'><summary class="source-heading"><div><span class="eyebrow">SOURCE CONNECTION</span><h4>原材料对应索引 <small>'+linked.size+' 处文本已关联 · '+grouped.length+' 处原文</small></h4></div>'+foldHint+'</summary><div class="source-relations-body">'+(readonly?'':'<div class="source-tools"><button class="text-button" type="button" data-link-source="'+i+'">＋ 关联原材料</button></div>')+(!links.length&&!legacy.length?'<p class="source-empty">尚未关联原材料。用户自拟内容可保留为空；取自材料的结论请补充摘录。</p>':'')+grouped.map(group=>{const l=group.link;

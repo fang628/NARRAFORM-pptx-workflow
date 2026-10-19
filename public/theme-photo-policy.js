@@ -2,10 +2,18 @@ const uses=['hero-image','toc-image'];
 const own=(o,k)=>Object.prototype.hasOwnProperty.call(o||{},k);
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function themePhotoEligible(p){
+  if(p?.analysis?.themeClarity==='unclear')return true;
   const brief=[p?.brief?.title,p?.brief?.purpose,p?.brief?.audience].join(' ');
   if(/答辩|defen[sc]e/i.test(brief))return true;
   if(/创新创业|商业计划|路演|融资/.test(brief))return true;
   return !/学术|科研|学位|论文|博士|硕士|毕业|实验研究|研究汇报|组会|academic\s+(?:report|presentation)|research\s+(?:report|presentation)/i.test(brief);
+}
+export function fallbackThemePhotoReferences(p,references){
+  if(p?.analysis?.themeClarity!=='unclear')return references;
+  const photos=themePhotoCandidates(p,{automatic:true});if(!photos.length)return references;
+  const next={...references},uses=[...(p.brief?.cover!==false?['hero-image']:[]),...(p.brief?.toc&&Number(p.brief?.pages)!==1?['toc-image']:[])];
+  for(const use of uses){if(next[use])continue;const other=use==='hero-image'?'toc-image':'hero-image';const photo=photos.find(m=>!next[other]||photoIdentity(p,m.id)!==photoIdentity(p,next[other]));if(photo)next[use]=photo.id;}
+  return next;
 }
 export function themePhotoCandidates(p,{automatic=false}={}){
   if(!themePhotoEligible(p))return [];
@@ -45,5 +53,5 @@ export function themePhotoSelector(p,{theme,use,photoMaterialId,attribute='data-
   if(!p.themePhotoReferenceEnabled||!themePhotoEligible(p)||!uses.includes(use))return '';
   const d=p.themeAssets?.directions?.find(d=>d.id===theme),selected=photoMaterialId===undefined?selectedThemePhotoId(d,use):photoMaterialId,photos=themePhotoCandidates(p);
   if(!photos.length)return '';
-  return `<section class="theme-photo-choice"><label>照片主体${emptyLabel==='不使用材料照片 · 艺术化生成'?'（可选）':''}<select ${attribute} data-theme="${h(theme)}" data-use="${h(use)}"><option value="">${h(emptyLabel)}</option>${photos.map(m=>`<option value="${h(m.id)}" data-photo-hash="${h(m.sha256)}" ${m.id===selected?'selected':''}>${h(m.name)}${m.recognized?'':'（请确认是照片）'}</option>`).join('')}</select></label><div class="theme-photo-preview" data-theme-photo-preview>${selected?`<img src="/api/projects/${h(p.id)}/assets/${h(selected)}" alt="照片主体参考"><span>${h(photos.find(m=>m.id===selected)?.name||'参考照片')}</span>`:''}</div><p class="subtle">可用于普通项目和答辩；仅借用照片主体进行图生图。封面与目录须使用不同照片，原图保留。</p></section>`;
+  return `<section class="theme-photo-choice"><label>照片主体${emptyLabel==='不使用材料照片 · 艺术化生成'?'（可选）':''}<select ${attribute} data-theme="${h(theme)}" data-use="${h(use)}"><option value="">${h(emptyLabel)}</option>${photos.map(m=>`<option value="${h(m.id)}" data-photo-hash="${h(m.sha256)}" ${m.id===selected?'selected':''}>${h(m.name)}${m.recognized?'':'（请确认是照片）'}</option>`).join('')}</select></label><div class="theme-photo-preview" data-theme-photo-preview>${selected?`<img src="/api/projects/${h(p.id)}/assets/${h(selected)}" alt="照片主体参考"><span>${h(photos.find(m=>m.id===selected)?.name||'参考照片')}</span>`:''}</div><p class="subtle">普通项目和答辩可选照片；材料无明确主题时优先借用已识别照片主体。封面与目录须使用不同照片，原图保留。</p></section>`;
 }

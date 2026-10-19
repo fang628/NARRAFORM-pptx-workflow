@@ -36,7 +36,7 @@ test('05五页故障模拟：异常样式、文案改写、ID遗漏、节点遗�
       }
       if(body.prompt&&(body.prompt.includes('仅独立非事实视觉元素')||body.prompt.includes('对随附局部装饰用图生图抠图')))reply={data:[{b64_json:new Resvg('<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080"><circle cx="960" cy="540" r="250" fill="#fff238"/></svg>').render().asPng().toString('base64')}]};
       if(prompt.startsWith('渲染对照验收：')){
-        const raw=JSON.parse(reply.choices[0].message.content),texts=JSON.parse(prompt.split('准确文字：')[1].split('\n原生对象清单：')[0]),page=Number(texts.find(e=>e.nodeId==='title').text.slice(0,2)),formatCount=(formatCounts.get(page)||0)+1;formatCounts.set(page,formatCount);
+        const raw=JSON.parse(reply.choices[0].message.content),texts=JSON.parse(prompt.split('准确文字：')[1].split('\n')[0]),page=Number(texts.find(e=>e.nodeId==='title').text.slice(0,2)),formatCount=(formatCounts.get(page)||0)+1;formatCounts.set(page,formatCount);
         // Exercise actual HTTP/provider/integration recovery before layout repairs.
         if(page===1&&formatCount<=2){res.setHeader('content-type','application/json');res.end(JSON.stringify({choices:[{message:{content:formatCount===1?'只有验收说明，没有JSON':'{"checks":{"visual":true},"notes":"缺少验收字段"}'}}]}));return;}
         const count=(reviewCounts.get(page)||0)+1;reviewCounts.set(page,count);

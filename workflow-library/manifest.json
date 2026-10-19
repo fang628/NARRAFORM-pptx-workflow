@@ -1,6 +1,6 @@
 {
   "source": "pptx-workflow",
-  "version": "33fe7babef1f8876",
+  "version": "ea7e65c741698c1e",
   "copiedAt": "2026-10-10T14:38:43.158Z",
   "files": [
     {
@@ -20,8 +20,8 @@
     },
     {
       "file": "shared/design-principles.md",
-      "sha256": "16d8c513a4e55c2fe84ce818809bdbd2e25e9bb95b1d6bbc870fee4e07db1ee8",
-      "bytes": 7851
+      "sha256": "aaa23de202e4e0aec453bab2ddd288553aa77dedfd1db2089d90d9145ae9150b",
+      "bytes": 8208
     },
     {
       "file": "shared/incremental-rework.md",
@@ -135,8 +135,8 @@
     },
     {
       "file": "stages/13-design/references/gen-prompt-scope.md",
-      "sha256": "c227633a69ad3a68baddb7649181cd1ef0df7c27d916d11ddbb0222e864f3972",
-      "bytes": 6531
+      "sha256": "b3a4baebc6bf34a8fa271280ee52fb1cc7ad35fd34a3f05411e8fd0e97133a42",
+      "bytes": 6700
     },
     {
       "file": "stages/13-design/references/layout-intent.md",
@@ -165,8 +165,8 @@
     },
     {
       "file": "stages/13-design/references/style-guide.md",
-      "sha256": "94df49dcf81bb23eb58732057b34957ff180a44d922a36d270772495e88ac88f",
-      "bytes": 5677
+      "sha256": "deaa3966ddec35f1a5bcd679b977d2e6ec2a7903e892dacfabd01ed42d31604b",
+      "bytes": 5607
     },
     {
       "file": "stages/13-design/references/style-tokens.json",

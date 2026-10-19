@@ -30,6 +30,7 @@ export function fixtureReply(b,options={}){
   }
   let result;
   if(prompt.startsWith('生图提示词发送前检查：'))result={passed:true,issues:[],correctedPrompt:null};
+  else if(prompt.startsWith('提取页顶横列样式：'))result={referenceIndex:JSON.parse(prompt.split('可选页索引：')[1])[0],box:[0,0,1,.18],appearance:{accent:'315678',track:'DDEEFF',completedFill:'AACCDD',ink:'272727',muted:'334455',indicatorInk:'FFFFFF',border:'8899AA',completedBorder:'557788',activeBorder:'112233',shadow:{color:'000000',opacity:.12,blur:2,offset:1,angle:90}},evidence:'合成测试：只验证选定单张预览与取色协议'};
   else if(prompt.includes('按照 pptx-workflow 1.3')){const nodes=JSON.parse(prompt.split('已有节点：')[1].split('\n使用的材料：')[0]);result={purpose:'合成页面验证',conclusion:'保持事实和层级',logic:'承接前页进入下一步',layoutIntent:'左文右图，装饰独立重建',style:'浅灰底深字、亮黄色强调、独立渐变与圆形装饰',readingOrder:nodes.map(n=>n.id),nodes:nodes.map(n=>({id:n.id,position:n.type==='image'?'右上':'左侧',relativeSize:'中等',alignment:'左对齐',carrier:'独立原生对象',relation:n.parentId?'附属'+n.parentId:'并列'})),differences:'保留每页准确内容',missingMaterials:[]};}
   else if(prompt.includes('识别与理解单份材料'))result={category:'研究材料',summary:'分子修饰研究材料',keyPoints:['分子修饰'],facts:[],suggestedUse:'主题与配图',questions:[]};
   else if(prompt.startsWith('汇总材料理解')){const readings=JSON.parse(prompt.split('材料理解：')[1]);result={summary:'分子修饰与递送研究',outline:[{title:'研究目标',sourceIds:readings.map(r=>r.id)}],questions:[]};}

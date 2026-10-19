@@ -64,7 +64,7 @@ test('简约封面与目录主题明确、视觉区丰满，保留阅读留白�
   const p={visualTreatment:'flat',brief:{title:'生态循环',cover:true,toc:true}},d={id:'a',name:'不发送的名称',coreColor:'#FFFFFF',heroSubject:'层叠叶片环绕的循环意象',tocSubject:'展开叶脉与循环色面的交织意象',contentSubject:'左下低对比叶片轮廓',textArea:'左侧阅读留白',style:'绿色'};
   assert.ok(visualTreatmentContext(p).includes(flatBackgroundSubjectRule));
   for(const use of ['hero-image','toc-image']){
-    const prompt=themeAssetPrompt(p,d,use);assert.match(prompt,/主题主视觉清楚/);assert.match(prompt,/大尺度轮廓与适度层次充实视觉区/);assert.match(prompt,/保留文字留白/);
+    const prompt=themeAssetPrompt(p,d,use);assert.match(prompt,/平面色块、点阵/);assert.match(prompt,/避免复杂渐变与光影/);
     assert.ok(!prompt.includes(d.name));assert.match(prompt,/不含文字、数字/);
     assert.ok(!themeAssetPrompt({...p,visualTreatment:'realistic'},d,use).includes('大尺度轮廓与适度层次充实视觉区'));
   }
@@ -118,4 +118,25 @@ test('真实 HTTP：选择先传给规划，切换类型重新规划并持久化
   assert.equal(p.visualTreatment,'flat');assert.deepEqual(p.themeAssets,preserved);assert.deepEqual(p.styleRegistry,registry);
   const saved=JSON.parse(fs.readFileSync(path.join(data,p.id,'project.json'),'utf8'));assert.equal(saved.visualTreatment,'flat');assert.deepEqual(saved.themeAssets,preserved);
   await call(prefix+'/action',{action:'generateThemeAssets',visualTreatment:'invalid'},400);
+});
+
+ test('简约与写实底图主体、留白要求一致，只替换绘画表现且不附长段规范',()=>{
+  const d={id:'a',name:'测试风格',coreColor:'#FFFFFF',style:'蓝色',heroSubject:'贯穿全篇的生态树冠',tocSubject:'展开的生态叶脉',contentSubject:'叶片轮廓',textArea:'左侧留白'};
+  const p={brief:{title:'生态'},visualTreatment:'flat'};
+  for(const use of ['hero-image','toc-image','content-background']){
+    const flat=themeAssetPrompt(p,d,use),real=themeAssetPrompt({...p,visualTreatment:'realistic'},d,use);
+    assert.equal(flat.replace(visualTreatmentText('flat'),'表现'),real.replace(visualTreatmentText('realistic'),'表现'));
+    assert.ok(flat.length<320);assert.ok(!flat.includes(flatBackgroundSubjectRule));
+  }
+  const style=imageStyle({...d,typography:'书法体渐变',frames:'斜切框；蓝色渐变填充',decoration:'复杂光影；点阵'},{visualTreatment:'flat'});
+  assert.match(style,/文字无渐变/);assert.match(style,/色块与文本框用平整填充/);assert.doesNotMatch(style,/蓝色渐变填充|复杂光影|书法体渐变/);assert.match(style,/斜切框/);
+  assert.match(visualTreatmentContext(p),/主体选取要求|主体均须/);
+ });
+
+test('风格规则沿用原有提示词模板分段，不新增规范分栏',()=>{
+ const p={brief:{title:'测试'},visualTreatment:'flat'},d={coreColor:'#FFFFFF',heroSubject:'生态树冠',style:'绿色',textArea:'右侧留白'};
+ const prompt=themeAssetPrompt(p,d,'hero-image');
+ assert.match(prompt,/^用途：.*。表现：.*。主体：.*。画面：/);
+ assert.doesNotMatch(prompt,/\n|风格规范|页内元素|主体选取要求/);
+ assert.match(visualTreatmentContext(p),/保持现有模板的分段与字段顺序/);
 });

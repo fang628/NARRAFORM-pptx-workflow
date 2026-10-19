@@ -20,7 +20,7 @@ function fixture(){
   const p={brief:{progress:true,toc:true,title:'统一进度与原生动画'},progressSections:[{id:'a',title:'背景'},{id:'b',title:'方法'},{id:'c',title:'结果'},{id:'d',title:'总结'}],slides:[{kind:'cover',title:'标题'},{kind:'toc',title:'目录'},{kind:'content',title:'背景',progressSectionId:'a'},{kind:'content',title:'结果',progressSectionId:'c'}].map(s=>({...s,body:[],sources:[]})),selectedTheme:'a',concepts:[{id:'a',coreColor:'102030',style:'深蓝底，浅色字，青色强调 #82CED0'}],materials:[]};
   prepareRebuildPresentation(p);return p;
 }
-test('4–6段箭形的相邻多边形边界完全咬合，整行不越界，高亮与底层使用相同轮廓',()=>{
+test('4–6段箭形的相邻多边形边界保留细微间距，整行不越界，高亮与底层使用相同轮廓',()=>{
   for(const count of [4,5,6]){
     const p=fixture();p.progressSections=Array.from({length:count},(_,i)=>({id:'section-'+(i+1),title:'章节'+(i+1)}));prepareRebuildPresentation(p);
     const elements=normalizeRebuildProgress(p,2,[]),tracks=elements.filter(e=>e.key.startsWith('nf-progress-track-'));
@@ -28,7 +28,7 @@ test('4–6段箭形的相邻多边形边界完全咬合，整行不越界，高
     const near=(a,b)=>assert(Math.abs(a-b)<.0001);
     for(let i=1;i<count;i++){
       const prev=vertices(tracks[i-1]),next=vertices(tracks[i]);
-      for(const [a,b]of [[prev[1],next[0]],[prev[2],next[5]],[prev[3],next[4]]]){near(a[0],b[0]);near(a[1],b[1]);}
+      for(const [a,b]of [[prev[1],next[0]],[prev[2],next[5]],[prev[3],next[4]]]){near(a[0]+p.rebuildPresentation.progress.gap,b[0]);near(a[1],b[1]);}
     }
     near(tracks[0].x,p.rebuildPresentation.progress.x);near(tracks.at(-1).x+tracks.at(-1).w,p.rebuildPresentation.progress.x+p.rebuildPresentation.progress.w);
     const indicator=elements.find(e=>e.key==='nf-progress-indicator');assert.deepEqual(vertices(indicator),vertices(tracks.find(e=>e.x===indicator.x)));
@@ -39,12 +39,12 @@ test('05统一进度条的几何和字体，封面目录隐藏；同章节不滑
   const pages=p.slides.map((s,i)=>({elements:normalizeRebuildProgress(p,i,i===2?original:[])}));p.reconstruction={slides:pages};
   assert.equal(pages[0].elements.length,0);assert.equal(pages[1].elements.length,0);
   assert.equal(pages[2].elements.filter(e=>e.role==='navigation').length,4);assert(!pages[2].elements.some(e=>e.key==='bad-nav'||e.key==='bad-nav-rail'));assert.equal(pages[2].elements[0].key,'title');
-  const labels=pages[2].elements.filter(e=>e.role==='navigation');for(const label of labels){const other=pages[3].elements.find(e=>e.key===label.key);assert(Math.abs((other.y+other.h/2)-(label.y+label.h/2))<.001);assert(Math.abs((other.x+other.w/2)-(label.x+label.w/2))<.001);assert(Math.abs(other.w/other.size-label.w/label.size)<.001);assert.equal(other.fontFace,label.fontFace);assert.equal(label.size,label.bold?35:28);assert.equal(other.size,other.bold?35:28);}
+  const labels=pages[2].elements.filter(e=>e.role==='navigation');for(const label of labels){const other=pages[3].elements.find(e=>e.key===label.key);assert(Math.abs((other.y+other.h/2)-(label.y+label.h/2))<.001);assert(Math.abs((other.x+other.w/2)-(label.x+label.w/2))<.001);assert(Math.abs(other.w/other.size-label.w/label.size)<.001);assert.equal(other.fontFace,label.fontFace);assert.equal(label.size,label.bold?30:24);assert.equal(other.size,other.bold?30:24);}
   assert.equal(p.rebuildPresentation.progress.accent,'82CED0','不得把网页黄色强加给PPT');
   const arrows=pages[2].elements.filter(e=>e.managed==='progress'&&e.type==='shape');assert.equal(arrows.length,5);assert(arrows.every(e=>e.shape===(e.x===p.rebuildPresentation.progress.x?'hexagon':'chevron')));
   for(const label of labels){const arrow=arrows.find(e=>e.key==='nf-progress-track-'+label.key.at(-1));assert(label.y>=arrow.y&&label.y+label.h<=arrow.y+arrow.h);assert.equal(label.align,'center');assert.equal(label.valign,'mid');}
   assert.deepEqual(normalizeRebuildProgress(p,2,pages[2].elements),pages[2].elements);
-  const plan=deliveryMotionPlan(p);assert(!plan.pages[2].progress);assert(Math.abs(plan.pages[3].progress.toX-787)<.001);assert(plan.pages[3].progress.offset<0);
+  const plan=deliveryMotionPlan(p);assert(!plan.pages[2].progress);assert.equal(plan.pages[3].progress.toX,pages[3].elements.find(e=>e.key==='nf-progress-indicator').x);assert(plan.pages[3].progress.offset<0);
   assert.equal(plan.pages[3].transition.type,'morph');assert.equal(plan.pages[3].transition.startDelay,0);assert.equal(plan.pages[3].progress.startDelay,0);
   assert.equal(plan.pages[3].labelChanges.length,2);assert(plan.pages[3].labelChanges.some(c=>c.fromSize<c.toSize&&c.toBold));assert(plan.pages[3].labelChanges.some(c=>c.fromSize>c.toSize&&!c.toBold));
   p.slides[3].progressSectionId='section-1';p.reconstruction.slides[3].elements=normalizeRebuildProgress(p,3,[]);assert(!deliveryMotionPlan(p).pages[3].progress);
@@ -65,14 +65,14 @@ test('当前章节字号放大25%，长名称预留放大空间；场景与05重
   const normal=progressLabelSize(text,width),active=progressLabelSize(text,width,{current:true});
   assert.equal(active,normal*1.25);assert(active*[...text].length<=width+.001);
   const p=fixture(),elements=progressSceneElements({...p.brief,progressSections:p.progressSections,progressNavigation:[{text:'背景',current:true},{text:'方法',current:false}]},2,4,p.slides[2],{accent:'82CED0',muted:'888888'});
-  assert.deepEqual(elements.filter(e=>e.type==='text').map(e=>e.size),[35,28]);
+  assert.deepEqual(elements.filter(e=>e.type==='text').map(e=>e.size),[30,24]);
   const old=p.rebuildPresentation;p.rebuildPresentation={...old,signature:'旧版字号规则'};delete p.rebuildPresentation.progress.activeScale;
   prepareRebuildPresentation(p);assert.equal(p.rebuildPresentation.progress.activeScale,1.25);
   p.progressSections[1].title=text;
   const labels=normalizeRebuildProgress(p,2,[]).filter(e=>e.type==='text');
   const inactive=labels.filter(e=>!e.bold);assert.equal(new Set(inactive.map(e=>e.size)).size,1);
   assert(labels.find(e=>e.bold).size>Math.max(...inactive.map(e=>e.size)),'当前章节不能因名称较长而比其他章节小');
-  assert(labels.every(e=>e.size>=22),'长名称也不得缩到阅读下限以下');
+  assert(labels.every(e=>e.size>0&&e.noWrap),'长名称缩字号且保持单行');
 });
 
 test('箭形和气泡横列均保留原生渐变、描边及阴影；切换版式使交付版本失效',()=>{
@@ -95,7 +95,7 @@ test('程序生成导航符合审计准确文案要求，关闭进度条不增�
 
 test('审计排除旧导航与匿名顶栏素材，保留同名正文、原图，长章节使用实际导航高度',()=>{
   const p=fixture();p.progressSections[1].title='用于验证多行章节标题的完整长名称';prepareRebuildPresentation(p);
-  const region=rebuildProgressRegion(p,2);assert(region.h>68);assert.equal(rebuildProgressRegion(p,0),null);
+  const region=rebuildProgressRegion(p,2);assert.equal(region.h,68);assert.equal(rebuildProgressRegion(p,0),null);
   const elements=[
     {key:'title',type:'text',nodeId:'title',text:'背景',x:80,y:20,w:500,h:45},
     {key:'old-text',type:'text',text:'背景',x:80,y:20,w:100,h:45},
@@ -116,7 +116,7 @@ test('两种版式自动匹配所选风格配色，切换风格后重新取色',
     p.selectedTheme='b';prepareRebuildPresentation(p);assert.equal(p.rebuildPresentation.progress.accent,'8350AC');
     const row=normalizeRebuildProgress(p,2,[]),first=row.find(e=>e.key==='nf-progress-track-0'),active=row.find(e=>e.key==='nf-progress-indicator');
     assert.equal(first.shape,layout==='bubble'?'roundRect':'hexagon');assert.equal(active.shape,first.shape);assert.equal(active.fill,'8350AC');
-    const panel=deliveryPresentationPanel({...p,unifiedRebuildProgress:true});assert.match(panel,/value="chevron"/);assert.match(panel,/value="bubble"/);assert.match(panel,/配色自动适配/);
+    const panel=deliveryPresentationPanel({...p,unifiedRebuildProgress:true});assert.match(panel,/value="chevron"/);assert.match(panel,/value="bubble"/);assert.match(panel,/取自一张最接近/);
   }
 });
 
@@ -131,21 +131,21 @@ test('两种横列强制保留渐变、轻阴影与细描边，缺省或零效�
   }
 });
 
-test('按实际文字分配单框长度、字号和高度；跨页不抖动，长名称不压缩到可读下限以下',()=>{
+test('按实际文字分配单框长度并减小字号；跨页不抖动，长名称不换行增高',()=>{
   const short=['背景','方法','结果','总结'],mixed=['背景','材料预处理与实验设计及验证方法的数据处理与分析','结果','总结'];
   const dense=Array.from({length:6},(_,i)=>'章节'+i+'材料处理与实验结果比较分析以及后续研究方向');
   for(const layout of ['chevron-row','bubble-row']){
     const style={x:86,y:12,w:1420,layout,size:28,minSize:22,gap:8,accent:'315678',track:'CCDDEE'};
     const metrics=names=>progressRowMetrics(names.map(text=>({text})),style),simple=metrics(short),complex=metrics(mixed),full=metrics(dense);
-    assert(complex.segments[1].w>complex.segments[0].w*1.5);assert(complex.h>simple.h);assert(full.h>complex.h);assert(full.normalSize<simple.normalSize);assert(full.normalSize>=22);
+    assert(complex.segments[1].w>complex.segments[0].w*1.5);assert(complex.h<=simple.h);assert(full.h<=complex.h);assert(full.normalSize<simple.normalSize);assert(full.normalSize>0);
     for(const names of [short,mixed,dense,['A','Research design','图像与数据融合','结论'],['背景','第一阶段\n第二阶段','结果','总结']]){
       const rows=names.map((_,active)=>progressArrowRow(names.map((text,i)=>({text,current:i===active})),style));
       const tracks=rows[0].filter(e=>e.key.startsWith('nf-progress-track-'));
       assert(Math.abs(tracks.at(-1).x+tracks.at(-1).w-1506)<.001);
-      for(let i=1;i<tracks.length;i++)assert(Math.abs(tracks[i].x-(tracks[i-1].x+tracks[i-1].w)-(layout==='bubble-row'?8:-18))<.001);
+      for(let i=1;i<tracks.length;i++)assert(Math.abs(tracks[i].x-(tracks[i-1].x+tracks[i-1].w)-(layout==='bubble-row'?6:-14))<.001);
       for(const row of rows){
         assert.deepEqual(row.filter(e=>e.key.startsWith('nf-progress-track-')).map(({x,y,w,h})=>({x,y,w,h})),tracks.map(({x,y,w,h})=>({x,y,w,h})));
-        for(const label of row.filter(e=>e.type==='text')){const track=tracks[Number(label.key.split('-').at(-1))];assert(label.size>=22);assert(label.x>=track.x&&label.x+label.w<=track.x+track.w+.001);assert(label.y+label.h<=track.y+track.h+.001);}
+        for(const label of row.filter(e=>e.type==='text')){const track=tracks[Number(label.key.split('-').at(-1))];assert(label.size>0&&label.noWrap);assert(label.x>=track.x&&label.x+label.w<=track.x+track.w+.001);assert(label.y+label.h<=track.y+track.h+.001);}
       }
     }
   }
@@ -163,9 +163,9 @@ test('实际PowerPoint保存同步Morph与文字几何缩放，正文仅淡化�
   const animations=JSON.parse(fs.readFileSync(path.join(folder,'animation-manifest.json')));assert.equal(animations.pages[3].transition,'morph');assert.equal(animations.pages[3].progressEffects,0);assert.equal(animations.pages[3].progressMorph,true);assert.equal(animations.pages[3].labelMorphCount,2);assert.equal(animations.pages[3].startDelay,0);assert.equal(animations.pages[2].transition,'fade');
   const zip=await JSZip.loadAsync(fs.readFileSync(deck)),xml=await zip.file('ppt/slides/slide4.xml').async('string');
   assert.match(xml,/<p:transition/);assert.match(xml,/<p159:morph[^>]+option="byObject"/);assert.doesNotMatch(xml,/<p:animMotion/);assert.match(xml,/<p:bg>/);assert.match(xml,/name="!!nf-progress-label-0"/);assert.match(xml,/name="!!nf-page-3--title"/);
-  const arrow=(xml.match(/<p:sp\b[^>]*>[\s\S]*?<\/p:sp>/g)||[]).find(s=>s.includes('name="!!nf-progress-indicator"'));assert.match(arrow,/<a:prstGeom prst="chevron"/);
-  const firstTrack=(xml.match(/<p:sp\b[^>]*>[\s\S]*?<\/p:sp>/g)||[]).find(s=>s.includes('name="!!nf-progress-track-0"'));assert.match(firstTrack,/<a:prstGeom prst="hexagon"/);assert.match(firstTrack,/<a:gd name="adj"/);
-  assert.match(arrow,/<a:gradFill/);assert.match(arrow,/<a:outerShdw/);assert.match(arrow,/<a:ln w="9144"/);assert.match(arrow,/<a:gd name="adj"/);
+  const arrow=(xml.match(/<p:sp\b[^>]*>[\s\S]*?<\/p:sp>/g)||[]).find(s=>s.includes('name="!!nf-progress-indicator"'));assert.match(arrow,/<a:custGeom>/);assert.equal((arrow.match(/<a:pt /g)||[]).length,6);
+  const firstTrack=(xml.match(/<p:sp\b[^>]*>[\s\S]*?<\/p:sp>/g)||[]).find(s=>s.includes('name="!!nf-progress-track-0"'));assert.match(firstTrack,/<a:custGeom>/);assert.match(firstTrack,/<a:pt x="0" y="50000"/);
+  assert.match(arrow,/<a:gradFill/);assert.match(arrow,/<a:outerShdw/);assert.match(arrow,/<a:ln w="9144"/);assert.match(arrow,/<a:close\/>/);
   const third=await zip.file('ppt/slides/slide3.xml').async('string');assert.doesNotMatch(third,/<p:animMotion/);
   assert(manifest.pages[3].texts.some(t=>t.key==='nf-progress-label-0'));
   for(const page of manifest.pages.slice(2)){
@@ -212,12 +212,12 @@ test('真实PowerPoint：六个长章节在两种自适应横列中均完整可�
     const {stdout}=await promisify(execFile)('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.resolve('tools/render_deck.ps1'),'-DeckPath',deck,'-OutputDir',dir,'-MotionSpec',spec],{timeout:110000,maxBuffer:2e6,windowsHide:true});
     const manifest=JSON.parse(stdout);
     for(const page of manifest.pages.slice(2)){
-      const labels=page.texts.filter(t=>t.key.startsWith('nf-progress-label-'));assert.equal(labels.length,6);assert(labels.every(t=>t.fontSize>=22&&t.boundWidth<=t.w+1&&t.boundHeight<=t.h+1),'长章节须保持字号下限且不出框');
-      if(layout==='bubble')assert(p.reconstruction.slides[page.index].elements.filter(e=>e.type==='shape').every(e=>e.adjustments.adj<50000),'高气泡不能用大圆弧侵占首尾行文字区域');
+      const labels=page.texts.filter(t=>t.key.startsWith('nf-progress-label-'));assert.equal(labels.length,6);assert(labels.every(t=>t.fontSize>0&&t.boundWidth<=t.w+1&&t.boundHeight<=t.h+1),'长章节保持单行，按实际字号渲染且不出框');
+      if(layout==='bubble')assert(p.reconstruction.slides[page.index].elements.filter(e=>e.type==='shape').every(e=>e.h<=44),'气泡须保持低矮');
     }
     const zip=await JSZip.loadAsync(fs.readFileSync(deck)),xml=await zip.file('ppt/slides/slide4.xml').async('string');
     const shapes=(xml.match(/<p:sp\b[^>]*>[\s\S]*?<\/p:sp>/g)||[]).filter(s=>/name="!!nf-progress-(?:track|indicator)/.test(s));assert.equal(shapes.length,7);
     for(const shape of shapes){assert.match(shape,/<a:gradFill/);assert.match(shape,/<a:outerShdw/);assert.match(shape,/<a:ln w="[1-9]/);}
-    assert.match(xml,/<p159:morph/);
+    assert.match(xml,/<p159:morph/);assert.match(xml,/wrap="none"/);
   }
 });
