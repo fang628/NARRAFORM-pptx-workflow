@@ -49,8 +49,8 @@ test('排除的预设不能因空匹配、登记继承或指定参考被重新�
   for(const ref of ['B','STYLE-child','STYLE-grandchild'])assert.throws(()=>validateStyleSelection({...direction,referenceStyleId:ref},p,{referenceStyleId:ref}),/不在贴合主题/);
   assert.doesNotThrow(()=>validateStyleSelection({...direction,referenceStyleId:'STYLE-custom',styleSelection:none},p));
   const same=fixtureDirections().map(d=>({...direction,id:d.id}));
-  assert.deepEqual(validateThemeDirections(same,p,{requirePlanning:true}).map(d=>d.referenceStyleId),['A','A','A']);
-  const context=workflowStyleContext();assert.match(context,/三种方向可以采用同一合适预设/);assert.match(context,/不能只因配色好看/);assert.match(context,/指定参考也不能绕过主题适配/);
+  assert.deepEqual(validateThemeDirections(same,p,{requirePlanning:true}).map(d=>d.referenceStyleId),['A',null,null]);
+  const context=workflowStyleContext();assert.match(context,/不能重复借用同一配色/);assert.match(context,/不能只因配色好看/);assert.match(context,/指定参考也不能绕过主题适配/);
 });
 
 test('登记的材料对象进入短提示词，同时允许陪衬且维持清晰主次',()=>{

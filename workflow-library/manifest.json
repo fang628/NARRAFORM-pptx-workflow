@@ -1,6 +1,6 @@
 {
   "source": "pptx-workflow",
-  "version": "ea7e65c741698c1e",
+  "version": "b6ac8e3906419fe6",
   "copiedAt": "2026-10-10T14:38:43.158Z",
   "files": [
     {
@@ -20,8 +20,8 @@
     },
     {
       "file": "shared/design-principles.md",
-      "sha256": "aaa23de202e4e0aec453bab2ddd288553aa77dedfd1db2089d90d9145ae9150b",
-      "bytes": 8208
+      "sha256": "4b35d16dea048b223e1ae1e5637b34614fa7417a4f0cf6459d59bb3626d101fc",
+      "bytes": 9051
     },
     {
       "file": "shared/incremental-rework.md",
@@ -30,8 +30,8 @@
     },
     {
       "file": "shared/preview-contract.md",
-      "sha256": "2d5276035eee20c24d24a6f9035ddd439d969cec47892e0f423efb28cf3e0ce1",
-      "bytes": 3606
+      "sha256": "f809d1a2e326947fd260bd4f2e88af63dcd99c3b53cd6153f1464f671224595b",
+      "bytes": 4486
     },
     {
       "file": "shared/references/splits/arc-horizontal-dome.png",
@@ -135,13 +135,13 @@
     },
     {
       "file": "stages/13-design/references/gen-prompt-scope.md",
-      "sha256": "b3a4baebc6bf34a8fa271280ee52fb1cc7ad35fd34a3f05411e8fd0e97133a42",
-      "bytes": 6700
+      "sha256": "31270c80123acf03ddbe3d57098055bfebd698532f1de1fbe48c5f7f780eef83",
+      "bytes": 8370
     },
     {
       "file": "stages/13-design/references/layout-intent.md",
-      "sha256": "f250b16cbd747c35c5762a73826d3ecac390708f4dd232ab2b64c2a812762be2",
-      "bytes": 2552
+      "sha256": "7890d60eb1085c1a3d868663116e68f7f3473aa45d99c1187c3898ee51b9a5b7",
+      "bytes": 2581
     },
     {
       "file": "stages/13-design/references/layout-splits.md",
@@ -165,8 +165,8 @@
     },
     {
       "file": "stages/13-design/references/style-guide.md",
-      "sha256": "deaa3966ddec35f1a5bcd679b977d2e6ec2a7903e892dacfabd01ed42d31604b",
-      "bytes": 5607
+      "sha256": "cf7864d647fb4b8941a852fac8a617f3cd5bba23e19bad38c710702ae558e4ca",
+      "bytes": 6466
     },
     {
       "file": "stages/13-design/references/style-tokens.json",
@@ -175,13 +175,13 @@
     },
     {
       "file": "stages/13-design/references/title-page.md",
-      "sha256": "5160b07f5069712c039528b2675adcacd56c9fbe84dcb2822cafae8a147f5b47",
-      "bytes": 1944
+      "sha256": "d9197289b45fe39f3da538e64fba1e1488ef5db59651ffc9f99066d757b684a1",
+      "bytes": 3276
     },
     {
       "file": "stages/13-design/references/toc-page.md",
-      "sha256": "a12f8ba7f4564bfeb44632db5582d21be8a54dc175830525fd525b5238b9043d",
-      "bytes": 1627
+      "sha256": "0753e89cb009626ecb87196f12e738240f2169e12a4d323b6c124819d6abff5d",
+      "bytes": 2425
     },
     {
       "file": "stages/13-design/references/typography-cjk.md",

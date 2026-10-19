@@ -16,7 +16,7 @@ test('选择A–F原样复用库设计，模型擅改字段与撞色调整均不
   const snapshot=structuredClone(workflowStyles),p={brief:{title:'合成主题'},styleRegistry:[]};
   for(const preset of workflowStyles){
     const raw={...fixtureDirections()[0],referenceStyleId:preset.id,coreColor:'#C01033',typography:'模型擅改为黑体',frames:'模型擅改为无框',layoutLanguage:'模型擅改为左右列表'};
-    const [d]=harmonizeThemeDirections([raw],p,{reservedColors:[preset.palette.colors[0].hex],previousColor:preset.palette.colors[0].hex});
+    const [d]=harmonizeThemeDirections([raw],p);
     assert.equal(d.name,preset.name);assert.equal(d.coreColor,preset.palette.colors[0].hex);assert.deepEqual(JSON.parse(d.typography),preset.typography);assert.deepEqual(JSON.parse(d.layoutLanguage),preset.layout);
     const [registered]=registerStyleDirections(p,[d],'test'),record=requireStyleRegistration(p,registered);
     assert.equal(registered.styleRegistrationId,preset.id);assert.equal(p.styleRegistry.length,0,'预设不新增项目登记');

@@ -36,7 +36,7 @@ test('规划遗漏配色编号时从适配清单回填，色系协调不会改�
   const directions=validateThemeDirections(raw,p,{requirePlanning:true});
   assert.deepEqual(directions.map(d=>d.paletteReferenceId),['A','C','E']);
   for(const d of directions)assert.equal(d.coreColor,workflowStyles.find(s=>s.id===d.paletteReferenceId).palette.colors[0].hex);
-  const [d]=harmonizeThemeDirections([directions[0]],p,{reservedColors:['#FFFFFF'],previousColor:'#FFFFFF'});assert.equal(d.coreColor,'#FFFFFF');
+  const [d]=harmonizeThemeDirections([directions[0]],p,{reservedColors:['#FFFFFF'],previousColor:'#FFFFFF'});assert.notEqual(d.coreColor,'#FFFFFF');assert.equal(d.paletteReferenceId,undefined);assert.equal(d.colorSelection.previousReference,'A');
   const registered=registerStyleDirections(p,directions,'test');assert.equal(p.styleRegistry.length,3);registered.forEach(d=>requireStyleRegistration(p,d));
 });
 

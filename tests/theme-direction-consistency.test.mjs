@@ -1,3 +1,4 @@
+import {workflowStyles} from '../lib/workflow-library.mjs';
 import {promptColor} from '../lib/prompt-colors.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -82,4 +83,23 @@ test('单个方向更换时避开其他方向的整个色系，已是不同色�
   const colors=['#C64B3B','#3166B5','#3A9554'];
   const result=harmonizeThemeDirections(make().map((d,i)=>({...d,coreColor:colors[i]})),project);
   assert.deepEqual(result.map(d=>d.coreColor),colors);
+});
+
+test('复现完整预设B与两次借用配色B撞色：保留原预设，其他方向独立配色且登记后不被覆盖',()=>{
+ const project={...p(),visualTreatment:'flat'},original=make().map((d,i)=>({...d,referenceStyleId:i===0?'B':null,...(i?{paletteReferenceId:'B'}:{}),styleSelection:{matchingPresetIds:i?[]:['B'],matchingPaletteIds:['B'],reason:'适合材料'}}));
+ const snapshot=structuredClone(original),directions=harmonizeThemeDirections(original,project);
+ assert.deepEqual(original,snapshot);assert.equal(directions[0].referenceStyleId,'B');assert.equal(directions[0].coreColor,workflowStyles.find(s=>s.id==='B').palette.colors[0].hex);
+ assert.equal(new Set(directions.map(d=>themeColorFamily(d.coreColor))).size,3);
+ for(let i=1;i<3;i++){assert.equal(directions[i].referenceStyleId,null);assert.equal(directions[i].paletteReferenceId,undefined);assert.equal(directions[i].paletteSource,undefined);assert.equal(directions[i].presetDesign,undefined);assert.equal(directions[i].colorSelection.previousReference,'B');}
+ const registered=registerStyleDirections(project,directions,'test');assert.equal(registered[0].styleRegistrationId,'B');
+ for(const d of registered){assert.equal(requireStyleRegistration(project,d).definition.coreColor,d.coreColor);for(const use of ['hero-image','toc-image','content-background'])assert.ok(themeAssetPrompt(project,d,use).includes('底色 '+promptColor(d.coreColor)));}
+ assert.deepEqual(registered.map(d=>d.coreColor),directions.map(d=>d.coreColor));
+ assert.deepEqual(harmonizeThemeDirections(registered,project).map(d=>d.coreColor),directions.map(d=>d.coreColor));
+});
+test('撞色时优先选择已评估适配的不同预设配色；完整预设重复也不能豁免色系差异',()=>{
+ const project={...p(),visualTreatment:'flat'},base=workflowStyles.find(s=>s.id==='B'),alternate=workflowStyles.find(s=>distinctThemeColorFamilies(s.palette.colors[0].hex,base.palette.colors[0].hex));assert.ok(alternate);
+ const original=make().slice(0,2).map((d,i)=>({...d,referenceStyleId:i?null:'B',...(i?{paletteReferenceId:'B'}:{}),styleSelection:{matchingPresetIds:['B'],matchingPaletteIds:['B',alternate.id],reason:'适合主题'}}));
+ const result=harmonizeThemeDirections(original,project);assert.equal(result[1].paletteReferenceId,alternate.id);assert.equal(result[1].coreColor,alternate.palette.colors[0].hex);assert.ok(distinctThemeColorFamilies(result[0].coreColor,result[1].coreColor));
+ const duplicates=harmonizeThemeDirections(make().map(d=>({...d,referenceStyleId:'B',styleSelection:{matchingPresetIds:['B'],matchingPaletteIds:['B']}})),project);
+ assert.equal(duplicates.filter(d=>d.referenceStyleId==='B').length,1);for(let i=0;i<3;i++)for(let j=0;j<i;j++)assert.ok(distinctThemeColorFamilies(duplicates[i].coreColor,duplicates[j].coreColor));
 });

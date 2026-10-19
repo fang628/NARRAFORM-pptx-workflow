@@ -1,6 +1,6 @@
 // Shared by the content model and browser editor; no HTML or executable source content.
 export const tableLimits={columns:12,rows:20,cell:600,characters:24000};
-export const tablePlanningRule='表格规划：识别材料中的表头、行列、数值、单位和对照关系。与本页主题相关、体量小且适合单页阅读的原表，或适合用表格比较的关键数据，使用独立type=table节点，headers为表头数组、rows为数据行二维数组，单元格保留准确文字、数值、单位与必要条件。优先紧凑表格，不把表格数据改写成长段正文，不与正文重复列出；大表只选与本页相关的行列并保留解释条件，不能虚构、计算或补齐缺失数据。表格从属于对应真实小标题或主标题，与文字、图片使用同一内容树和来源索引；表格标签仅供识别，不额外作为上屏小标题。';
+export const tablePlanningRule='表格规划：适合按共同维度比较、归纳的结论和数据都可以使用表格，包括定性结论对照、方案优缺点、条件与结果、指标比较和阶段总结；不限定数值数据，也不要求材料中已有原表。根据材料中明确支持的信息组织独立type=table节点，headers为表头数组、rows为数据行二维数组；同一比较维度对齐，不混淆条件、单位与结论归属。表格可以直接承载准确的关键结论，不必另建重复正文；关键结论仍用一句完整且简洁的话，其余单元格可用短语或数据。仅在表格比文字分点更清楚时采用，不强制每页制表。信息完整优先，保留必要结论、数值、单位、条件和来源，不因追求小表删掉必要信息；大表可按真实主题拆分或选取与本页相关的行列，不能虚构、计算或补齐缺失数据。表格从属于对应真实小标题或主标题，与文字、图片使用同一内容树和来源索引；已入表的信息不与正文重复列出，表格标签仅供识别，不额外作为上屏小标题。';
 export function validateTableContent(value){
   const {headers,rows}=value||{};
   if(!Array.isArray(headers)||!headers.length||headers.length>tableLimits.columns||!Array.isArray(rows)||!rows.length||rows.length>tableLimits.rows)throw Error('表格须有 1–12 列表头和 1–20 行数据');

@@ -9,11 +9,11 @@ import {registerStyleDirections,requireStyleRegistration} from '../lib/style-reg
 import {fixtureCustomDirections} from './visual-fixture.mjs';
 
 const brief={title:'材料主线',cover:true,toc:true,pages:3};
-test('艺术主体可抽象，无材料实物证据也能规划；主题与全材料主线要求仍保留',()=>{
+test('艺术主体须是一个可辨识对象，无材料实物证据也能规划；主题与全材料主线要求仍保留',()=>{
   const p={brief,materials:[{id:'doc',name:'报告',text:'不同章节共同讨论研究的变化与连接。'}]},raw={...fixtureCustomDirections()[0],heroSubject:'流动光带',tocSubject:'交织薄片',contentSubject:'低对比波纹',subjectSources:{heroSubject:{kind:'artistic',element:'流动光带',inspiration:'以连续变化与连接呼应全篇共同主线'}}};
   const plan=validateThemePlanning(raw,p);assert.equal(plan.subjectSources.heroSubject.kind,'artistic');assert.equal(plan.subjectSources.heroSubject.materialId,undefined);assert.equal(plan.subjectSources.heroSubject.element,'流动光带');
-  assert.match(backgroundSubjectRule,/必须符合主题并贯穿全篇材料的共同主线/);assert.match(backgroundSubjectRule,/不能只代表某一小节/);assert.match(backgroundSubjectRule,/不要求是主题对应的具体物质/);
-  assert.match(themeAssetSubjectRule('hero-image'),/抽象形态/);assert.match(backgroundVariationRule,/任何风格/);
+  assert.match(backgroundSubjectRule,/必须符合主题并贯穿全篇材料的共同主线/);assert.match(backgroundSubjectRule,/不能只代表某一小节/);assert.match(backgroundSubjectRule,/PPT实际介绍的核心对象/);
+  assert.match(themeAssetSubjectRule('hero-image'),/具象艺术主体/);assert.match(backgroundVariationRule,/任何风格/);
 });
 
 test('所有完整预设和表现类型都区分封面与目录，仅移位置或镜像不算区别',()=>{

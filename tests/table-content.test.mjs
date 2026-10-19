@@ -8,7 +8,7 @@ import {spawn} from 'node:child_process';
 import http from 'node:http';
 import {fixtureReply,fixtureRequest} from './visual-fixture.mjs';
 import JSZip from 'jszip';
-import {sourceTableCatalog,validateTableContent,tableMarkdown} from '../lib/table-content.js';
+import {sourceTableCatalog,validateTableContent,tableMarkdown,tablePlanningRule} from '../lib/table-content.js';
 import {validateReading} from '../lib/materials.mjs';
 import {validateSlides,scene,themes,buildDeck} from '../lib/scene.mjs';
 import {bindSources,targetText} from '../lib/sources.mjs';
@@ -85,4 +85,15 @@ test('真实HTTP材料分析→表格规划→编辑保存→重载：表格与�
   await act('approveAnalysis');await act('content');await wait();assert.ok(p.tableContentEnabled);assert.deepEqual(p.slides[0].elements.find(n=>n.type==='table').rows,table.rows);assert.match(p.pageDesigns[0].markdown,/\| 处理组 \| 32% \| 24 h \|/);assert.ok(prompts.some(prompt=>prompt.includes('根据材料写恰好')&&prompt.includes('type=table')));
   p.slides[0].elements.find(n=>n.type==='table').rows[0][1]='33%';await act('saveContent',{slides:p.slides});p=await call(prefix);assert.equal(p.slides[0].elements.find(n=>n.type==='table').rows[0][1],'33%');assert.equal(p.slides[0].sourceLinks[0].stale,true);assert.deepEqual(JSON.parse(fs.readFileSync(path.join(data,p.id,'project.json'))).slides,p.slides);
   assert.equal((await fetch(base+'/table-content.js')).status,200);
+});
+
+test('原材料纯文字结论可组织为表格，保留来源及单元格文字，不要求数值或原表',()=>{
+ const content={headers:['方案','适用条件','结论'],rows:[['方案甲','材料充分时','方案甲适合直接复用材料。'],['方案乙','材料缺少时','方案乙需要补充说明。']]};
+ const source='方案甲适合直接复用材料。方案乙需要补充说明。',reading=validateReading({summary:'两种方案的适用结论',keyPoints:[],facts:[],questions:[],tables:[{tableId:null,...content,suggestedUse:'按条件对照结论'}]},{id:'doc',kind:'document'},source);
+ assert.equal(reading.tables.length,1);assert.deepEqual(reading.tables[0].rows,content.rows);
+ const slide=validateSlides([{kind:'content',sources:['doc'],elements:[{id:'title',type:'text',role:'title',text:'方案适用结论',parentId:null},{id:'conclusions',type:'table',label:'编辑用表格',...content,parentId:'title'}]}])[0];
+ slide.sourceLinks=[{materialId:'doc',target:'element:conclusions',quote:source}];bindSources({materials:[{id:'doc',kind:'document',text:source}]},[slide]);assert.equal(slide.sourceLinks[0].stale,false);
+ assert.match(tableMarkdown(slide.elements.find(e=>e.id==='conclusions')),/方案甲适合直接复用材料。/);
+ assert.ok(canonicalTexts(slide).some(e=>e.text==='方案乙需要补充说明。'));assert.equal(slide.elements.filter(e=>e.type==='text'&&e.role==='body').length,0);
+ assert.match(tablePlanningRule,/不限定数值数据/);assert.match(tablePlanningRule,/不要求材料中已有原表/);
 });

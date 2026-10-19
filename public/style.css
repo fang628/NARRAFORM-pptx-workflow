@@ -1097,3 +1097,5 @@ button:is(.close,.danger,[data-delete],[data-delete-project],[data-delete-style]
 .rebuild-asset-instances button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:5px 7px;background:#e2dfd4}
 .rebuild-asset-instances button:hover,.rebuild-asset-instances button:focus-visible{background:#eee7be;color:#39362a}
 .rebuild-asset-instances code{min-width:0;overflow-wrap:anywhere}
+
+.progress-sections-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap}.progress-sections-actions .progress-regenerate{min-height:34px;padding:6px 11px;font-size:12px;white-space:nowrap}@media(max-width:640px){.progress-sections-heading{align-items:flex-start;flex-wrap:wrap}.progress-sections-actions{justify-content:flex-start}}
