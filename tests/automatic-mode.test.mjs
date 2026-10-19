@@ -64,7 +64,7 @@ test('真实HTTP：中途退出、自动材料与内容确认、两次人工风�
   const data=fs.mkdtempSync(path.resolve('work/automatic-mode-')),base='http://127.0.0.1:'+port;
   const app=spawn(process.execPath,['server.mjs'],{env:{...process.env,PORT:String(port),PPT_AGENT_DATA:data,PPT_AGENT_TEST:'1'},windowsHide:true,stdio:['ignore','pipe','pipe']});for(const stream of [app.stdout,app.stderr])stream.on('data',chunk=>fs.appendFileSync(path.join(data,'server.log'),chunk));t.after(()=>app.kill());
   await until(async()=>{try{return (await fetch(base+'/api/health')).ok;}catch{return false;}},10000);
-  const call=async(url,body,status=200)=>{const response=await fetch(base+url,body===undefined?{}:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),value=await response.json();assert.equal(response.status,status,JSON.stringify(value));return value;};
+  const call=async(url,body,status=200)=>{let response;try{response=await fetch(base+url,body===undefined?{}:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});}catch(error){if(body!==undefined||error.cause?.code!=='ECONNRESET')throw error;response=await fetch(base+url);}const value=await response.json();assert.equal(response.status,status,JSON.stringify(value));return value;};
   let p=await call('/api/projects',{brief:project().brief},201);const prefix='/api/projects/'+p.id,act=(action,extra={})=>call(prefix+'/action',{action,...extra});
   p=await call(prefix+'/materials',{name:'依据.txt',base64:Buffer.from('自动化测试依据。').toString('base64')});doc=p.materials[0].id;
   const config={baseURL:'http://127.0.0.1:'+mock.address().port+'/v1',model:'synthetic-auto',key:'synthetic-only'};await act('configure',{text:config,image:config});

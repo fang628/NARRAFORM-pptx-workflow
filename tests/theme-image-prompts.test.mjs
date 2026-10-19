@@ -49,7 +49,7 @@ test('绘画表现和配色保留，模板不改写登记定义',()=>{
   const snapshot=structuredClone(d);
   for(const use of ['hero-image','toc-image','content-background']){
     const prompt=themeAssetPrompt(p,d,use);
-    assert.match(prompt,/表现：使用简洁平面图形与色面/);assert.doesNotMatch(prompt,/#[\da-f]{6}\b/i);
+    assert.match(prompt,/表现：背景与装饰用简洁平面色块、点阵/);assert.doesNotMatch(prompt,/#[\da-f]{6}\b/i);
     for(const color of ['#F5F8FC','#14344D','#A9CFD7','#087F8C'])assert.ok(prompt.includes(promptColor(color)));
     assert.match(prompt,/不含文字、数字、图注、文本框或占位框/);
     if(use==='hero-image')assert.match(prompt,/主体区与文字留白区用边界线分隔/);

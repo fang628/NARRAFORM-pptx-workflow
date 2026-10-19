@@ -22,7 +22,7 @@ function Invoke-OfficeCall([scriptblock]$Operation) {
 }
 try {
     $officeLock = Enter-NarraformOfficeRender
-    $app = New-Object -ComObject PowerPoint.Application
+    $app = Invoke-OfficeCall { New-Object -ComObject PowerPoint.Application }
     $readOnly = -1
     if ($MotionSpec) { $readOnly = 0 }
     $deck = Invoke-OfficeCall { $app.Presentations.Open($deckFile, $readOnly, 0, 0) }
