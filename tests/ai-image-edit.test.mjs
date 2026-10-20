@@ -110,7 +110,7 @@ test('内容原子确认及底图、素材、代表页、全篇预览的两条�
       await act('prepareAIImageEdit',{...target,imageEditMode:mode,sourceHash:before.sourceHash,editRegion:request.editRegion,instruction:'主体向右移动',prompt:before.prompt});await wait();
       const content=requests.slice(start).find(r=>r.messages).messages.at(-1).content,input=typeof content==='string'?content:content[0].text;
       if(regionHint){assert.equal(content[1].type,'image_url');assert.match(input,/黄色虚线框/);assert.deepEqual(p.aiImageEditDrafts[before.key].editRegion,request.editRegion);}
-      if(target.targetType==='theme'&&mode==='redraw'){assert.match(input,/主体描述用一个短语，通常10–25字/);assert.match(input,/单段通常100–220字，不设凑字数下限/);}
+      if(target.targetType==='theme'&&mode==='redraw'){assert.match(input,/提示词只写所选形象及一两项可画特征/);assert.match(input,/单段通常100–220字，不设凑字数下限/);}
       if(mode==='adjust')assert.doesNotMatch(input,/主体描述用一个短语/,'局部编辑仍仅整理用户意见');
       const draft=p.aiImageEditDrafts[before.key];request={...request,...(mode==='adjust'?{instruction:draft.instruction,adjustmentRevision:draft.revision,...(target.targetType==='theme'?{prompt:before.prompt}:{})}:{prompt:draft.prompt})};
     }else if(mode==='adjust')request.instruction='  主体向右移动，标题不变。\n保留其他内容。  ';
@@ -123,7 +123,7 @@ test('内容原子确认及底图、素材、代表页、全篇预览的两条�
       assert.equal(draw.referenceImages[0].sha256,digest(fs.readFileSync(path.join(data,p.id,before.sourceFile))));
       if(regionHint){assert.notEqual(draw.referenceImages[1].sha256,draw.referenceImages[0].sha256);assert.ok(draw.referenceImages.every(r=>r.field!=='mask'));const saved=target.targetType==='image'?p.materials.find(m=>m.id===p.task.resultImageId):aiImageTarget(p,target).image;assert.deepEqual(saved.editRegion,request.editRegion);}
       const organize=requests.slice(start,drawStart).find(r=>r.messages);if(direct)assert.equal(organize,undefined,'直接提交不调用主模型整理');else assert.ok(!JSON.stringify(organize.messages.at(-1).content).includes(before.prompt),'局部调整不发送完整旧设计');
-    }else{if(aiRedraw&&target.targetType==='visual'){const rewrite=requests.slice(start,drawStart).find(r=>r.messages).messages.at(-1).content;assert.match(rewrite,/多层 Markdown 列表/);assert.match(rewrite,/当前内容关系/);assert.match(rewrite,/适合内容时必须采用/);assert.match(rewrite,/用户要求重新设计排版时/);assert.match(rewrite,/\n  - 标题：已修改标题\n    - 图片：配图/);}assert.equal(draw.prompt,request.prompt);assert.ok(draw.endpoint.endsWith('/images/generations'));assert.equal(draw.referenceImages,undefined);}
+    }else{if(aiRedraw&&target.targetType==='visual'){const rewrite=requests.slice(start,drawStart).find(r=>r.messages).messages.at(-1).content;assert.match(rewrite,/多层 Markdown 列表/);assert.match(rewrite,/当前内容关系/);assert.match(rewrite,/适合内容时必须采用/);assert.match(rewrite,/用户要求重新设计排版时/);assert.match(rewrite,/设计阶段必须积极寻找并采用/);assert.match(rewrite,/实际采用的创意排版在风格项用短句说明，没有则省略/);assert.match(rewrite,/\n  - 标题：已修改标题\n    - 图片：配图/);}assert.equal(draw.prompt,request.prompt);assert.ok(draw.endpoint.endsWith('/images/generations'));assert.equal(draw.referenceImages,undefined);}
     if(ratioRepair){assert.equal(draws.length,2);assert.ok(draws[1].endpoint.endsWith('/images/edits'));assert.equal(draws[1].referenceImages.length,1);assert.ok(!draws[1].prompt.includes(request.prompt));}
     if(target.targetType!=='image'){
       const after=structuredClone(aiImageTarget(p,target).image),count=requests.length;

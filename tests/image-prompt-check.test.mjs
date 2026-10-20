@@ -13,8 +13,8 @@ test('发送前保留整页风格项的创意要求，底图不注入信息层�
   });await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeAllConnections();server.close();});
   const config={baseURL:'http://127.0.0.1:'+server.address().port+'/v1',key:'synthetic',model:'mock'},signal=new AbortController().signal;
   for(const stage of ['整页预览','单张底图'])await imagePromptCheck({config,system:'JSON',stage},signal)('仅当前单页，16:9。');
-  assert.match(requests[0],/风格要求中保留一句针对本页的创意设计/);assert.match(requests[0],/特殊分块规范/);assert.match(requests[0],/排版项仅说明内容分组与区域，不重复创意段/);
-  assert.doesNotMatch(requests[1],/风格要求中保留一句针对本页的创意设计|特殊分块规范/);
+  assert.match(requests[0],/有创意设计时必须用一句短句说明/);assert.match(requests[0],/特殊分块规范/);assert.match(requests[0],/没有创意设计时省略该项/);assert.match(requests[0],/排版项仅说明内容分组与区域，不重复创意段/);
+  assert.doesNotMatch(requests[1],/有创意设计时必须用一句短句说明|特殊分块规范/);
 });
 
 test('整页发送前清理模板重复，局部调整稿与底图稿保持独立路径',async()=>{

@@ -9,6 +9,7 @@ import {visualPublic} from '../lib/visual-pipeline.mjs';
 import {visualConcepts} from '../public/visual-ui.js';
 import {syncPageDesignText} from '../lib/page-design-text.mjs';
 import {enterVisualStage} from '../lib/content-stage.mjs';
+import {pageStamp,visualStamp,fullPageCurrent,digest} from '../lib/visual-model.mjs';
 import {fixtureReply,fixtureDirections} from './visual-fixture.mjs';
 const previousLibrary='previous-library';
 function project(){
@@ -60,4 +61,12 @@ test('仅规范变化后修改章节，已有设计正常更新导航，不再�
 test('删页后残留的历史设计不会使状态检查崩溃',()=>{
  const p=project();p.reuseCheckpoint={source:structuredClone(p),inputs:'before',version:1,materialHashes:{doc:'original'}};p.slides.pop();
  assert.equal(pageDesignState(p,2),null);assert.doesNotThrow(()=>downstreamReuseState(p));assert.equal(downstreamReuseState(p).pending,true);
+});
+
+test('规范更新保留已批准预览与重建的输入签名，真实内容修改仍使结果失效',()=>{
+ const p=project();
+ p.visualPages=Object.fromEntries(p.slides.map((s,i)=>[i,{stamp:pageStamp(p,i,p.selectedTheme,{libraryVersion:previousLibrary}),previewHash:'preview-'+i}]));
+ const saved=digest({pages:p.slides.map((s,i)=>({stamp:p.visualPages[i].stamp,preview:p.visualPages[i].previewHash})),theme:p.selectedTheme});
+ assert.ok(p.slides.every((s,i)=>fullPageCurrent(p,i)));assert.equal(visualStamp(p),saved);
+ p.slides[0].body=['确实改变的内容'];assert.equal(fullPageCurrent(p,0),false);assert.notEqual(visualStamp(p),saved);
 });

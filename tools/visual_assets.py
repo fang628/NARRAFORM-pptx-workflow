@@ -48,16 +48,20 @@ def main():
         if '<!' in text or '<?' in text or len(text) > 180000:
             raise ValueError('SVG contains declarations or is too large')
         root = ET.fromstring(text)
-        tags = {'svg','g','defs','path','rect','circle','ellipse','line','polyline','polygon','linearGradient','radialGradient','stop','clipPath','mask'}
+        tags = {'svg','g','defs','path','rect','circle','ellipse','line','polyline','polygon','linearGradient','radialGradient','stop','clipPath','mask','pattern'}
         attrs = {'viewBox','width','height','x','y','x1','y1','x2','y2','cx','cy','r','rx','ry','d','points','fill','stroke','stroke-width','stroke-linecap','stroke-linejoin','stroke-dasharray','fill-rule','clip-rule','opacity','fill-opacity','stroke-opacity','transform','id','offset','stop-color','stop-opacity','gradientUnits','gradientTransform','fx','fy','clip-path','mask','preserveAspectRatio','version'}
+        attrs.update({'patternUnits','patternContentUnits','patternTransform'})
         if root.tag != '{http://www.w3.org/2000/svg}svg':
             raise ValueError('SVG needs an SVG namespace')
         vb = [float(v) for v in root.get('viewBox','').replace(',',' ').split()]
         if len(vb) != 4 or not all(math.isfinite(v) for v in vb) or min(vb[2:]) <= 0:
             raise ValueError('SVG needs a valid viewBox')
         for node in root.iter():
-            if node.tag.rsplit('}',1)[-1] not in tags or (node.text or '').strip() or (node.tail or '').strip():
-                raise ValueError('SVG may only contain non-text vector geometry')
+            tag = node.tag.rsplit('}',1)[-1]
+            if node.tag != '{http://www.w3.org/2000/svg}'+tag or tag not in tags:
+                raise ValueError(f'SVG 包含不支持的标签：{tag}；仅允许非文字矢量图形')
+            if (node.text or '').strip() or (node.tail or '').strip():
+                raise ValueError('SVG 素材不得包含文字内容')
             for key, val in node.attrib.items():
                 if key not in attrs or any(v in val.lower() for v in ['javascript:', 'data:', 'http:', 'https:', '@import', 'expression(', 'file:']):
                     raise ValueError('SVG contains unsafe attributes or external resources')
@@ -73,7 +77,14 @@ def main():
     with Image.open(source) as raw:
         raw.load()
         image = raw.convert('RGBA')
-    if op == 'cutout':
+    if op == 'reference-cutout':
+        from reference_cutout import reference_cutout
+        with Image.open(sys.argv[4]) as background:
+            background.load()
+            image, report = reference_cutout(image, background, len(sys.argv)>5 and sys.argv[5]=='artistic')
+        image.save(target)
+        print(json.dumps(report))
+    elif op == 'cutout':
         from cutout_alpha import prepare_cutout
         image, report = prepare_cutout(image)
         image.save(target)

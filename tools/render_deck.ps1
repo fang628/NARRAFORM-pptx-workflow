@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$DeckPath,[Parameter(Mandatory=$true)][string]$OutputDir,[string]$MotionSpec='')
+﻿param([Parameter(Mandatory=$true)][string]$DeckPath,[Parameter(Mandatory=$true)][string]$OutputDir,[string]$MotionSpec='',[string]$PageIndices='')
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 function File-SHA256([string]$FilePath) {
@@ -36,6 +36,7 @@ try {
     if ([Math]::Abs($deck.PageSetup.SlideWidth / $deck.PageSetup.SlideHeight - 16.0 / 9.0) -gt 0.00001) { throw 'PPTX must be 16:9' }
     $pages = @()
     for ($index = 1; $index -le $deck.Slides.Count; $index++) {
+        if ($PageIndices -and (($PageIndices -split ',') -notcontains [string]($index-1))) { continue }
         $slide = $deck.Slides.Item($index)
         $scale = 1600.0 / $deck.PageSetup.SlideWidth
         $texts = @()
@@ -78,7 +79,7 @@ try {
         Invoke-OfficeCall { $deck.Slides.Item($index).Export($image, 'PNG', 1920, 1080) }
         $pages += @{index=$index-1;file=$file;sha256=(File-SHA256 $image);texts=$texts;measurementErrors=$measurementErrors}
     }
-    Invoke-OfficeCall { $deck.SaveAs((Join-Path $renderDir 'deck.pdf'),32) }
+    if (-not $PageIndices) { Invoke-OfficeCall { $deck.SaveAs((Join-Path $renderDir 'deck.pdf'),32) } }
     $manifest = @{renderer='Microsoft PowerPoint';version=$app.Version;pages=$pages;at=[DateTime]::UtcNow.ToString('o');pptx_sha256=(File-SHA256 $deckFile)}
     $json = $manifest | ConvertTo-Json -Depth 8
     [IO.File]::WriteAllText((Join-Path $renderDir 'render-manifest.json'),$json,[Text.UTF8Encoding]::new($false))

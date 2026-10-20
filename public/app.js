@@ -1,3 +1,4 @@
+import {patchDeliveryContent} from './delivery-update.js';
 import {designEditingActive,designOutputBusy} from './design-editing.js';
 import {confirmPreviewForDelivery} from './preview-confirmation.js';
 import {automaticModePanel,automaticModeButton,automaticViewTab} from './automatic-mode.js';
@@ -121,9 +122,11 @@ function render({keepView=false}={}){
   if(changed)liveDraftRecovery=[];
   if(view)view.drafts=[...new Map([...liveDraftRecovery,...view.drafts].map(d=>[d.key,d])).values()];
   nav();main.classList.remove('page-enter');
-  main.innerHTML=automaticModePanel(p)+[intake,content,concepts,fullPreview,delivery][tab]();
+  const markup=automaticModePanel(p)+[intake,content,concepts,fullPreview,delivery][tab]();
+  if(tab===4&&!changed)patchDeliveryContent(main,markup);else main.innerHTML=markup;
   const reuse=p?.downstreamReuse;if(reuse?.pending&&!p.autoMode?.enabled)main.insertAdjacentHTML('afterbegin',`<section class="downstream-update notice" role="status"><div><strong>已有结果待同步</strong><p>内容或规范版本变化后，可重新生成，也可保留原布局与图片，同步当前文案。</p></div><button class="secondary" data-action="reuseDownstream">跳过重生成 · 同步文案 →</button></section>`);else if(reuse?.last)main.insertAdjacentHTML('afterbegin',`<section class="downstream-update notice"><div><strong>已沿用原布局与图片</strong><p>新文案已同步到设计稿${reuse.last.nativeTextSynced?'和可编辑元素':''}。旧整页图仅作布局参考，最终以最新文字的 PPT 渲染为准。</p>${reuse.last.skipped.length?`<details><summary>部分页面需另行处理</summary><ul>${reuse.last.skipped.map(s=>`<li>${h(s)}</li>`).join('')}</ul></details>`:''}</div></section>`);
   $$('#main .panel').forEach((panel,i)=>{
+    if(panel.querySelector(':scope > .dossier-strip'))return;
     const label=['FORM / FIELD','LINE / SURFACE','GRID / STUDY','FRAME / SEQUENCE'][i%4];
     const strip=document.createElement('div');strip.className='dossier-strip';strip.setAttribute('aria-hidden','true');
     strip.innerHTML=`<span class="dossier-tab"><b>${String(i+1).padStart(2,'0')}</b>${label}</span><span class="dossier-rule" aria-hidden="true"></span><span class="dossier-code">DESIGN SERIES / ${String(i+1).padStart(2,'0')}</span>`;
@@ -132,6 +135,7 @@ function render({keepView=false}={}){
     panel.prepend(strip);
   });
   $$('#main .panel,#main .concept-info,#main .preview-caption,#main .delivery').forEach(surface=>{
+    if(surface.querySelector(':scope > .surface-footmark'))return;
     const mark=document.createElement('div');mark.className='surface-footmark';mark.setAttribute('aria-hidden','true');
     surface.append(mark);
   });
@@ -154,7 +158,7 @@ function render({keepView=false}={}){
 async function refreshProjects(){const [list,archived]=await Promise.all([api('/api/projects'),api('/api/projects?archived=true')]);$('#projects').innerHTML='<option value="">选择项目</option>'+list.map(x=>`<option value="${x.id}" ${x.id===p?.id?'selected':''}>${h(x.demo?'[示例] '+x.title:x.title)}</option>`).join('');$('#archiveCount').textContent=archived.length;$('#projectArchiveList').innerHTML=archived.length?archived.map(x=>`<article class="archived-project"><div><h3>${h(x.demo?'[示例] '+x.title:x.title)}</h3><p>${x.pages} 页 · ${x.materials} 份材料 · ${h(new Date(x.archivedAt).toLocaleDateString('zh-CN'))} 归档</p></div><div class="archived-project-actions"><button type="button" class="secondary" data-restore-project="${h(x.id)}">恢复项目 ↗</button><button type="button" class="text-button archive-delete" data-delete-project="${h(x.id)}" data-project-title="${h(x.title)}" aria-label="删除归档项目：${h(x.title)}">删除</button></div></article>`).join(''):'<div class="archive-empty">暂无归档项目</div>';syncArchiveButton();}
 function syncArchiveButton(){const button=$('#archiveProject');button.disabled=!p||busy()||sending||collectingMaterials||archivePending||designBatchPending;button.title=busy()?'任务执行中，请完成或取消后归档':'归档后可在「已归档」中恢复';}
 async function load(id){$('#supplementImageDialog').close();$('#supplementImageForm').reset();delete $('#supplementImageDialog').dataset.projectId;rebuildRegionEditor.close();projectRequestRevision++;activeTaskOrigin=null;aiImageEditor.close();materialCropEditor.close();$('#addImageTaskDialog').close();$('#themePromptReviewDialog').close();$('#themeAssetPromptDialog').close();$('#themeDirectionDialog').close();themeAssetEdit=null;themeDirectionEdit=null;$('#materialImageDialog').close();$('#materialReader').close();$('#imagePromptDialog').close();$('#sourceDialog').close();sendQueue=[];selectionSummary=null;materialDraft='';p=await api('/api/projects/'+id);if(p.archivedAt){p=null;throw Error('此项目已归档，请在「已归档」中恢复');}localStorage.setItem('ppt-agent-project',id);tab=p.stage>=6?4:p.stage>=5?3:p.stage>=4?2:p.stage>=1?1:0;render();await refreshProjects();}
-async function act(action,extra={},next){if(!p)throw Error('请先创建项目');const keepView=designEditingActive(p),queued=busy()&&imageAction(action,extra);projectRequestRevision++;p=await api(`/api/projects/${p.id}/action`,{action,...extra});if(next!==undefined)tab=next;if(p.task?.status==='running'&&activeTaskOrigin?.id!==p.task.id)activeTaskOrigin={id:p.task.id,tab};render({keepView});if(queued)toast('已加入任务列表，等待当前批次完成');return p;}
+async function act(action,extra={},next){if(!p)throw Error('请先创建项目');const keepView=tab===4||designEditingActive(p),queued=busy()&&imageAction(action,extra);projectRequestRevision++;p=await api(`/api/projects/${p.id}/action`,{action,...extra});if(next!==undefined)tab=next;if(p.task?.status==='running'&&activeTaskOrigin?.id!==p.task.id)activeTaskOrigin={id:p.task.id,tab};render({keepView});if(queued)toast('已加入任务列表，等待当前批次完成');return p;}
 async function safe(fn){try{await fn();}catch(e){toast(e.message);}}
 function schedulePoll(){
   clearTimeout(pollTimer);if(!p)return;const id=p.id,revision=projectRequestRevision;

@@ -46,7 +46,7 @@ test('整页提示词七项自足，原文与多层图片归属保留，工程�
   assert.doesNotMatch(prompt,/\*\*原图保真要求\*\*|实际排版要有创意，保留合理的组合与局部构图发挥空间。/);
   assert.doesNotMatch(prompt,/设计规范版本|restrained_decoration|floor\(N\/2\)|S01-|GEN-001|不应使用的重复长风格/);
   const layoutSection=prompt.split('- **排版要求**')[1].split('- **图片占位框比例**')[0];
-  assert.match(layoutSection,/左右对照，证据紧邻所属观点/);assert.doesNotMatch(layoutSection,/创意方向：|创意设计：/);assert.match(styleSection,/创意设计：.*特殊分块/);assert.doesNotMatch(layoutSection,/只给粗略创意方向|具体形状、装饰与局部组合交给生图AI/);assert.ok(layoutSection.length<350);
+  assert.match(layoutSection,/左右对照，证据紧邻所属观点/);assert.doesNotMatch(layoutSection,/创意方向：|创意设计：/);assert.doesNotMatch(styleSection,/创意设计：/);assert.doesNotMatch(layoutSection,/只给粗略创意方向|具体形状、装饰与局部组合交给生图AI/);assert.ok(layoutSection.length<350);
   assert.doesNotMatch(styleSection,/扇形、同心、波浪/,'分块要求不重复堆进风格项');
   assert.ok(prompt.length<1700,'短文案页面无需附加整段工作流');
 });
@@ -56,7 +56,7 @@ test('创意方向仍按语义选择，视觉关系只输出具体箭头；旧�
   p.themeAssets={stamp:themeAssetsStamp(p),directions:[{...d,assets:{'content-background':{normalized:'bg.png',previewHash:'hash'}}}]};
   for(const [meaning,form,arrow] of [['样本处理流程，第一步进入第二步','箭形组合','箭形'],['三个等级分级，底层支撑上层','金字塔式','直箭头'],['三个时期的发展历程','波浪走向','弯箭头']]){
     const arrangement='“LPS 刺激”与“TNF-α 检测结果”之间加'+arrow+'，表示处理后的检测流程。';
-    Object.assign(p.pageDesigns[1].plan,{logic:meaning+'。'+arrangement,layoutIntent:'按当前内容建立重点'});
+    Object.assign(p.pageDesigns[1].plan,{logic:meaning+'。'+arrangement,layoutIntent:'采用'+form+'分区呈现当前内容'});
     const prompt=slideImagePrompt(p,1,d,images),style=prompt.split('- **风格要求**：')[1].split(/\n- \*\*/)[0],relation=prompt.split('- **视觉关系要求**：')[1];
     assert.match(style,new RegExp(form));assert.match(style,/创意设计：/);assert.equal(relation,arrangement);
     assert.doesNotMatch(relation,/逻辑联系|若有|图文对应|S01-|实际逻辑联系用/);
@@ -85,49 +85,51 @@ test('自然语言箭头说明保留实际联系，普通并列和顺序不会�
   assert.equal(effectiveSlideImagePrompt(p,1,d,images,'full',next),next);
 });
 
-test('旧排版创意迁入风格，缺失时按特殊分块补齐，人工创意保留且重复提交不膨胀',()=>{
+test('无创意时不补齐，有实际设计时迁移或补回，人工修改保持幂等',()=>{
   const {p,d,images}=fixture();p.themeAssets={stamp:themeAssetsStamp(p),directions:[{...d,assets:{'content-background':{normalized:'bg.png',previewHash:'hash'}}}]};
   const base=slideImagePrompt(p,1,d,images);
-  const missing=base.replace(/创意设计：[^。\n]+。/,'');
-  const legacy=missing.replace('- **排版要求**：','- **排版要求**：创意方向：以蜂窝组合分区呈现并列图文。');
-  for(const source of [missing,legacy]){
-    const result=effectiveSlideImagePrompt(p,1,d,images,'full',source);
-    const style=result.split('- **风格要求**：')[1].split(/\n- \*\*/)[0],layout=result.split('- **排版要求**：')[1].split(/\n- \*\*/)[0];
-    assert.match(style,/创意设计：/);assert.equal((result.match(/创意设计：/g)||[]).length,1);assert.doesNotMatch(layout,/创意设计：|创意方向：/);
-    assert.match(style,source===legacy?/蜂窝组合分区/:/特殊分块/);
-    assert.equal(effectiveSlideImagePrompt(p,1,d,images,'full',result),result);
-  }
-  const custom=base.replace(/创意设计：[^。\n]+。/,'创意设计：采用阶梯形特殊分块，图文穿插突出实验阶段。');
-  const revised=effectiveSlideImagePrompt(p,1,d,images,'full',custom);
-  assert.match(revised,/采用阶梯形特殊分块，图文穿插突出实验阶段/);assert.equal(revised,custom);
+  assert.doesNotMatch(base,/创意设计：/);
+  assert.equal(effectiveSlideImagePrompt(p,1,d,images,'full',base),base);
+  const legacy=base.replace('- **排版要求**：','- **排版要求**：创意方向：以蜂窝组合分区呈现并列图文。');
+  const moved=effectiveSlideImagePrompt(p,1,d,images,'full',legacy);
+  assert.match(moved.split('- **风格要求**：')[1],/创意设计：以蜂窝组合分区呈现并列图文/);
+  assert.doesNotMatch(moved.split('- **排版要求**：')[1].split(/\n- \*\*/)[0],/创意设计|创意方向/);
+  const custom=base.replace('- **风格要求**：','- **风格要求**：创意设计：采用阶梯形特殊分块，图文穿插突出实验阶段。');
+  assert.equal(effectiveSlideImagePrompt(p,1,d,images,'full',custom),custom);
+  p.pageDesigns[1].plan.layoutIntent='采用阶梯式分块呈现实验阶段';
+  const supplied=effectiveSlideImagePrompt(p,1,d,images,'full',base);
+  assert.match(supplied,/创意设计：采用阶梯式分块呈现实验阶段/);
+  assert.equal(effectiveSlideImagePrompt(p,1,d,images,'full',supplied),supplied);
+  const old=base.replace('- **风格要求**：','- **风格要求**：创意设计：采用已确认的常规分区，通过图文组合、疏密与尺度变化突出重点。');
+  assert.doesNotMatch(effectiveSlideImagePrompt(p,1,d,images,'full',old),/采用已确认的常规分区/);
 });
 
 test('风格中的创意沿用已确认特殊分块，不把并列改成流程，不采用已否定的形态',()=>{
   const {p,d,images}=fixture();
   Object.assign(p.pageDesigns[1].plan,{logic:'两组并列，不宣称因果',layoutIntent:'采用蜂窝组合分区组织两组指标'});
   let prompt=slideImagePrompt(p,1,d,images),style=prompt.split('- **风格要求**：')[1].split(/\n- \*\*/)[0];
-  assert.match(style,/创意设计：沿用已确认的蜂窝分区/);assert.doesNotMatch(style,/箭形|金字塔/);assert.equal(prompt.split('- **视觉关系要求**：')[1],'不加箭头。');
+  assert.match(style,/创意设计：采用蜂窝组合分区组织两组指标/);assert.doesNotMatch(style,/箭形|金字塔/);assert.equal(prompt.split('- **视觉关系要求**：')[1],'不加箭头。');
   p.pageDesigns[1].plan.layoutIntent='避免使用蜂窝，左右对照';prompt=slideImagePrompt(p,1,d,images);style=prompt.split('- **风格要求**：')[1].split(/\n- \*\*/)[0];
-  assert.doesNotMatch(style,/蜂窝/);assert.match(style,/特殊分块|异形承载/);
+  assert.doesNotMatch(style,/蜂窝|创意设计：/);
 });
 
-test('斜切和弧线加入自动创意候选，遵循已确认选择与明确排除',()=>{
+test('不从对照或中心关系臆造创意，明确选用斜切与弧线才说明',()=>{
   const {p,d,images}=fixture(),style=()=>slideImagePrompt(p,1,d,images).split('- **风格要求**：')[1].split(/\n- \*\*/)[0];
-  Object.assign(p.pageDesigns[1].plan,{logic:'两组并列对照',layoutIntent:'左右对照'});assert.match(style(),/以斜切分区组织对照/);
-  Object.assign(p.pageDesigns[1].plan,{logic:'中心结论与多项支撑',layoutIntent:'中心与支撑'});assert.match(style(),/以弧线围合组织中心与支撑/);
-  for(const form of ['斜切','弧线','弧形']){p.pageDesigns[1].plan.layoutIntent='采用'+form+'分区组织图文';assert.match(style(),new RegExp('沿用已确认的'+form+'分区'));}
+  Object.assign(p.pageDesigns[1].plan,{logic:'两组并列对照',layoutIntent:'左右对照'});assert.doesNotMatch(style(),/创意设计：/);
+  Object.assign(p.pageDesigns[1].plan,{logic:'中心结论与多项支撑',layoutIntent:'中心与支撑'});assert.doesNotMatch(style(),/创意设计：/);
+  for(const form of ['斜切','弧线','弧形']){p.pageDesigns[1].plan.layoutIntent='采用'+form+'分区组织图文';assert.match(style(),new RegExp('采用'+form+'分区组织图文'));}
   Object.assign(p.pageDesigns[1].plan,{logic:'两组对照',layoutIntent:'不要斜切，采用交错分区'});assert.doesNotMatch(style(),/斜切/);
   Object.assign(p.pageDesigns[1].plan,{logic:'中心与支撑',layoutIntent:'不用弧线，采用放射分区'});assert.doesNotMatch(style(),/弧线/);
 });
 
 test('适合的创意方向用明确采用指令，常规布局只用于设计稿已说明不适用的页面',()=>{
   const {p,d,images}=fixture(),style=()=>slideImagePrompt(p,1,d,images).split('- **风格要求**：')[1].split(/\n- \*\*/)[0].split('创意设计：')[1];
-  for(const [logic,intent,form]of [['两组结果对照','左右对照','斜切分区'],['中心结论与多项支撑','中心与支撑','弧线围合'],['三个等级分级','分级信息','金字塔式'],['样本处理流程','按步骤阅读','箭形组合'],['两组指标并列','采用蜂窝分区','蜂窝分区']]){
+  for(const [logic,intent,form]of [['两组结果对照','采用斜切分区','斜切分区'],['中心结论与多项支撑','采用弧线围合','弧线围合'],['三个等级分级','采用金字塔式分区','金字塔式'],['样本处理流程','采用箭形组合','箭形组合'],['两组指标并列','采用蜂窝分区','蜂窝分区']]){
     Object.assign(p.pageDesigns[1].plan,{logic,layoutIntent:intent});const instruction=style();
-    assert.match(instruction,new RegExp(form));assert.match(instruction,/采用有表达作用/);assert.doesNotMatch(instruction,/可选|可尝试|可探索|探索有表达作用|或/);
+    assert.match(instruction,new RegExp(form));assert.match(instruction,/采用/);assert.doesNotMatch(instruction,/可选|可尝试|可探索|探索有表达作用|或/);
   }
   Object.assign(p.pageDesigns[1].plan,{logic:'保留整幅大图的阅读空间',layoutIntent:'大图与原文需完整保留，不适合采用特殊分块，常规分区更利于阅读'});
-  assert.match(style(),/采用已确认的常规分区/);assert.doesNotMatch(style(),/特殊分块|斜切|金字塔/);
+  assert.equal(style(),undefined);
 });
 
 test('旧节点关系中的编号转成真实文案，清理箭头要求不截断引号内的句子',()=>{
@@ -169,7 +171,7 @@ test('封面目录不补事实图片，学术限制依实际用途适用',()=>{
   p.pageDesigns[1].plan.nodes=[];
   const toc=slideImagePrompt(p,1,d,[]);assert.match(toc,/比例要求\*\*：目录页/);assert.match(toc,/无进度条/);assert.match(toc,/本页无配图/);assert.match(toc,/不画任何图片占位框/);
   p.brief.title='创新创业路演';assert.doesNotMatch(slideImagePrompt(p,1,d,[]),/文本框内尽量不要有渐变/);
-  const background=themeAssetPrompt(p,d,'hero-image');assert.doesNotMatch(background,/细节简洁/);assert.match(background,/艺术主视觉占满视觉区/);assert.ok(background.includes(promptColor(d.coreColor)));assert.ok(background.includes(d.heroSubject));assert.ok(background.includes(d.textArea));assert.doesNotMatch(background,/无衬线|正文无框|不应使用的重复长风格/);
+  const background=themeAssetPrompt(p,d,'hero-image');assert.doesNotMatch(background,/细节简洁/);assert.match(background,/艺术主视觉占满视觉区/);assert.ok(background.includes(promptColor(d.coreColor)));assert.ok(background.includes(d.heroSubject));assert.match(background,/标题与副标题区域连续留白/);assert.doesNotMatch(background,/无衬线|正文无框|不应使用的重复长风格/);
 });
 
 test('自然语言修改与返工不会累积规范，旧版尾部用户修改保留',()=>{
@@ -237,7 +239,7 @@ test('封面目录与正文的预览只锁定底图，不重新描述主体排�
 });
 
 test('创意原则只用于编写，最终稿保留本页设计意图；旧稿清理不叠加且底图继续锁定',()=>{
-  const {p,d,images}=fixture(),[preset]=registerStyleDirections(p,[{...d,referenceStyleId:'A'}],'test');
+  const {p,d,images}=fixture();p.pageDesigns[1].plan.style='采用斜切文本框组织对照';const [preset]=registerStyleDirections(p,[{...d,referenceStyleId:'A'}],'test');
   for(const direction of [d,preset])for(const kind of ['cover','toc','content'])for(const mode of ['concept','full']){
     p.slides[1].kind=kind;
     p.themeAssets={stamp:themeAssetsStamp(p),directions:[{...direction,assets:Object.fromEntries(['hero-image','toc-image','content-background'].map(use=>[use,{normalized:'bg.png',previewHash:'hash'}]))}]};
@@ -250,7 +252,7 @@ test('创意原则只用于编写，最终稿保留本页设计意图；旧稿�
     const legacy=prompt.replace('- **排版要求**：','- **排版要求**：'+roughLayoutImageGuidance+'实际排版要有创意，保留合理的组合与局部构图发挥空间。'),repaired=effectiveSlideImagePrompt(p,1,direction,images,mode,legacy);
     assert.equal(repaired,prompt);assert.equal(effectiveSlideImagePrompt(p,1,direction,images,mode,repaired),repaired);
     const style=prompt.split('- **风格要求**：')[1].split(/\n- \*\*/)[0];assert.match(style,/创意设计：/,'风格项必须包含创意要求');
-    if(direction.presetDesign)assert.match(style,/沿用预设的分块、框形与装饰/);else assert.match(style,/特殊分块、异形承载与图文组合/);
+    assert.match(style,/创意设计：采用斜切文本框组织对照/);
   }
 });
 

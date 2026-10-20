@@ -53,3 +53,8 @@ test('新增复杂原生几何保留独立shape身份并可渲染SVG对照',()=>
     const elements=validateAudit([text('title',slide.title,100),text('body-0',slide.body[0],250),{key:'shape',type:'shape',shape:kind,x:1000,y:600,w:250,h:150,fill:'#eeeeee',color:'#222',strokeWidth:2}],slide,[]);assert.equal(elements[2].shape,kind);new Resvg(nativeSVG(elements,()=>'' )).render().asPng();
   }
 });
+
+test('自动修正无有效变化时保留工具错误并报告已尝试轮数，不以0轮掩盖接口失败',async()=>{
+ const messages=[],c=await rebuildReviewLoop({feedback:[{index:0,regionScope:{},instruction:'抠出书法字'}],render:async()=>({id:'old',review:{pages:[{index:0,passed:false,issues:['标题字形不符']} ]}}),repair:async()=>({changed:false,errors:['书法字抠图接口暂不可用（HTTP 503）']}),progress:m=>messages.push(m)});
+ assert.equal(c.visualRepair.status,'stalled');assert.equal(c.visualRepair.attemptedRounds,1);assert.equal(c.visualRepair.pendingFeedback.length,1);assert.match(c.visualRepair.errors[0],/503/);assert.match(messages.at(-1),/503/);
+});

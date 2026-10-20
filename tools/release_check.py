@@ -7,8 +7,11 @@ import xml.etree.ElementTree as ET
 P='http://schemas.openxmlformats.org/presentationml/2006/main'
 A='http://schemas.openxmlformats.org/drawingml/2006/main'
 R='http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-def check(deck, spec):
+def check(deck, spec, pages=None, baseline=None):
     errors=[]
+    if pages is not None and baseline:
+        import re
+        errors.extend(e for e in baseline.get('errors',[]) if (match:=re.match(r'^S(\d+):',e)) and int(match.group(1))-1 not in pages)
     with zipfile.ZipFile(deck) as z:
         names=z.namelist()
         if z.testzip() or len(names)!=len(set(names)): errors.append('ZIP integrity failure')
@@ -26,6 +29,9 @@ def check(deck, spec):
         if len(slide_names)!=len(spec['slides']):errors.append('Slide count mismatch')
         audits=[]
         for i,elements in enumerate(spec['slides']):
+            if pages is not None and i not in pages:
+                if not baseline or i>=len(baseline.get('slides',[])): raise ValueError('Missing verified page baseline')
+                audits.append(baseline['slides'][i]);continue
             r=xml.get(f'ppt/slides/slide{i+1}.xml')
             if r is None:errors.append('Missing slide');continue
             expected=Counter(e['text'] for e in elements if e['type']=='text')
@@ -52,6 +58,8 @@ def check(deck, spec):
             audits.append({'index':i,'objects':len(objects),'texts':sum(actual.values()),'pictures':len(r.findall(f'.//{{{P}}}pic')),'background':background['id'] if background else None})
     return {'passed':not errors,'errors':errors,'slides':audits,'pptx_sha256':hashlib.sha256(Path(deck).read_bytes()).hexdigest()}
 if __name__=='__main__':
-    result=check(sys.argv[1],json.loads(Path(sys.argv[2]).read_text(encoding='utf-8')))
+    import argparse
+    parser=argparse.ArgumentParser();parser.add_argument('deck');parser.add_argument('spec');parser.add_argument('--pages');parser.add_argument('--baseline');args=parser.parse_args()
+    result=check(args.deck,json.loads(Path(args.spec).read_text(encoding='utf-8')),set(map(int,args.pages.split(','))) if args.pages else None,json.loads(Path(args.baseline).read_text(encoding='utf-8')) if args.baseline else None)
     print(json.dumps(result,ensure_ascii=False))
     sys.exit(0 if result['passed'] else 1)

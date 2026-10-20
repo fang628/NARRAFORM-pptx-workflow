@@ -95,7 +95,7 @@ test('程序生成导航符合审计准确文案要求，关闭进度条不增�
 
 test('审计排除旧导航与匿名顶栏素材，保留同名正文、原图，长章节使用实际导航高度',()=>{
   const p=fixture();p.progressSections[1].title='用于验证多行章节标题的完整长名称';prepareRebuildPresentation(p);
-  const region=rebuildProgressRegion(p,2);assert.equal(region.h,68);assert.equal(rebuildProgressRegion(p,0),null);
+  const region=rebuildProgressRegion(p,2);assert.equal(region.h,Math.max(68,p.rebuildPresentation.progress.y+p.rebuildPresentation.progress.h+12));assert.equal(rebuildProgressRegion(p,0),null);
   const elements=[
     {key:'title',type:'text',nodeId:'title',text:'背景',x:80,y:20,w:500,h:45},
     {key:'old-text',type:'text',text:'背景',x:80,y:20,w:100,h:45},
@@ -204,6 +204,7 @@ test('真实PowerPoint：六个长章节在两种自适应横列中均完整可�
   const sha=digest(fs.readFileSync(bg)),asset={materialId:'bg',previewHash:sha,normalized:'background.png'};
   p.materials=[{id:'bg',file:'background.png',purpose:'workflow-background',kind:'image',sha256:sha}];p.themeAssets={stamp:themeAssetsStamp(p),directions:[{id:'a',assets:{'hero-image':asset,'toc-image':asset,'content-background':asset}}]};
   for(const layout of ['chevron','bubble']){
+    p.progressStyleReference={layout,theme:'a',index:2,box:[.045,.065,.91,.065],appearance:{accent:'82CED0'}};
     p.deliveryMotion=deliveryMotionSettings({progressLayout:layout});prepareRebuildPresentation(p);
     const top=p.rebuildPresentation.progress.y+p.rebuildPresentation.progress.h+32;
     p.reconstruction={slides:p.slides.map((s,i)=>({index:i,background:slideBackground(p,i),elements:normalizeRebuildProgress(p,i,[{key:'title',type:'text',nodeId:'title',text:s.title,x:86,y:top,w:1100,h:100,size:60,color:'F4F4EF',bold:true}])}))};
@@ -213,11 +214,14 @@ test('真实PowerPoint：六个长章节在两种自适应横列中均完整可�
     const manifest=JSON.parse(stdout);
     for(const page of manifest.pages.slice(2)){
       const labels=page.texts.filter(t=>t.key.startsWith('nf-progress-label-'));assert.equal(labels.length,6);assert(labels.every(t=>t.fontSize>0&&t.boundWidth<=t.w+1&&t.boundHeight<=t.h+1),'长章节保持单行，按实际字号渲染且不出框');
+      for(const label of labels)assert(Math.abs(label.y+label.h/2-87.75)<.1,'实际PowerPoint文字中心对齐参考横列，不回落到固定页顶');
       if(layout==='bubble')assert(p.reconstruction.slides[page.index].elements.filter(e=>e.type==='shape').every(e=>e.h<=44),'气泡须保持低矮');
     }
     const zip=await JSZip.loadAsync(fs.readFileSync(deck)),xml=await zip.file('ppt/slides/slide4.xml').async('string');
     const shapes=(xml.match(/<p:sp\b[^>]*>[\s\S]*?<\/p:sp>/g)||[]).filter(s=>/name="!!nf-progress-(?:track|indicator)/.test(s));assert.equal(shapes.length,7);
     for(const shape of shapes){assert.match(shape,/<a:gradFill/);assert.match(shape,/<a:outerShdw/);assert.match(shape,/<a:ln w="[1-9]/);}
+    const first=shapes.find(s=>s.includes('name="!!nf-progress-track-0"'));
+    assert.match(first,new RegExp('<a:off x="'+72*7620+'"'),'PowerPoint原生图形左边界沿用参考图');
     assert.match(xml,/<p159:morph/);assert.match(xml,/wrap="none"/);
   }
 });

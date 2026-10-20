@@ -1,7 +1,12 @@
 {
   "source": "pptx-workflow",
-  "version": "b6ac8e3906419fe6",
-  "copiedAt": "2026-10-10T14:38:43.158Z",
+  "agentPolicyVersion": "agent-visual-v4",
+  "version": "e90c07817ffb584a",
+  "previousVersions": [
+    "b6ac8e3906419fe6",
+    "96582974efd86018"
+  ],
+  "copiedAt": "2026-10-19T15:06:03.865Z",
   "files": [
     {
       "file": "README.md",
@@ -20,8 +25,8 @@
     },
     {
       "file": "shared/design-principles.md",
-      "sha256": "4b35d16dea048b223e1ae1e5637b34614fa7417a4f0cf6459d59bb3626d101fc",
-      "bytes": 9051
+      "sha256": "3012a87aac78950ea397f3ad30f4d167eed6c294cc8db21c7802239d06f6d3da",
+      "bytes": 9586
     },
     {
       "file": "shared/incremental-rework.md",
@@ -160,8 +165,8 @@
     },
     {
       "file": "stages/13-design/references/reference-index.md",
-      "sha256": "0f378b41ca7452312d552fb96cb94de9813086f7f5c3cc39a494cb15b02b46ba",
-      "bytes": 4410
+      "sha256": "40824234e1b319b37e0e209715addd53f5621f7fe058c1be9e3b0433cf324fb2",
+      "bytes": 4424
     },
     {
       "file": "stages/13-design/references/style-guide.md",
@@ -193,6 +198,5 @@
       "sha256": "df26d5d8acae84da0f1a7a984ba56f6177da7b8f00450f1ebcebc002e9d3b355",
       "bytes": 2703
     }
-  ],
-  "agentPolicyVersion": "agent-visual-v4"
+  ]
 }

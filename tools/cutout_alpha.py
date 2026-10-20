@@ -12,25 +12,40 @@ def prepare_cutout(image):
     if alpha.min() == 255:
         rgb = rgba[:, :, :3].astype(np.int16)
         border = np.concatenate((rgb[0], rgb[-1], rgb[:, 0], rgb[:, -1]))
-        neutral = (border.max(axis=1) - border.min(axis=1) <= 24) & (border.min(axis=1) >= 205)
-        if neutral.mean() < .97:
-            raise ValueError('无法可靠分离复杂底色；请使用支持透明背景的生图通道或重新抠图')
-        floor = max(195, float(np.percentile(border.min(axis=1), 2)) - 22)
-        background = (rgb.max(axis=2) - rgb.min(axis=2) <= 24) & (rgb.min(axis=2) >= floor)
-        foreground = (~background).astype(np.uint8) * 255
-        # Fill the exterior contours, preserving enclosed white highlights and details.
-        contours, _ = cv2.findContours(foreground, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        contours = [c for c in contours if cv2.contourArea(c) >= max(24, width * height * .0005)]
-        if not contours:
-            raise ValueError('未找到可可靠分离的独立主体')
-        mask = np.zeros_like(alpha)
-        cv2.drawContours(mask, contours, -1, 255, cv2.FILLED)
-        coverage = float((mask > 0).mean())
-        if coverage < .005 or coverage > .85 or np.any(mask[0]) or np.any(mask[-1]) or np.any(mask[:, 0]) or np.any(mask[:, -1]):
-            raise ValueError('主体边界不可靠，保留原返回图供用户检查')
-        alpha = cv2.GaussianBlur(mask, (3, 3), .6)
-        rgba[:, :, 3] = alpha
-        mode = 'neutral-background-matte'
+        key = np.median(border, axis=0)
+        # Explicit chroma matte preserves white lettering and enclosed holes.
+        chroma = (key[0]>180 and key[2]>180 and key[1]<90) or (key[1]>180 and key[0]<90 and key[2]<90)
+        if chroma and (np.linalg.norm(border-key,axis=1)<35).mean()>.97:
+            distance=np.linalg.norm(rgb-key,axis=2)
+            opacity=np.clip((distance-20)/40,0,1)
+            coverage=float((opacity>.05).mean())
+            if coverage<.002 or coverage>.85:
+                raise ValueError('纯色底分离后没有可靠的独立主体')
+            restored=np.clip((rgb-key*(1-opacity[:,:,None]))/np.maximum(opacity[:,:,None],.01),0,255)
+            rgba[:,:,:3]=restored.astype(np.uint8)
+            alpha=(opacity*255).astype(np.uint8)
+            rgba[:,:,3]=alpha
+            mode='chroma-background-matte'
+        else:
+            neutral = (border.max(axis=1) - border.min(axis=1) <= 24) & (border.min(axis=1) >= 205)
+            if neutral.mean() < .97:
+                raise ValueError('无法可靠分离复杂底色；请使用支持透明背景的生图通道或重新抠图')
+            floor = max(195, float(np.percentile(border.min(axis=1), 2)) - 22)
+            background = (rgb.max(axis=2) - rgb.min(axis=2) <= 24) & (rgb.min(axis=2) >= floor)
+            foreground = (~background).astype(np.uint8) * 255
+            # Fill the exterior contours, preserving enclosed white highlights and details.
+            contours, _ = cv2.findContours(foreground, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            contours = [c for c in contours if cv2.contourArea(c) >= max(24, width * height * .0005)]
+            if not contours:
+                raise ValueError('未找到可可靠分离的独立主体')
+            mask = np.zeros_like(alpha)
+            cv2.drawContours(mask, contours, -1, 255, cv2.FILLED)
+            coverage = float((mask > 0).mean())
+            if coverage < .005 or coverage > .85 or np.any(mask[0]) or np.any(mask[-1]) or np.any(mask[:, 0]) or np.any(mask[:, -1]):
+                raise ValueError('主体边界不可靠，保留原返回图供用户检查')
+            alpha = cv2.GaussianBlur(mask, (3, 3), .6)
+            rgba[:, :, 3] = alpha
+            mode = 'neutral-background-matte'
     ys, xs = np.where(alpha > 4)
     if not len(xs):
         raise ValueError('抠图没有可见主体')
