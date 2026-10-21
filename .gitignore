@@ -12,6 +12,11 @@
 *.test.js
 *.test.py
 
+# Optional local maintenance utilities, not part of the runtime
+/tools/clean_intermediates.ps1
+/tools/sync_workflow_library.mjs
+/tools/workflow-library-policy.mjs
+
 # Dependencies and Python environments
 node_modules/
 .venv/
