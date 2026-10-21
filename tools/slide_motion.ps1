@@ -5,6 +5,7 @@ function Get-NarraformShapeKey($Shape) {
     $name = [string]$Shape.Name
     if ($name.StartsWith('!!nf-page-')) { return ($name -replace '^!!nf-page-\d+--', '') }
     if ($name.StartsWith('!!nf-progress-')) { return $name.Substring(2) }
+    if ($name.StartsWith('!!nf-footer-')) { return $name.Substring(2) }
     return $name
 }
 function Set-NarraformMotion($Deck, $Plan) {
@@ -14,14 +15,16 @@ function Set-NarraformMotion($Deck, $Plan) {
         $sequence = $slide.TimeLine.MainSequence
         for ($i = $sequence.Count; $i -ge 1; $i--) {
             $key = Get-NarraformShapeKey $sequence.Item($i).Shape
-            if ($key.StartsWith('nf-progress-')) { $sequence.Item($i).Delete() }
+            if ($key.StartsWith('nf-progress-') -or $key.StartsWith('nf-footer-')) { $sequence.Item($i).Delete() }
         }
         foreach ($shape in $slide.Shapes) {
             $key = Get-NarraformShapeKey $shape
             $shape.Tags.Add('NARRAFORM_KEY', $key)
             if ($Plan.settings.enabled) {
-                # Only navigation gets a stable cross-slide Morph identity.
-                if ($key.StartsWith('nf-progress-')) { $shape.Name = '!!' + $key }
+                # Match native main titles and navigation across slides.
+                # Artistic/calligraphy image titles remain ordinary pictures.
+                if ($key.StartsWith('nf-progress-') -or $key.StartsWith('nf-footer-')) { $shape.Name = '!!' + $key }
+                elseif ($page.title -and $key -eq [string]$page.title.key -and [string]$page.title.kind -eq 'text') { $shape.Name = '!!nf-title-text' }
                 else { $shape.Name = '!!nf-page-' + [string]$page.index + '--' + $key }
             } else { $shape.Name = $key }
         }
@@ -41,7 +44,7 @@ function Set-NarraformMotion($Deck, $Plan) {
         }
         $labelCount = 0
         if ($page.labelChanges) { $labelCount = @($page.labelChanges).Count }
-        $report += @{index=[int]$page.index;fade=($kind -eq 'fade');transition=$kind;duration=$duration;startDelay=0;progressEffects=0;progressMorph=($kind -eq 'morph' -and $null -ne $page.progress);labelMorphCount=$labelCount;progress=$page.progress}
+        $report += @{index=[int]$page.index;fade=($kind -eq 'fade');transition=$kind;duration=$duration;startDelay=0;progressEffects=0;progressMorph=($kind -eq 'morph' -and $null -ne $page.progress);titleMorph=($kind -eq 'morph' -and $page.titleMorph);title=$page.title;labelMorphCount=$labelCount;progress=$page.progress}
     }
-    return @{version=2;renderer='Microsoft PowerPoint';pages=$report}
+    return @{version=3;renderer='Microsoft PowerPoint';pages=$report}
 }

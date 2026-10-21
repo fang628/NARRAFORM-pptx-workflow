@@ -161,7 +161,7 @@ function launch(p,label,fn,{onComplete,priorStage}={}) {
 async function body(req) { let size=0, chunks=[]; for await(const chunk of req) {size+=chunk.length; if(size>30_000_000) throw Error('请求超过 30 MB'); chunks.push(chunk);} try { return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}'); } catch {throw Error('请求 JSON 无效');} }
 function json(res,status,value) { res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'}); res.end(JSON.stringify(value)); }
 function imageExtension(buf) { if(buf.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) return '.png'; if(buf[0]===255&&buf[1]===216&&buf[2]===255) return '.jpg'; throw Error('仅支持有效的 PNG／JPEG 图片'); }
-function briefOf(b) { if(!b||!String(b.title||'').trim()) throw Error('请填写演示文稿主题'); const n=optionalPageCount(b.pages); return {title:String(b.title).slice(0,120),audience:String(b.audience||'').slice(0,500),purpose:String(b.purpose||'').slice(0,4000),pages:n,language:String(b.language||'中文').slice(0,50),toc:n!==1&&!!b.toc,thanks:n!==1&&!!b.thanks,progress:b.progress!==false,speaker:!!b.speaker,cover:b.cover!==false}; }
+function briefOf(b) { if(!b||!String(b.title||'').trim()) throw Error('请填写演示文稿主题'); if(b.pageNumbers!==undefined&&typeof b.pageNumbers!=='boolean')throw Error('页脚页码选项须为布尔值'); const n=optionalPageCount(b.pages); return {title:String(b.title).slice(0,120),audience:String(b.audience||'').slice(0,500),purpose:String(b.purpose||'').slice(0,4000),pages:n,language:String(b.language||'中文').slice(0,50),toc:n!==1&&!!b.toc,thanks:n!==1&&!!b.thanks,progress:b.progress!==false,speaker:!!b.speaker,cover:b.cover!==false}; }
 async function drainImageQueue(p){
   if(tasks.has(p.id)||uploads.has(p.id)||credentialWrites.has(p.id)||queueDispatch.has(p.id)||projects.get(p.id)!==p||p.archivedAt)return;
   const job=p.imageTaskQueue?.find(t=>t.status==='queued');if(!job)return;
@@ -242,6 +242,9 @@ async function performAction(p,b,res,fromQueue=false) {
   } else if(b.action==='requirements') {
     const next=briefOf(b.brief),sections=b.progressSections===undefined?null:validateProgressSections(b.progressSections);
     const changed=Object.keys(next).filter(k=>next[k]!== (k==='cover'?p.brief.cover!==false:p.brief[k]));
+    const footerChanged=b.brief.pageNumbers!==undefined&&(p.pageNumbers===true)!==b.brief.pageNumbers;
+    if(footerChanged&&!changed.length&&sections===null){p.pageNumbers=b.brief.pageNumbers;event(p,'已更新页脚页码选项，05重新构建时应用；内容与预览保留');return json(res,200,clean(p));}
+    if(b.brief.pageNumbers!==undefined)p.pageNumbers=b.brief.pageNumbers;
     if(changed.length){
       const analysis=analysisCurrent(p)&&changed.every(k=>['pages','toc','thanks'].includes(k))?p.analysis:null;
       p.brief=next;materialsChanged(p);p.slides=[];
@@ -388,7 +391,7 @@ const server=http.createServer(async(req,res)=>{
       return json(res,200,[...projects.values()].filter(p=>view==='all'||(view==='true'?!!p.archivedAt:!p.archivedAt)).map(p=>({id:p.id,title:p.brief.title,stage:p.stage,updatedAt:p.updatedAt,demo:p.demo,archivedAt:p.archivedAt||null,pages:p.slides.length,materials:p.materials.filter(m=>!m.generated).length})).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)));
     }
     if(url.pathname==='/api/projects'&&req.method==='POST') {
-      const b=await body(req),id=crypto.randomUUID();const p={id,brief:briefOf(b.brief),progressSections:validateProgressSections(b.progressSections||progressSectionsOf(null)),progressSectionsManual:b.progressSections!==undefined,materials:[],slides:[],concepts:[],selectedTheme:null,version:1,stage:0,approvals:{},events:[],demo:!!b.demo};
+      const b=await body(req),id=crypto.randomUUID();const p={id,brief:briefOf(b.brief),pageNumbers:b.brief?.pageNumbers===true,progressSections:validateProgressSections(b.progressSections||progressSectionsOf(null)),progressSectionsManual:b.progressSections!==undefined,materials:[],slides:[],concepts:[],selectedTheme:null,version:1,stage:0,approvals:{},events:[],demo:!!b.demo};
       if(b.demo) {
         p.brief={...p.brief,title:'从想法到演示，保持每一步可控',pages:5};
         p.slides=[{kind:'cover',title:'让想法成为\n清晰的演示',subtitle:'NARRAFORM 本地工作台 · 示例项目',body:[],notes:'这是本地功能示例，未调用模型。',sources:[]},{kind:'content',title:'材料、内容与设计，在一个工作台完成',subtitle:'把复杂制作拆成可确认的步骤',body:['上传报告、文档和真实图片，保留材料来源。','逐页编辑标题与正文，再选择适合受众的视觉方向。','确认全篇预览后，导出原生文字与图形组成的 PPTX。'],sources:[]},{kind:'content',title:'先确认内容，再决定视觉表达',body:['需求确认：用途、受众、页数与演讲备注。','内容确认：每页主题、证据及必要配图。','视觉确认：比较三种方案，审阅整套页面。'],sources:[]},{kind:'content',title:'随时修改，回到正确的确认节点',body:['直接编辑单页内容，或通过 API 提交修改意见。','内容变化后，重新确认受影响的方案与预览。','任务状态保存在本机，重新打开仍可继续编辑。'],sources:[]},{kind:'content',title:'把最终控制权留在你的手中',subtitle:'可编辑的交付，从原生元素开始',body:['标题、正文和装饰图形在 PowerPoint 中仍可修改。','图片使用独立对象插入，按比例完整展示。','本示例不代表 AI 生成结果，也不消耗 API 额度。'],sources:[]}];if(p.brief.cover===false)p.slides=p.slides.filter(s=>s.kind!=='cover');p.concepts=themes;p.version=1;p.approvals={requirements:1,content:1};p.stage=4;
