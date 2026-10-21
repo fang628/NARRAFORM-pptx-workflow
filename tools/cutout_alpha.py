@@ -4,11 +4,17 @@ import numpy as np
 from PIL import Image
 
 
-def prepare_cutout(image):
+def prepare_cutout(image, artistic=False):
     rgba = np.array(image.convert('RGBA'))
     height, width = rgba.shape[:2]
     alpha = rgba[:, :, 3]
     mode = 'provider-alpha'
+    if artistic and alpha.min()<255:
+        edge=np.concatenate((rgba[0],rgba[-1],rgba[:,0],rgba[:,-1]))
+        rgb_edge=edge[:,:3].astype(np.int16)
+        pale=(rgb_edge.max(1)-rgb_edge.min(1)<=24)&(rgb_edge.min(1)>=205)&(edge[:,3]>200)
+        if pale.mean()>.45:
+            raise ValueError('书法字浅色底与白色笔画无法可靠区分，请使用纯洋红底或参考底图分离')
     if alpha.min() == 255:
         rgb = rgba[:, :, :3].astype(np.int16)
         border = np.concatenate((rgb[0], rgb[-1], rgb[:, 0], rgb[:, -1]))
@@ -16,8 +22,14 @@ def prepare_cutout(image):
         # Explicit chroma matte preserves white lettering and enclosed holes.
         chroma = (key[0]>180 and key[2]>180 and key[1]<90) or (key[1]>180 and key[0]<90 and key[2]<90)
         if chroma and (np.linalg.norm(border-key,axis=1)<35).mean()>.97:
-            distance=np.linalg.norm(rgb-key,axis=2)
-            opacity=np.clip((distance-20)/40,0,1)
+            # Estimate the minimum physically possible alpha against the known
+            # matte, then unmix it. A distance threshold makes pale stroke edges
+            # opaque too early and leaves a pink/green fringe on dark slides.
+            delta=rgb-key
+            opacity=np.max(np.where(delta>=0,delta/np.maximum(255-key,1),-delta/np.maximum(key,1)),axis=2)
+            opacity=np.clip(opacity,0,1)
+            opacity[opacity<.025]=0
+            opacity[opacity>.995]=1
             coverage=float((opacity>.05).mean())
             if coverage<.002 or coverage>.85:
                 raise ValueError('纯色底分离后没有可靠的独立主体')
@@ -30,6 +42,10 @@ def prepare_cutout(image):
             neutral = (border.max(axis=1) - border.min(axis=1) <= 24) & (border.min(axis=1) >= 205)
             if neutral.mean() < .97:
                 raise ValueError('无法可靠分离复杂底色；请使用支持透明背景的生图通道或重新抠图')
+            if artistic:
+                # White ink/highlights and white counters are indistinguishable
+                # here. Do not fill closed contours and call the plate transparent.
+                raise ValueError('书法字浅色底与白色笔画无法可靠区分，请使用纯洋红底或参考底图分离')
             floor = max(195, float(np.percentile(border.min(axis=1), 2)) - 22)
             background = (rgb.max(axis=2) - rgb.min(axis=2) <= 24) & (rgb.min(axis=2) >= floor)
             foreground = (~background).astype(np.uint8) * 255

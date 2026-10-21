@@ -48,6 +48,6 @@ def reference_cutout(image, background, artistic=False):
     # Preserve source ink colours exactly; aggressive unmatting creates neon
     # fringes when the AI preview has slightly changed the registered background.
     rgba = np.dstack((rgb.astype(np.uint8),(alpha*255).astype(np.uint8)))
-    result, report = prepare_cutout(Image.fromarray(rgba))
+    result, report = prepare_cutout(Image.fromarray(rgba), artistic)
     report.update(mode='registered-background-difference',coverage=coverage,threshold=threshold,borderDifference=median)
     return result, report

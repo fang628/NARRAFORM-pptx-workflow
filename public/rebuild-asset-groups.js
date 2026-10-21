@@ -1,5 +1,5 @@
 const stable=value=>Array.isArray(value)?value.map(stable):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().filter(k=>value[k]!==undefined).map(k=>[k,stable(value[k])])):value;
-const appearance=(element,geometry)=>stable(Object.fromEntries([...['type','shape','fill','color','strokeWidth','opacity','fillOpacity','colorOpacity','gradient','outline','shadow','rotate','flipH','flipV','beginArrowType','endArrowType','dashType','adjustments','imageFit'],...(geometry?['w','h']:[])].filter(k=>element[k]!==undefined).map(k=>[k,element[k]])));
+const appearance=(element,geometry)=>stable(Object.fromEntries([...['type','shape','fill','color','strokeWidth','opacity','fillOpacity','colorOpacity','gradient','outline','shadow','rotate','flipH','flipV','beginArrowType','endArrowType','dashType','adjustments','imageFit','colorAdjustment'],...(geometry?['w','h']:[])].filter(k=>element[k]!==undefined).map(k=>[k,element[k]])));
 
 // Presentation grouping only: the original instances, coordinates and editing
 // targets remain intact. Unknown appearance is never inferred from the name.
@@ -15,7 +15,8 @@ export function groupRebuildAssets(project,page){
     let identity;
     if(item.type==='image'&&item.id){
       const material=materials.get(item.id);
-      identity=['image',material?.sha256?'hash:'+material.sha256:'id:'+item.id,appearance(source||{type:'image'},false),!!item.needsAttention,!!item.materialOriginal];
+      const hash=item.assetAppearanceHash||material?.sha256;
+      identity=['image',hash?'hash:'+hash:'id:'+item.id,appearance(source||{type:'image'},false),!!item.needsAttention,!!item.materialOriginal];
     }else if(source&&['rect','ellipse','shape','line'].includes(source.type)){
       identity=['native',appearance(source,true),!!item.needsAttention];
     }else identity=['instance',item.key];

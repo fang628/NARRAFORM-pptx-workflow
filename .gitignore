@@ -1,6 +1,16 @@
 # Local project data: uploaded materials, prompts, generated slides and API vaults
 /data/
 /work/
+/projects/
+/local-projects/
+/pptx-project/
+
+# Tests are kept locally, outside the published application source
+/tests/
+/test/
+*.test.mjs
+*.test.js
+*.test.py
 
 # Dependencies and Python environments
 node_modules/

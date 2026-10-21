@@ -804,6 +804,8 @@ html{scroll-padding-top:90px}
 .rebuild-header>.actions{justify-content:flex-start;flex-wrap:wrap;margin:18px 0}
 .rebuild-delivery .panel{min-width:0}
 .rebuild-delivery .release-review{margin-top:0}
+.rebuild-delivery .release-review[data-check-status="failed"]{border-left:4px solid #d0ad37}
+.rebuild-delivery .release-review[data-check-status="failed"]>.panel-heading>.tag{background:#f0df9b;color:#574815;border-color:#c4a950;font-weight:700}
 .rebuild-delivery .release-review>.dossier-strip{display:flex}
 .rebuild-delivery .release-review h3{font-size:20px;margin:8px 0 0}
 .rebuild-delivery .release-review .panel-heading{padding-top:0;align-items:flex-start}
