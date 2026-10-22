@@ -111,6 +111,8 @@ def main():
                     raise ValueError('SVG contains unsafe attributes or external resources')
                 if 'url(' in val and not re.fullmatch(r'url\(#[A-Za-z0-9_-]+\)', val):
                     raise ValueError('SVG references must be local')
+        from svg_colors import normalize_svg_colors
+        color_repairs=normalize_svg_colors(root)
         width,height=[int(v) for v in sys.argv[4:6]]
         if not 1<=width<=1920 or not 1<=height<=1080:raise ValueError('Invalid vector raster bounds')
         validate_svg_filters(root, vb, (width,height))
@@ -123,7 +125,7 @@ def main():
         ET.register_namespace('', 'http://www.w3.org/2000/svg')
         root.set('width',str(width));root.set('height',str(height))
         Path(target).write_text(ET.tostring(root,encoding='unicode'), encoding='utf-8')
-        print(json.dumps({'valid':True, **({'geometryRepairs':geometry_repairs} if geometry_repairs else {}), **({'lineEffectRepairs':line_repairs} if line_repairs else {})}))
+        print(json.dumps({'valid':True, **({'colorRepairs':color_repairs} if color_repairs else {}), **({'geometryRepairs':geometry_repairs} if geometry_repairs else {}), **({'lineEffectRepairs':line_repairs} if line_repairs else {})}))
         return
     with Image.open(source) as raw:
         raw.load()

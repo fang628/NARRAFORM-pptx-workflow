@@ -17,12 +17,12 @@ import {initialElements,setImageCaption,tableMarkdown} from '/elements-model.js'
 import {contentPageCountNotice,pageDesignPanel,rememberDesignFeedback,markPageDesignDirty,reconstructionPanel,rememberDesignExpansion,saveAndConfirmPageDesigns,batchDesignResult} from './page-design.js';
 import {elementEditor,collectElementSlide,syncCaptionFields,mutateElements,bindTreeInteractions,moveElementBranch,syncLegacy} from './element-editor.js';
 import {initAIImageEditor,setPromptInput,sourcePanel,slideImage,promptButton,conceptPrompts,targetLabel,provenanceDialogs,rememberSourceExpansion,sourceTextView} from './provenance.js';
-import {materialPanel,receivedMaterials,materialReaderSelector,queueRows,selectMaterialFiles,droppedMaterialFiles,bindMaterialPickers,uploadMaterialFile,selectionReport,rememberMaterialReportExpansion,layoutMaterialReports} from './materials.js';
+import {materialPanel,receivedMaterials,materialReaderSelector,queueRows,selectMaterialFiles,droppedMaterialFiles,bindMaterialPickers,bindMaterialSelection,selectedMaterialIds,uploadMaterialFile,selectionReport,rememberMaterialReportExpansion,layoutMaterialReports} from './materials.js';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let p=null,tab=0,renderedTab=-1,renderedProject=null,editMode='revise',editIndex=0,pollTimer=null,toastTimer=null;
 let selectionSummary=null,collectingMaterials=false,titlePageOptionAvailable=false,materialStreamingAvailable=false;
-let archivePending=false,designBatchPending=false;
+let archivePending=false,designBatchPending=false,materialDeletionPending=false;
 let renderedResultKey='',projectRequestRevision=0,activeTaskOrigin=null,liveDraftRecovery=[];
 let deleteArchiveTarget=null,deleteArchivePending=false;
 let sendQueue=[],materialDraft='',sending=false,treeUndo=null,readerMaterialId=null;
@@ -279,6 +279,7 @@ function bindForms(){
   };}
   const selectionProjectId=p?.id;
   bindMaterialPickers($('#main'),{enqueue:queueFiles,canSelect:()=>selectionProjectId===p?.id&&!busy()&&!sending&&!collectingMaterials});
+  bindMaterialSelection($('#main'),p,{canSelect:()=>selectionProjectId===p?.id&&!busy()&&!sending&&!collectingMaterials});
   const draft=$('#pasteText');if(draft)draft.oninput=()=>materialDraft=draft.value;
   const analysis=$('#materialAnalysis');if(analysis)analysis.oninput=e=>{if(e.target.matches('[data-analysis-title],#analysisNotes'))$('#approveAnalysis').innerHTML=icon('check')+' 保存修改并确认';};
   const drop=$('.upload-zone');if(drop){drop.ondragover=e=>{e.preventDefault();if(!busy()&&!sending)drop.classList.add('drag-over');};drop.ondragleave=()=>drop.classList.remove('drag-over');drop.ondrop=e=>{e.preventDefault();drop.classList.remove('drag-over');if(busy()||sending||collectingMaterials)return;const projectId=p?.id;collectingMaterials=true;safe(async()=>{try{const files=await droppedMaterialFiles(e.dataTransfer);if(projectId!==p?.id)throw Error('项目已切换，请在当前项目重新选择文件夹');queueFiles(files);}finally{collectingMaterials=false;}});};}
@@ -503,6 +504,13 @@ if(designBatchPending){toast('正在保存并确认内容与设计，请稍候')
   if(b.hasAttribute('data-open-material-reader')){const materials=receivedMaterials(p),m=materials.find(m=>m.id===readerMaterialId)||materials[0];if(!m)throw Error('请先发送材料');readMaterial(m.id);return;}
   if(b.dataset.readMaterial){readMaterial(b.dataset.readMaterial,b.dataset.sourceQuote,b.dataset.sourceSlide,b.dataset.sourceStart!==undefined?{start:Number(b.dataset.sourceStart),end:Number(b.dataset.sourceEnd)}:null);return;}
   if(b.dataset.removeMaterial){await act('removeMaterial',{id:b.dataset.removeMaterial},0);toast('材料已移出，相关理解与确认已重置');return;}
+  if(b.hasAttribute('data-remove-selected-materials')){
+    if(materialDeletionPending)return;const ids=selectedMaterialIds(p);if(!ids.length)throw Error('请先选择材料');
+    materialDeletionPending=true;b.disabled=true;
+    try{await act('removeMaterial',{ids},0);toast('已删除 '+ids.length+' 份所选材料，相关理解与确认已重置');}
+    finally{materialDeletionPending=false;if(b.isConnected)b.disabled=false;}
+    return;
+  }
   if(b.id==='analyzeMaterials'){
     if(sendQueue.length||materialDraft.trim())throw Error('请先发送待处理材料');
     if(!p.apiReady){openAPI();toast('连接模型后即可识别材料');return;}

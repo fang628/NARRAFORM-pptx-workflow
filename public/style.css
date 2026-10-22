@@ -1111,6 +1111,13 @@ button:is(.close,.danger,[data-delete],[data-delete-project],[data-delete-style]
 .progress-sections-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap}.progress-sections-actions .progress-regenerate{min-height:34px;padding:6px 11px;font-size:12px;white-space:nowrap}@media(max-width:640px){.progress-sections-heading{align-items:flex-start;flex-wrap:wrap}.progress-sections-actions{justify-content:flex-start}}
 
 /* Shared custom styles: a compact yellow star, matching the existing library. */
+.material-batch-toolbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:12px 0 0;padding:10px 12px;background:#e9e7de;border-left:3px solid #e7cf4d}
+.material-batch-toolbar .checkbox{color:#514f44;white-space:nowrap}.material-batch-toolbar [data-material-selection-count]{font-size:11px;color:#797565;font-variant-numeric:tabular-nums}
+.material-batch-toolbar [data-material-clear-selection]{margin-left:auto}.material-batch-toolbar .secondary{min-height:32px;padding:5px 12px;font-size:11px}
+.received-material>[data-material-select]{flex:none;margin:0;cursor:pointer;accent-color:#b79d2a}.received-material.is-selected{background:#eeead8;box-shadow:inset 3px 0 #e7cf4d}
+.received-material>div{min-width:0;flex:1}.received-material>.remove-material{flex:none}
+@media(max-width:640px){.material-batch-toolbar{gap:10px}.material-batch-toolbar [data-material-clear-selection]{margin-left:0}.material-batch-toolbar [data-remove-selected-materials]{margin-left:auto}}
+
 .style-star{display:inline-flex;align-items:center;gap:5px;margin:0 10px;padding:5px 9px;color:#625e47;background:#e7e4d7;white-space:nowrap;font-size:12px;vertical-align:middle}
 .style-star span{font-size:19px;line-height:1}.style-star.is-starred{background:#fff238;color:#343326}.style-star:hover{background:#fff676;color:#25251f}.style-star:focus-visible{outline:2px solid #8d8140;outline-offset:3px}
 .style-favorites{margin:20px 0;padding-top:16px;border-top:1px solid #b1afa066}.style-favorites h4{font-size:14px}.style-favorites h4 small{margin-left:8px;font:12px var(--mono);opacity:.65}

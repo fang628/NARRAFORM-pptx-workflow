@@ -368,12 +368,10 @@ def extract(source):
             return markdown(text[:LIMIT], len(text)>LIMIT)
         return {'text':text[:LIMIT], 'truncated':len(text)>LIMIT}
     if ext == '.pptx':
-        with zipfile.ZipFile(source) as z:
-            names = sorted([n for n in z.namelist() if re.fullmatch(r'ppt/slides/slide\d+\.xml', n)], key=lambda n:int(re.search(r'slide(\d+)',n).group(1)))
-            if sum(z.getinfo(n).file_size for n in names) > 30_000_000:
-                raise ValueError('解压后的文档过大')
-            text = '\n'.join('[%s]\n%s' % (n, '\n'.join(e.text for e in ET.fromstring(z.read(n)).iter() if e.tag.endswith('}t') and e.text)) for n in names)
-            return {'text':text[:LIMIT], 'truncated':len(text)>LIMIT}
+        from presentation_structure import read_presentation
+        presentation = read_presentation(source)
+        text = '\n'.join('[%s]\n%s' % (p['part'], p['text']) for p in presentation['slides'])
+        return {'text':text[:LIMIT], 'truncated':len(text)>LIMIT, 'presentation':presentation}
     raise ValueError('不支持的文档类型')
 
 
