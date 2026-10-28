@@ -23,12 +23,35 @@ def bbox_length(value, origin, extent, coordinate=False):
 
 def normalize_svg_line_effects(root):
     by_id = {n.get('id'): n for n in root.iter() if n.get('id')}
+    parents={child:parent for parent in root.iter() for child in parent}
+    def inherited(node,attr,default):
+        while node is not None:
+            if attr in node.attrib:
+                return node.get(attr)
+            node=parents.get(node)
+        return default
     defs = root.find(NS+'defs')
     repairs=[]
-    for line in list(root.iter(NS+'line')):
+    for line in list(root.iter()):
+        tag=line.tag.rsplit('}',1)[-1]
+        if tag not in {'line','path','polyline'}:
+            continue
         try:
-            x1,y1,x2,y2=[float(line.get(k,'0')) for k in ('x1','y1','x2','y2')]
-            stroke=float(line.get('stroke-width','1'))
+            if tag=='line':
+                points=[tuple(float(line.get(k,'0')) for k in pair) for pair in [('x1','y1'),('x2','y2')]]
+            elif tag=='path':
+                from svg_geometry import path_points
+                points=path_points(line.get('d',''),require_closed=False)
+            else:
+                from svg_geometry import NUMBER
+                value=line.get('points','')
+                values=re.findall(NUMBER,value)
+                points=list(zip(map(float,values[::2]),map(float,values[1::2]))) if len(values)%2==0 and not re.sub(NUMBER+r'|[\s,]','',value) else None
+            if not points or len(points)<2 or any(not math.isfinite(n) for p in points for n in p):
+                continue
+            xs,ys=zip(*points)
+            x1,y1,x2,y2=min(xs),min(ys),max(xs),max(ys)
+            stroke=float(inherited(line,'stroke-width','1'))
         except ValueError:
             continue
         if not all(math.isfinite(n) for n in (x1,y1,x2,y2,stroke)) or stroke<=0 or x1==x2 and y1==y2 or x1!=x2 and y1!=y2:
@@ -37,7 +60,7 @@ def normalize_svg_line_effects(root):
         if not w: x-=stroke/2; w=stroke
         if not h: y-=stroke/2; h=stroke
         for attr in ('stroke','filter'):
-            match=LOCAL.fullmatch(line.get(attr,''))
+            match=LOCAL.fullmatch(inherited(line,attr,'') if attr=='stroke' else line.get(attr,''))
             source=by_id.get(match[1]) if match else None
             if source is None:
                 continue

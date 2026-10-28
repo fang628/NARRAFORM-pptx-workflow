@@ -542,6 +542,11 @@ if(designBatchPending){toast('正在保存并确认内容与设计，请稍候')
   if(b.dataset.suggestRemoveAsset!==undefined){
     const field=$(`[data-rebuild-asset-instruction="${Number(b.dataset.assetPage)}"]`),line='删除非事实元素「'+b.dataset.suggestRemoveAsset+'」。';if(field){field.value=[field.value.trim(),line].filter(Boolean).join('\n');field.focus();field.dispatchEvent(new Event('input',{bubbles:true}));}return;
   }
+  if(b.dataset.repairRebuildPage!==undefined){
+    if(!p.rebuildReady){openAPI();toast('请配置支持视觉输入的主模型，或选填独立高性能视觉模型');return;}
+    const index=Number(b.dataset.repairRebuildPage);
+    await act('repairRebuildPage',{index});return;
+  }
   if(b.dataset.retryRebuildPage!==undefined){
     if(!p.rebuildReady){openAPI();toast('请配置支持视觉输入的主模型，或选填独立高性能视觉模型');return;}
     await act('retryRebuildPage',{index:Number(b.dataset.retryRebuildPage)});return;
@@ -599,7 +604,7 @@ async function goToVisualStage(next=2){
  const slides=tab===1&&$('#slidesForm')?collectSlides():p.slides;
  const designDrafts=tab===1?$$('[data-design-markdown]').map(el=>({index:Number(el.dataset.designMarkdown),markdown:el.value})):[];
  await act('enterVisualStage',{slides,designDrafts},next);
- if(p.contentStageEntry?.skipped.length)toast('已进入视觉方案；'+p.contentStageEntry.accepted.length+' 页可生成，'+p.contentStageEntry.skipped.length+' 页待补齐设计稿');
+ if(p.contentStageEntry?.advisories?.length)toast('全部 '+p.contentStageEntry.accepted.length+' 页已确认，可继续生图；设计稿待补齐仅作提示');
 }
 async function flushSlideEdits(){if(tab===1&&$('#slidesForm')&&JSON.stringify(collectSlides())!==JSON.stringify(p.slides))await saveSlides();}
 function slideTarget(s,target){if(target.startsWith('element:')){const n=s.elements?.find(n=>n.id===target.slice(8));return n?(n.type==='table'?tableMarkdown(n):n.type==='image'?n.materialId:n.text||n.label):'';}return target.startsWith('body:')?s.body[Number(target.split(':')[1])]||'':target==='image'?s.imageId:s[target]||'';}

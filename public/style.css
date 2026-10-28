@@ -620,6 +620,8 @@ footer::before{width:145px;height:8px;background:var(--line-array)}
 .surface-footmark{position:absolute;display:block;margin:0;inset:auto auto 0 0!important;transform:none!important;mask-position:left bottom;mask-size:100% 100%;mask-repeat:no-repeat}
 .world-fog::after{inset:auto auto 0 var(--contour-content-left);width:min(1100px,calc(100vw - var(--contour-content-left)));height:min(700px,75vh);transform:none;mask-image:var(--surface-contour-texture),linear-gradient(90deg,#000,transparent 95%),linear-gradient(0deg,#000,transparent 95%);mask-position:left bottom;mask-size:100% 100%;mask-repeat:no-repeat;mask-composite:intersect}
 .command-panel .ornament-contours{inset:auto auto 0 0;width:52%;height:100%;transform:none;mask-position:left bottom;mask-size:100% 100%}
+/* All contour fields dissolve at each edge while staying attached to their surface. */
+.surface-footmark,.command-panel .ornament-contours,.world-fog::after{mask-image:var(--surface-contour-texture),linear-gradient(90deg,transparent,#000 7%,#000 55%,transparent),linear-gradient(0deg,transparent,#000 12%,#000 52%,transparent);mask-position:left bottom;mask-size:100% 100%;mask-repeat:no-repeat;mask-composite:intersect}
 @media(max-width:1000px){:root{--contour-content-left:205px}}
 @media(max-width:700px){:root{--contour-content-left:0px}.world-fog::after{height:60vh}}
 /* Opaque paper and explicit text hierarchy for every image prompt editor. */
@@ -1122,3 +1124,10 @@ button:is(.close,.danger,[data-delete],[data-delete-project],[data-delete-style]
 .style-star span{font-size:19px;line-height:1}.style-star.is-starred{background:#fff238;color:#343326}.style-star:hover{background:#fff676;color:#25251f}.style-star:focus-visible{outline:2px solid #8d8140;outline-offset:3px}
 .style-favorites{margin:20px 0;padding-top:16px;border-top:1px solid #b1afa066}.style-favorites h4{font-size:14px}.style-favorites h4 small{margin-left:8px;font:12px var(--mono);opacity:.65}
 .favorite-style-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:12px}.favorite-style-grid article{padding:14px;background:#e9e7df;border-left:3px solid #e8da5a}.favorite-style-grid article>div{display:flex;align-items:center;gap:8px}.favorite-style-grid i{width:12px;height:18px;flex:none;background:var(--swatch)}.favorite-style-grid strong{font-size:13px;overflow-wrap:anywhere}.favorite-style-grid button{margin-left:auto;font-size:11px;white-space:nowrap}.favorite-style-grid p{font-size:12px;line-height:1.7;overflow-wrap:anywhere}.favorite-style-grid summary{font-size:12px;cursor:pointer}
+/* End the workspace close to its last content; hidden UI must not reserve space. */
+[hidden]:not([hidden="until-found"]){display:none!important}
+#main{padding-bottom:24px;min-height:0}
+#main>:last-child{margin-bottom:0}
+#main>:last-child>:is(.panel,.delivery):last-child{margin-bottom:0}
+#main .preview-grid.preview-masonry{margin-bottom:-26px}
+#main .reading-grid.reading-masonry{margin-bottom:-16px}

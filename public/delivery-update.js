@@ -1,6 +1,6 @@
 // Keep already displayed page nodes and image decoders alive across polling.
 export function deliveryPageKey(p,index){
-  const value=JSON.stringify([p.slides[index].title,p.task?.status==='running',!!p.visualReconstructionCurrent,p.rebuildAssets?.find(s=>s.index===index),p.rebuildLive?.pages?.[index],p.candidate?.id,p.candidate?.review?.pages?.[index],p.rebuildPageChecks?.[index],p.rebuildUndo?.pages?.[index],p.rebuildAssetFeedback?.[index],p.releaseCurrent]);
+  const value=JSON.stringify([p.slides[index].title,p.task?.status==='running',!!p.visualReconstructionCurrent,!!p.rebuildPageRepairEnabled,p.rebuildAssets?.find(s=>s.index===index),p.rebuildLive?.pages?.[index],p.candidate?.id,p.candidate?.review?.pages?.[index],p.rebuildPageChecks?.[index],p.rebuildUndo?.pages?.[index],p.rebuildAssetFeedback?.[index],p.releaseCurrent]);
   let hash=2166136261;for(let i=0;i<value.length;i++)hash=Math.imul(hash^value.charCodeAt(i),16777619);
   return (hash>>>0).toString(36);
 }

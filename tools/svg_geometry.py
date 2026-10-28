@@ -5,9 +5,9 @@ import re
 NUMBER = r'[-+]?(?:\d*\.\d+|\d+\.?\d*)(?:[eE][-+]?\d+)?'
 
 
-def path_points(value):
-    # Only single, straight, closed paths are geometry candidates. Curves, holes
-    # and multi-part artwork retain their original paths.
+def path_points(value, *, require_closed=True):
+    # Geometry correction requires closed paths; paint repair also accepts open
+    # straight paths. Curves, holes and multi-part artwork retain their paths.
     if any(c not in 'MmLlHhVvZz' for c in re.findall(r'[A-Za-z]', re.sub(NUMBER, '', value))):
         return None
     tokens = re.findall(r'[MmLlHhVvZz]|' + NUMBER, value)
@@ -41,7 +41,7 @@ def path_points(value):
             else:
                 return None
             points.append((x, y))
-        return points if closed else None
+        return points if closed or not require_closed else None
     except (ValueError, IndexError):
         return None
 

@@ -52,7 +52,8 @@ export function pageDesignPanel(p,i){
   return `<section class="page-design-panel" data-page-design="${i}">
     <div class="page-design-head"><div><span class="eyebrow">DESIGN SPEC / ${String(i+1).padStart(2,'0')}</span><h3>单页设计稿</h3></div><span class="tag" data-design-state>${state}</span></div>
     <div class="page-design-body">
-      <p class="subtle">AI 先完成设计初稿；只改文案可直接同步；改变节点或层级后可重新设计，进入下一步时默认确认当前有效设计稿。</p>
+      <p class="subtle">AI 先完成设计初稿；只改文案可直接同步；改变节点或层级后可重新设计，进入下一步时默认确认所有页面，设计稿待补齐仅作提示。</p>
+      ${d?.confirmationAdvisory?`<p class="subtle" role="status">${h(d.confirmationAdvisory.reason)}</p>`:''}
       ${generation?.status==='running'?`<p class="subtle" role="status">${generation.attempt?`本页设计稿自动重新生成 ${generation.attempt}/${generation.limit}`:'正在生成本页设计稿'}…</p>`:''}
       ${generation?.status==='failed'?`<p class="image-extraction-report" role="status">本页设计稿暂未完成：${h(generation.history?.at(-1)?.message)}；${d.markdown?'上一版已保留':'内容树已保留'}，其他任务继续。可单页重试或补齐设计稿。</p>`:failure&&!d?.current?`<p class="image-extraction-report">本页 AI 设计未完成：${h(failure.message)}；可单页重试或补齐设计稿。</p>`:''}
       <section class="design-input-check"><h4>设计稿本步检查 · ${d?.inputCheck?.warnings.length?'材料与图片说明待核对':'内容与素材登记'}</h4>${d?.inputCheck?.warnings.length?`<ul>${d.inputCheck.warnings.map(v=>`<li>${h(v)}</li>`).join('')}</ul>`:d?'<p>暂无新增素材登记缺口。</p>':'<p>生成设计稿后在这里显示本步检查结果。</p>'}<p>实际画面检查在视觉方案与完整预览生成结束时完成。</p></section>
@@ -67,7 +68,7 @@ export function pageDesignPanel(p,i){
         <section class="design-feedback"><h4>用 AI 修改设计稿</h4><label>修改意见<textarea aria-label="第 ${i+1} 页设计修改意见" data-design-feedback="${i}" rows="3" maxlength="3000" placeholder="例如：图片移到右侧并放大，左侧突出核心结论，减少装饰，保留图注。">${h(feedbackDrafts.get(p.id+':'+i)||'')}</textarea></label><div class="page-design-actions"><button type="button" class="secondary" data-page-design-action="revisePageDesign" data-page="${i}" ${p.executionConcurrency===undefined?'disabled title="重启本地服务后启用"':''}>按意见重新生成 ↗</button></div><p class="subtle">保留当前文案与内容层级，重新生成完成后可进入下一步。</p></section>
         <p class="subtle design-edit-hint">可修改风格和设计说明。准确文案请在上方内容树修改后直接同步；节点增删或层级调整后重新生成。</p>
         <details class="design-edit"><summary>编辑设计说明 · Markdown</summary><textarea aria-label="第 ${i+1} 页设计稿 Markdown" data-design-markdown="${i}" rows="16" maxlength="80000">${h(d.markdown)}</textarea></details>
-      `:'<div class="design-empty">AI 设计稿尚未生成，点击上方按钮生成本页初稿。</div>'}
+      `:'<div class="design-empty">AI 设计稿待补齐，仅作提示；保存并确认后可按当前内容树直接生图，也可点击上方按钮补充设计。</div>'}
     </div>
   </section>`;
 }
