@@ -1,4 +1,4 @@
-"""Render PDF analysis pages; copy embedded originals when their shape is unchanged."""
+"""Render PDF analysis pages; extract PPTX media directly from the package."""
 import contextlib
 import io
 import json
@@ -41,8 +41,14 @@ def main():
             image.load()
             if image.width*image.height > 40_000_000:
                 raise ValueError('图片像素过大')
-            image.convert('RGBA').save(target)
-        print(json.dumps({'width':image.width,'height':image.height}))
+            # Crop/rotation on the slide never changes the source material.
+            suffix = '.png' if image.format == 'PNG' else '.jpg' if image.format == 'JPEG' else '.png'
+            target = target.with_suffix(suffix)
+            if image.format in ('PNG', 'JPEG'):
+                target.write_bytes(raw)
+            else:
+                image.convert('RGBA').save(target)
+        print(json.dumps({'width':image.width,'height':image.height,'file':target.name}))
     elif op == 'crop':
         box = json.loads(sys.argv[4])
         with Image.open(source) as image:

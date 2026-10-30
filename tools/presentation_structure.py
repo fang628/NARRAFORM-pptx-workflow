@@ -86,7 +86,10 @@ def read_presentation(source):
                         heights = [float(row.get('h', 0)) for row in rows]
                         if box and sum(grid) and sum(heights):
                             record['cellBoxes'] = [[{'x': box['x']+box['w']*sum(grid[:c])/sum(grid), 'y':box['y']+box['h']*sum(heights[:r])/sum(heights), 'w':box['w']*grid[c]/sum(grid), 'h':box['h']*heights[r]/sum(heights)} for c in range(min(len(grid),len(row)))] for r,row in enumerate(record['table'])]
-                    blip = node.find('.//a:blip', NS)
+                    # A group/chart must not inherit its first child's picture.
+                    blip = node.find('p:blipFill/a:blip', NS)
+                    if blip is None:
+                        blip = node.find('p:spPr/a:blipFill/a:blip', NS)
                     if blip is not None:
                         ref = rels.get(blip.get('{'+NS['r']+'}embed'))
                         if ref and ref['part'].startswith('ppt/media/') and ref['part'] in z.namelist():
@@ -115,4 +118,4 @@ def read_presentation(source):
             walk(root.find('p:cSld/p:spTree', NS))
             text = '\n'.join(o.get('text', '') if 'text' in o else '\n'.join('\t'.join(row) for row in o['table']) if 'table' in o else '' for o in objects).strip()
             pages.append({'number': number, 'part': part, 'objects': objects, 'text': text})
-        return {'version': 1, 'width': width, 'height': height, 'slides': pages}
+        return {'version': 2, 'width': width, 'height': height, 'slides': pages}

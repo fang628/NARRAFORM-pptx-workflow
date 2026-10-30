@@ -41,7 +41,7 @@ def navigation_score(header, full_size, layout):
             continue
         left, top = min(b[0] for b in segments), min(b[1] for b in segments)
         right, bottom = max(b[0]+b[2] for b in segments), max(b[1]+b[3] for b in segments)
-        if right-left >= full_size[0]*.35:
+        if right-left >= full_size[0]*.2:
             rows.append((len(segments), left, top, right-left, bottom-top))
     if not rows:
         return {'score': len(boxes), 'box': None}
