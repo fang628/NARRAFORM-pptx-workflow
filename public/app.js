@@ -1,3 +1,4 @@
+import {createProjectEventStream} from './project-events.js';
 import {patchDeliveryContent} from './delivery-update.js';
 import {designEditingActive,designOutputBusy} from './design-editing.js';
 import {confirmPreviewForDelivery} from './preview-confirmation.js';
@@ -18,6 +19,7 @@ import {contentPageCountNotice,pageDesignPanel,rememberDesignFeedback,markPageDe
 import {elementEditor,collectElementSlide,syncCaptionFields,mutateElements,bindTreeInteractions,moveElementBranch,syncLegacy} from './element-editor.js';
 import {initAIImageEditor,setPromptInput,sourcePanel,slideImage,promptButton,conceptPrompts,targetLabel,provenanceDialogs,rememberSourceExpansion,sourceTextView} from './provenance.js';
 import {materialPanel,receivedMaterials,materialReaderSelector,queueRows,selectMaterialFiles,droppedMaterialFiles,bindMaterialPickers,bindMaterialSelection,selectedMaterialIds,uploadMaterialFile,selectionReport,rememberMaterialReportExpansion,layoutMaterialReports} from './materials.js';
+const projectStream=createProjectEventStream({getProject:()=>p,onProgress:()=>{nav();syncTaskProgress();},onInvalidate:()=>schedulePoll(90)});
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let p=null,tab=0,renderedTab=-1,renderedProject=null,editMode='revise',editIndex=0,pollTimer=null,toastTimer=null;
@@ -158,10 +160,10 @@ function render({keepView=false}={}){
 async function refreshProjects(){const [list,archived]=await Promise.all([api('/api/projects'),api('/api/projects?archived=true')]);$('#projects').innerHTML='<option value="">选择项目</option>'+list.map(x=>`<option value="${x.id}" ${x.id===p?.id?'selected':''}>${h(x.demo?'[示例] '+x.title:x.title)}</option>`).join('');$('#archiveCount').textContent=archived.length;$('#projectArchiveList').innerHTML=archived.length?archived.map(x=>`<article class="archived-project"><div><h3>${h(x.demo?'[示例] '+x.title:x.title)}</h3><p>${x.pages} 页 · ${x.materials} 份材料 · ${h(new Date(x.archivedAt).toLocaleDateString('zh-CN'))} 归档</p></div><div class="archived-project-actions"><button type="button" class="secondary" data-restore-project="${h(x.id)}">恢复项目 ↗</button><button type="button" class="text-button archive-delete" data-delete-project="${h(x.id)}" data-project-title="${h(x.title)}" aria-label="删除归档项目：${h(x.title)}">删除</button></div></article>`).join(''):'<div class="archive-empty">暂无归档项目</div>';syncArchiveButton();}
 function syncArchiveButton(){const button=$('#archiveProject');button.disabled=!p||busy()||sending||collectingMaterials||archivePending||designBatchPending;button.title=busy()?'任务执行中，请完成或取消后归档':'归档后可在「已归档」中恢复';}
 async function load(id){$('#supplementImageDialog').close();$('#supplementImageForm').reset();delete $('#supplementImageDialog').dataset.projectId;rebuildRegionEditor.close();projectRequestRevision++;activeTaskOrigin=null;aiImageEditor.close();materialCropEditor.close();$('#addImageTaskDialog').close();$('#themePromptReviewDialog').close();$('#themeAssetPromptDialog').close();$('#themeDirectionDialog').close();themeAssetEdit=null;themeDirectionEdit=null;$('#materialImageDialog').close();$('#materialReader').close();$('#imagePromptDialog').close();$('#sourceDialog').close();sendQueue=[];selectionSummary=null;materialDraft='';p=await api('/api/projects/'+id);if(p.archivedAt){p=null;throw Error('此项目已归档，请在「已归档」中恢复');}localStorage.setItem('ppt-agent-project',id);tab=p.stage>=6?4:p.stage>=5?3:p.stage>=4?2:p.stage>=1?1:0;render();await refreshProjects();}
-async function act(action,extra={},next){if(!p)throw Error('请先创建项目');const keepView=tab===4||designEditingActive(p),queued=busy()&&imageAction(action,extra);projectRequestRevision++;p=await api(`/api/projects/${p.id}/action`,{action,...extra});if(next!==undefined)tab=next;if(p.task?.status==='running'&&activeTaskOrigin?.id!==p.task.id)activeTaskOrigin={id:p.task.id,tab};render({keepView});if(queued)toast('已加入任务列表，等待当前批次完成');return p;}
+async function act(action,extra={},next){if(!p)throw Error('请先创建项目');const keepView=tab===4||designEditingActive(p),queued=busy()&&imageAction(action,extra);projectRequestRevision++;p=await api(`/api/projects/${p.id}/action`,{action,...extra});if(next!==undefined)tab=next;if(p.task?.status==='running'&&activeTaskOrigin?.id!==p.task.id)activeTaskOrigin={id:p.task.id,tab};render({keepView});if(queued)toast('已加入任务列表；可独立执行的单页请求将优先调度');return p;}
 async function safe(fn){try{await fn();}catch(e){toast(e.message);}}
-function schedulePoll(){
-  clearTimeout(pollTimer);if(!p)return;const id=p.id,revision=projectRequestRevision;
+function schedulePoll(delay){
+  projectStream.sync();clearTimeout(pollTimer);if(!p)return;const id=p.id,revision=projectRequestRevision;
   pollTimer=setTimeout(async()=>{
     try{
       const fresh=await api('/api/projects/'+id);if(p?.id!==id||revision!==projectRequestRevision)return;
@@ -188,7 +190,7 @@ function schedulePoll(){
       if(ended&&p.task.label==='重新规划三种风格与提示词'&&p.task.status==='done'&&tab===2&&activeTaskOrigin?.id===p.task.id)openThemePromptReview();
     }catch(e){toast('同步结果暂时失败，将自动重试：'+e.message);}
     finally{if(p?.id===id)schedulePoll();}
-  },busy()||hasQueuedImages()||p?.autoMode?.enabled?1100:3000);
+  },delay??(projectStream.connected?20000:busy()||hasQueuedImages()||p?.autoMode?.enabled?1100:3000));
 }
 async function create(brief,demo=false,progressSections){if(!demo&&progressSections===undefined&&$('[data-progress-section-fields]'))progressSections=progressSectionsDraft();projectRequestRevision++;activeTaskOrigin=null;p=await api('/api/projects',{brief,demo,...(progressSections?{progressSections}:{})});localStorage.setItem('ppt-agent-project',p.id);tab=demo?2:0;render();await refreshProjects();}
 function themePhotoPayload(root){
@@ -674,7 +676,7 @@ $('#imagePromptForm').onsubmit=e=>{e.preventDefault();safe(async()=>{
   await act('image',{...promptPayload(),allowUpload:true});$('#imagePromptDialog').close();
 });};
 $('#apiButton').onclick=openAPI;
-$('#apiForm').elements.executionConcurrency.onchange=()=>safe(async()=>{await act('setConcurrency',{limit:Number($('#apiForm').elements.executionConcurrency.value)});$('#concurrencySaveState').textContent='已保存 · 并发上限 '+p.executionConcurrency+'，下次任务生效；执行过程可查看队列和判断摘要。';});
+$('#apiForm').elements.executionConcurrency.onchange=()=>safe(async()=>{await act('setConcurrency',{limit:Number($('#apiForm').elements.executionConcurrency.value)});$('#concurrencySaveState').textContent='已保存 · 并发上限 '+p.executionConcurrency+'，等待请求立即按新上限调度；执行过程可查看资源池与队列。';});
 $('#apiForm').onsubmit=e=>{e.preventDefault();const submit=e.submitter?.value;safe(async()=>{await persistAPIConfiguration();if(submit==='test'){await act('testAPI',{type:'text'});syncAPIStatus();}else{$('#apiDialog').close();toast(p.apiPersistence==='windows-dpapi'?'API 已在本机加密保存，重启自动恢复':'API 已保存到当前服务会话');}});};
 $('#forgetKey').onclick=()=>safe(async()=>{apiAutosave.reset();await apiAutosave.settled();apiAutosave.reset();await act('forgetKey');apiFormProject=null;apiFormEpoch++;acknowledgedAPIKeys.clear();$('#apiForm').reset();$('#apiDialog').close();toast('当前项目密钥已清除');});
 $('#apiForm').addEventListener('input',e=>{if(e.target.matches('input'))apiAutosave.schedule();});

@@ -17,3 +17,15 @@ function Exit-NarraformOfficeRender($Mutex) {
         try { $Mutex.ReleaseMutex() } finally { $Mutex.Dispose() }
     }
 }
+
+# Programmatic Office opens must not inherit AutomationSecurityLow.
+# Restore the caller's setting immediately after Open, including failure paths.
+function Open-NarraformPresentation($Application, [string]$File, [int]$ReadOnly = -1) {
+    $previousSecurity = $Application.AutomationSecurity
+    try {
+        $Application.AutomationSecurity = 3 # msoAutomationSecurityForceDisable
+        return $Application.Presentations.Open($File, $ReadOnly, 0, 0)
+    } finally {
+        $Application.AutomationSecurity = $previousSecurity
+    }
+}

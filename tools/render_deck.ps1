@@ -25,7 +25,7 @@ try {
     $app = Invoke-OfficeCall { New-Object -ComObject PowerPoint.Application }
     $readOnly = -1
     if ($MotionSpec) { $readOnly = 0 }
-    $deck = Invoke-OfficeCall { $app.Presentations.Open($deckFile, $readOnly, 0, 0) }
+    $deck = Invoke-OfficeCall { Open-NarraformPresentation $app $deckFile $readOnly }
     . (Join-Path $PSScriptRoot 'slide_motion.ps1')
     if ($MotionSpec) {
         $motion = Get-Content -LiteralPath $MotionSpec -Raw -Encoding UTF8 | ConvertFrom-Json

@@ -4,7 +4,7 @@
 
 ## 启动
 
-**环境要求**：Node.js 20+、Python 3.10+。完整的 PPTX 渲染与对照需要 Windows 和已安装的 Microsoft PowerPoint。
+**环境要求**：Node.js 20+、Python 3.11+。完整的 PPTX 渲染与对照需要 Windows 和已安装的 Microsoft PowerPoint。
 
 ```powershell
 git clone https://github.com/fang628/NARRAFORM-pptx-workflow.git NARRAFORM
@@ -17,11 +17,14 @@ cd NARRAFORM
 ```powershell
 npm.cmd install
 python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install "pip>=26.3,<27"
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 npm.cmd start
 ```
 
 自定义端口：`$env:PORT='4359'; npm.cmd start`。通过 `PPT_AGENT_PYTHON` 可指定 Python 路径。
+
+Windows 下同一数据目录只允许一个服务实例，避免多个端口同时改写项目。需要独立运行时，同时设置不同的 `PPT_AGENT_DATA`；强制结束进程后独占访问由系统自动释放。
 
 ## API 配置
 
@@ -47,6 +50,10 @@ Windows 下密钥使用当前用户 DPAPI 加密保存，重启自动恢复；�
 5. **导出交付**：拆解并重建元素，组装 PPTX，通过实际 PowerPoint 渲染逐页对照。可按页修改、补拆和撤回，下载最近构建的 PPTX；讲稿 PDF 按需生成，按页编号分点、连续排版。
 
 支持自动模式，自动完成材料处理、内容确认、预览与交付流程，表现类型和视觉方向由用户选择。可随时退出；关闭网页后后台任务继续运行，服务重启后自动模式暂停。
+
+任务采用动态有界并发：文字与生图按接口分池，共享项目、供应商账户和服务总额度；根据响应耗时与限流调整并发，遇到 429 遵守 `Retry-After`。API 设置中的 1–6 为项目请求上限，运行中也可调整，不中断在途请求。相同在途请求合并，完成后的主动重生成仍会重新调用模型。
+
+整页生成后即可检查该页；05 的单页检查完成后可先修正，其他页继续处理。交互请求优先调度，同批尚未开始的匹配单页任务可并入流水线，其余任务按列表顺序执行。PowerPoint 渲染保持串行，本地图像处理与主要 SVG 渲染使用有界进程／工作线程。进度通过 SSE 增量推送，断线后回退轮询；关键结果立即保存，频繁进度合并写入。
 
 PPT/PDF 在 01 逐页分析布局与叙述逻辑，只提取内容图片。PPTX 图片直接读取内嵌原件，组合图与原生图表按对象独立导出；页面截图仅供分析。上传 PPTX 后，在补充说明写明“只优化视觉风格、不重做”，02 将沿用原稿页序、文字、图文位置与关系，后续只优化视觉并重建。
 

@@ -22,7 +22,7 @@ try {
     $officeLock = Enter-NarraformOfficeRender
     $app = New-Object -ComObject PowerPoint.Application
     # Read-only source: export the actual object, never crop a slide screenshot.
-    $deck = $app.Presentations.Open($source, -1, 0, 0)
+    $deck = Open-NarraformPresentation $app $source -1
     if ($PageNumber -lt 1 -or $PageNumber -gt $deck.Slides.Count) { throw 'Source slide does not exist' }
     $shape = Find-SourceShape $deck.Slides.Item($PageNumber).Shapes $ObjectId
     if ($null -eq $shape) { throw 'Source object does not exist' }
