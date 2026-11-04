@@ -1,7 +1,7 @@
 @echo off
 cd /d "%~dp0"
-if not exist node_modules call npm.cmd install
-if not exist node_modules\@resvg\resvg-js call npm.cmd install
+node -e "for (const name of ['pptxgenjs','@resvg/resvg-js','jszip','image-size','mathlive','mathjax-full/js/mathjax.js']) require.resolve(name)" >nul 2>nul
+if errorlevel 1 call npm.cmd install
 if errorlevel 1 exit /b 1
 if not exist .venv\Scripts\python.exe python -m venv .venv
 if errorlevel 1 exit /b 1

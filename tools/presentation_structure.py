@@ -18,9 +18,16 @@ def relationships(z, part):
 
 
 def paragraphs(node):
+    from extract import omml, math_text
+    def text_of(element):
+        if element.tag=='{http://schemas.openxmlformats.org/officeDocument/2006/math}oMath':
+            return math_text(omml(element))
+        if element.tag=='{'+NS['a']+'}t':return element.text or ''
+        if element.tag=='{'+NS['a']+'}br':return '\n'
+        return ''.join(text_of(child) for child in element)
     result = []
     for paragraph in node.findall('a:p', NS):
-        text = ''.join(e.text or '' if e.tag == '{'+NS['a']+'}t' else '\n' if e.tag == '{'+NS['a']+'}br' else '' for e in paragraph.iter() if e.tag.rsplit('}', 1)[-1] in ('t', 'br'))
+        text = text_of(paragraph)
         pr = paragraph.find('a:pPr', NS)
         runs = []
         for run in paragraph.findall('a:r', NS):
@@ -78,6 +85,9 @@ def read_presentation(source):
                     if body is not None:
                         record['paragraphs'] = paragraphs(body)
                         record['text'] = '\n'.join(p['text'] for p in record['paragraphs'])
+                        from extract import omml, math_node
+                        formulas=[math_node('math',omml(e)) for e in body.findall('.//{http://schemas.openxmlformats.org/officeDocument/2006/math}oMath')]
+                        if formulas:record['formulas']=formulas
                     table = node.find('a:graphic/a:graphicData/a:tbl', NS)
                     if table is not None:
                         record['table'] = [['\n'.join(p['text'] for p in paragraphs(c.find('a:txBody', NS))) for c in row.findall('a:tc', NS)] for row in table.findall('a:tr', NS)]

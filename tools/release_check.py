@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 P='http://schemas.openxmlformats.org/presentationml/2006/main'
 A='http://schemas.openxmlformats.org/drawingml/2006/main'
 R='http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+M='http://schemas.openxmlformats.org/officeDocument/2006/math'
 def check(deck, spec, pages=None, baseline=None):
     errors=[]
     if pages is not None and baseline:
@@ -37,13 +38,26 @@ def check(deck, spec, pages=None, baseline=None):
             expected=Counter(e['text'] for e in elements if e['type']=='text')
             actual=Counter(''.join(s.itertext()) for s in r.findall(f'.//{{{P}}}sp/{{{P}}}txBody/{{{A}}}p/{{{A}}}r/{{{A}}}t'))
             # Multi-line text can contain separate runs; compare each native text shape.
-            actual=Counter(''.join(t.text or '' for t in s.findall(f'.//{{{A}}}t')) for s in r.findall(f'.//{{{P}}}sp') if s.find(f'{{{P}}}txBody') is not None)
+            actual=Counter(''.join(t.text or '' for t in s.findall(f'.//{{{A}}}t')) for s in r.findall(f'.//{{{P}}}sp') if s.find(f'{{{P}}}txBody') is not None and s.find(f'.//{{{M}}}oMath') is None)
             def normalize(counts):
                 normalized=Counter()
                 for text,count in counts.items():
                     normalized[text.replace('\n','').replace('\r','')]+=count
                 return normalized
             if normalize(expected)!=normalize(actual):errors.append(f'S{i+1}: exact native text mismatch')
+            formulas=[e for e in elements if e['type']=='formula']
+            math_shapes=[s for s in r.findall(f'.//{{{P}}}sp') if s.find(f'.//{{{M}}}oMath') is not None]
+            if len(math_shapes)!=len(formulas):errors.append(f'S{i+1}: native formula count mismatch')
+            if formulas:
+                from formula_omml import convert
+                import unicodedata
+                def signature(math):
+                    text=unicodedata.normalize('NFKC',''.join(t.text or '' for t in math.findall(f'.//{{{M}}}t'))).replace(' ','')
+                    constructors=Counter(e.tag for e in math.iter() if e.tag.rsplit('}',1)[-1] in ('f','rad','sSup','sSub','sSubSup','nary','m','d','limLow','limUpp'))
+                    return text,constructors
+                for equation in formulas:
+                    shape=next((s for s in math_shapes if s.find(f'.//{{{P}}}cNvPr').get('name')==equation['key']),None)
+                    if shape is None or signature(shape.find(f'.//{{{M}}}oMath'))!=signature(ET.fromstring(convert(equation['latex']))):errors.append(f'S{i+1}: native formula mismatch '+equation['key'])
             tree=r.find(f'{{{P}}}cSld/{{{P}}}spTree')
             objects=[s for s in tree if s.tag in {f'{{{P}}}sp',f'{{{P}}}pic',f'{{{P}}}cxnSp',f'{{{P}}}graphicFrame'}]
             if len(objects)!=len(elements):errors.append(f'S{i+1}: object inventory mismatch')

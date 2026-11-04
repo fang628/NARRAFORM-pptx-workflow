@@ -21,15 +21,16 @@ function fieldDefault(el){
 }
 export function captureLiveView(root){
   const active=root.ownerDocument.activeElement,fields=viewEntries(root,'input,textarea,select');
+  const formulaFocused=active?.tagName==='MATH-FIELD',formulaSource=formulaFocused?active.closest('.tree-formula-editor')?.querySelector('[data-formula-source]'):null;
   return {drafts:fields.filter(({el})=>el.type!=='file'&&(['checkbox','radio'].includes(el.type)?el.checked!==el.defaultChecked:el.value!==fieldDefault(el))).map(({el,key})=>({key,value:el.value,checked:el.checked,check:['checkbox','radio'].includes(el.type),label:el.getAttribute('aria-label')||el.name||'未提交文字'})),
     details:viewEntries(root,'details').map(({el,key})=>({key,open:el.open})),
-    focus:fields.find(({el})=>el===active)?.key,start:active?.selectionStart,end:active?.selectionEnd};
+    focus:fields.find(({el})=>el===active||el===formulaSource)?.key,formulaFocused,formulaSelection:formulaFocused&&active.selection?structuredClone(active.selection):null,start:active?.selectionStart,end:active?.selectionEnd};
 }
 export function restoreLiveView(root,state){
   const fields=new Map(viewEntries(root,'input,textarea,select').map(({el,key})=>[key,el])),missing=[],restored=[];
   for(const draft of state.drafts){const el=fields.get(draft.key);if(!el||el.tagName==='SELECT'&&![...el.options].some(o=>o.value===draft.value)){missing.push(draft);continue;}if(draft.check)el.checked=draft.checked;else el.value=draft.value;restored.push(el);}
   const details=new Map(viewEntries(root,'details').map(({el,key})=>[key,el]));for(const d of state.details)if(details.has(d.key))details.get(d.key).open=d.open;
-  return {missing,restored,focus(){const el=fields.get(state.focus);if(!el||el.disabled)return;el.focus({preventScroll:true});if(typeof state.start==='number')try{el.setSelectionRange(state.start,state.end);}catch{}}};
+  return {missing,restored,focus(){const el=fields.get(state.focus);if(!el||el.disabled)return;if(state.formulaFocused){const editor=el.closest('.tree-formula-editor');if(editor){editor.dataset.restoreFocus='true';editor.formulaSelection=state.formulaSelection;return;}}el.focus({preventScroll:true});if(typeof state.start==='number')try{el.setSelectionRange(state.start,state.end);}catch{}}};
 }
 const names={'hero-image':'封面底图','toc-image':'目录底图','content-background':'正文底图'};
 export function imageTaskChoices(p){

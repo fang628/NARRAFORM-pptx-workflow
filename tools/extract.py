@@ -22,6 +22,11 @@ def omml(node):
         return math_node('mn' if value.isdigit() else 'mi', text=value)
     if name == 'f':
         return math_node('mfrac', part('num'), part('den'))
+    if name == 'func':
+        function=node.find(M+'fName')
+        return math_node('mrow',math_node('mi',text=''.join(function.itertext()) if function is not None else '',mathvariant='normal'),math_node('mo',text='\u2061'),part('e'))
+    if name == 'eqArr':
+        return math_node('mtable',*(math_node('mtr',math_node('mtd',omml(e))) for e in node.findall(M+'e')))
     if name in ('sSup','sSub','sSubSup'):
         return math_node({'sSup':'msup','sSub':'msub','sSubSup':'msubsup'}[name], part('e'), *([part('sub')] if name in ('sSub','sSubSup') else []), *([part('sup')] if name in ('sSup','sSubSup') else []))
     if name == 'rad':
@@ -110,7 +115,7 @@ class Document:
         start = self.length
         self.add(text, {'fontSize':11})
         if self.length > start:
-            self.structures.append({'type':'formula','start':start,'end':self.length,'math':tree,'block':block})
+            self.structures.append({'type':'formula','start':start,'end':self.length,'math':tree,'block':block,**({'latex':text} if self.kind=='md' else {})})
 
 
 def word_properties(node):

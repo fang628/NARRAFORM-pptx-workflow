@@ -1131,3 +1131,59 @@ button:is(.close,.danger,[data-delete],[data-delete-project],[data-delete-style]
 #main>:last-child>:is(.panel,.delivery):last-child{margin-bottom:0}
 #main .preview-grid.preview-masonry{margin-bottom:-26px}
 #main .reading-grid.reading-masonry{margin-bottom:-16px}
+
+/* English stage labels sit below the main title. */
+.page-head .step-title-line{display:flex;flex-direction:column;align-items:flex-start;gap:10px;margin:0;min-width:0}
+.page-head .step-title-line h1{margin:0;line-height:1.25}
+.page-head .step-title-english{display:inline-flex;align-items:center;gap:9px;color:#c5c3b7;font:500 10px/1.6 var(--mono);letter-spacing:1.5px;max-width:100%;overflow-wrap:anywhere}
+.page-head .step-title-english::before{content:"";width:14px;height:2px;background:var(--yellow);flex-shrink:0}
+@media(max-width:700px){.page-head .step-title-english{font-size:9px;letter-spacing:1px}}
+
+/* Keep heading chrome concise; stage titles retain their English labels. */
+:is(.panel-heading,.modal-heading,.page-design-head)>div>p,
+:is(.panel-heading,.modal-heading,.page-design-head)>p.subtle,
+.config-label>small,
+.hero-copy>.eyebrow,
+.hero-copy>p,
+.progress-sections-heading>p{display:none!important}
+.page-head h1{margin:0}
+:is(.panel-heading,.modal-heading,.page-design-head) :is(h2,h3,h4){margin-block:0}
+.config-label{align-items:center}
+
+/* Intake blocks share one heading rhythm, independent of older panel overrides. */
+:is(#materialInbox,#materialAnalysis,#briefForm>.panel)>.panel-heading{align-items:center;gap:16px;padding:0 0 20px;margin:0 0 20px}
+:is(#materialInbox,#materialAnalysis,#briefForm>.panel)>.panel-heading>div{display:flex;flex-direction:column;gap:10px;min-width:0}
+:is(#materialInbox,#materialAnalysis,#briefForm>.panel)>.panel-heading h3{margin:0;line-height:1.4}
+:is(#materialInbox,#materialAnalysis,#briefForm>.panel)>.panel-heading .eyebrow{display:block;margin:0;line-height:1.6}
+:is(#materialInbox,#materialAnalysis,#briefForm>.panel)>.panel-heading>.tag{flex-shrink:0}
+
+.tree-formula-editor{padding:10px 14px 14px;min-width:0;background:#eeece2}
+.tree-formula-editor math-field{display:block;min-height:60px;width:100%;box-sizing:border-box;background:#faf9f4;color:#30302c;border:1px solid transparent;border-radius:0;padding:10px;font-size:22px;--primary:#82763a;--caret-color:#625b27;--selection-background-color:#f1e996}
+.tree-formula-editor math-field:focus-within{border-color:#aca264}
+.formula-tools{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0}
+.formula-tools button{font-size:11px;padding:3px 0}
+.formula-source summary{font:11px/1.6 var(--mono);color:#686555;cursor:pointer}
+.formula-source textarea{width:100%;box-sizing:border-box;margin-top:8px;background:#f7f6ef;border:1px solid #c4c0ac;font:13px/1.6 var(--mono);color:#34342e}
+.formula-edit-state{display:block;font-size:11px;color:#7a5730;line-height:1.6}
+.design-formula{display:block;margin:10px 0;max-width:100%;overflow:auto;background:transparent;color:inherit;border:0}
+.project-transfer-panel{flex:none;display:grid;grid-template-columns:auto 1fr;align-items:center;gap:8px 16px;margin:0 0 12px;padding:0 0 12px;border-bottom:1px solid #bcb9ab}
+.project-transfer-heading{display:flex;align-items:center;margin:0}
+.project-transfer-heading h3{margin:0;font-size:14px;line-height:1.4;color:#34342f}
+.project-transfer-actions{display:grid;grid-template-columns:repeat(2,minmax(0,144px));justify-content:end;gap:8px;min-width:0}
+.project-transfer-actions .project-transfer-card{position:relative;isolation:isolate;display:flex;align-items:center;gap:8px;min-width:0;min-height:42px;padding:8px 27px 8px 10px;border:1px solid #b7b3a3;border-left:3px solid #b6ad70;border-radius:0;background:#eeece3;color:#37372f;text-align:left;box-shadow:none;clip-path:none;overflow:hidden;transition:background .2s ease,border-color .2s ease,transform .2s ease}
+.project-transfer-actions .transfer-export{background:#e9e4b9;border-left-color:#e5cf26}
+.project-transfer-actions .project-transfer-card::before{content:"";position:absolute;inset:auto 0 0 auto;width:30px;height:12px;background:repeating-linear-gradient(120deg,transparent 0 3px,#77704a 3px 4px);opacity:.11;pointer-events:none;z-index:-1}
+.project-transfer-actions .project-transfer-card::after{display:none}
+.transfer-file-icon{display:grid;place-items:center;flex:none;width:18px;height:24px;color:#655f37}
+.transfer-file-icon svg{width:18px;height:22px;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.transfer-card-copy{display:flex;align-items:center;min-width:0}
+.transfer-card-copy strong{font-size:13px;font-weight:650;line-height:1.4;letter-spacing:0;color:#34342c;white-space:nowrap}
+.transfer-card-arrow{position:absolute;right:10px;top:50%;margin-top:-7px;font:14px/1 var(--mono);color:#7e7857;transition:transform .2s ease}
+.project-transfer-actions .project-transfer-card:hover:not(:disabled){transform:translateY(-2px);border-color:#a89a4a;background:#f1efdc}
+.project-transfer-actions .transfer-export:hover:not(:disabled){background:#f3ecaa;border-left-color:var(--yellow)}
+.project-transfer-card:hover:not(:disabled) .transfer-card-arrow{transform:translate(2px,-2px)}
+.project-transfer-actions .project-transfer-card:focus-visible{outline:2px solid #93812e;outline-offset:3px}
+.project-transfer-actions .project-transfer-card:disabled{opacity:.55;cursor:wait}
+@media(max-width:520px){.project-transfer-panel{grid-template-columns:1fr}.project-transfer-actions{grid-template-columns:repeat(2,minmax(0,1fr));justify-content:stretch}}
+@media(prefers-reduced-motion:reduce){.project-transfer-actions .project-transfer-card,.transfer-card-arrow{transition:none}}
+.project-transfer-state{grid-column:1/-1;font-size:12px;line-height:1.6;color:#716637;margin:0;overflow-wrap:anywhere}
