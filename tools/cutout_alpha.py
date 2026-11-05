@@ -4,6 +4,34 @@ import numpy as np
 from PIL import Image
 
 
+def prepare_chroma_cutout(image, artistic=False, expected_colour=None):
+    """Require an actual uniform chroma matte, never accept incidental alpha."""
+    rgba = np.array(image.convert('RGBA'))
+    rgb = rgba[:, :, :3].astype(np.int16)
+    border = np.concatenate((rgb[0], rgb[-1], rgb[:, 0], rgb[:, -1]))
+    key = np.median(border, axis=0)
+    expected = np.array([int(expected_colour[i:i+2], 16) for i in (0, 2, 4)]) if expected_colour else None
+    chroma = np.linalg.norm(key-expected) < 45 if expected is not None else ((key[0] > 180 and key[2] > 180 and key[1] < 90) or (key[1] > 180 and key[0] < 90 and key[2] < 90))
+    if not chroma or (np.linalg.norm(border-key, axis=1) < 35).mean() <= .97:
+        raise ValueError('返回图未提供可靠的均匀纯色底，改用参考底图本地分离')
+    # Derive alpha and unmix RGB against the measured selected matte. Existing
+    # provider alpha does not prove that the solid background has been removed.
+    delta = rgb-key
+    opacity = np.max(np.where(delta >= 0, delta/np.maximum(255-key, 1), -delta/np.maximum(key, 1)), axis=2)
+    opacity = np.clip(opacity, 0, 1)
+    opacity[opacity < .025] = 0
+    opacity[opacity > .995] = 1
+    coverage = float((opacity > .05).mean())
+    if coverage < .002 or coverage > .85:
+        raise ValueError('纯色底分离后没有可靠的独立主体')
+    restored = np.clip((rgb-key*(1-opacity[:, :, None]))/np.maximum(opacity[:, :, None], .01), 0, 255)
+    rgba[:, :, :3] = restored.astype(np.uint8)
+    rgba[:, :, 3] = (opacity*255).astype(np.uint8)
+    result, report = prepare_cutout(Image.fromarray(rgba), False)
+    report.update(mode='chroma-background-matte', matteColour=[int(v) for v in key])
+    return result, report
+
+
 def prepare_cutout(image, artistic=False):
     rgba = np.array(image.convert('RGBA'))
     height, width = rgba.shape[:2]

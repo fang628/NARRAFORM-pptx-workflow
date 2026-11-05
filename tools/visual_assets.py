@@ -130,11 +130,24 @@ def main():
     with Image.open(source) as raw:
         raw.load()
         image = raw.convert('RGBA')
-    if op == 'reference-cutout':
+    if op == 'choose-matte':
+        from cutout_matte import choose_matte
+        with Image.open(sys.argv[4]) as background:
+            background.load()
+            report = choose_matte(image, background)
+        print(json.dumps(report))
+    elif op == 'reference-cutout':
         from reference_cutout import reference_cutout
         with Image.open(sys.argv[4]) as background:
             background.load()
             image, report = reference_cutout(image, background, len(sys.argv)>5 and sys.argv[5]=='artistic')
+        image.save(target)
+        print(json.dumps(report))
+    elif op == 'chroma-cutout':
+        from cutout_alpha import prepare_chroma_cutout
+        extra = sys.argv[4:]
+        colour = next((arg for arg in extra if len(arg)==6 and all(c in '0123456789abcdefABCDEF' for c in arg)), None)
+        image, report = prepare_chroma_cutout(image, 'artistic' in extra, colour)
         image.save(target)
         print(json.dumps(report))
     elif op == 'cutout':

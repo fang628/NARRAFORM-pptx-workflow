@@ -1,10 +1,12 @@
 {
   "source": "pptx-workflow",
   "agentPolicyVersion": "agent-visual-v4",
-  "version": "e90c07817ffb584a",
+  "version": "f3ac24490ad8c4ef",
   "previousVersions": [
     "b6ac8e3906419fe6",
-    "96582974efd86018"
+    "96582974efd86018",
+    "e90c07817ffb584a",
+    "bfd13f56dfd91f6d"
   ],
   "copiedAt": "2026-10-19T15:06:03.865Z",
   "files": [
@@ -15,8 +17,8 @@
     },
     {
       "file": "shared/artifact-contract.md",
-      "sha256": "aef942229fd8c9c47a820bb0d318441b5375c8f2d61842570f7a08c69c3d0464",
-      "bytes": 4102
+      "sha256": "eeaa4efc27cb461ee23c69847b3f1d2ed69066d0be6befc735ba85f0386c47ea",
+      "bytes": 4210
     },
     {
       "file": "shared/content-density-and-text-color.md",
@@ -135,8 +137,8 @@
     },
     {
       "file": "stages/13-design/references/content-page.md",
-      "sha256": "6f46c5937131da3a73744813277466da9563b4d6516bae54b75f4ae5547dce23",
-      "bytes": 5724
+      "sha256": "bf9105faea6420a3f4ea365679eebfc423a66878deda39a5de1db2342877efcf",
+      "bytes": 5733
     },
     {
       "file": "stages/13-design/references/gen-prompt-scope.md",
@@ -195,8 +197,8 @@
     },
     {
       "file": "stages/32-asset-rebuild/steps/rebuild.md",
-      "sha256": "df26d5d8acae84da0f1a7a984ba56f6177da7b8f00450f1ebcebc002e9d3b355",
-      "bytes": 2703
+      "sha256": "f93bfb28d854762fe61c38c48c73f613b1a235ac38eee3c4b7c4e8097ba73396",
+      "bytes": 3108
     }
   ]
 }
