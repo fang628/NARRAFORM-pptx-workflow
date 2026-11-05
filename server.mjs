@@ -55,6 +55,7 @@ import {materialImageCatalog,validateGeneratedImageReuse} from './lib/content-im
 import {checkContentPages} from './lib/content-check.mjs';
 import {materialFidelityPolicy} from './lib/content-policy.mjs';
 import {credentialStore} from './lib/credential-store.mjs';
+import {sharedCredentials} from './lib/shared-credentials.mjs';
 import {initialElements,validateElements,validateImageAnnotations,syncLegacy,elementSchema,contentHierarchyRules,contentNodesForModel} from './lib/elements.mjs';
 import {imagePromptSuffix,checkedPrompt,promptDraftKey} from './lib/image-prompts.mjs';
 import {workspaceAction} from './lib/workspace-actions.mjs';
@@ -73,14 +74,15 @@ import {acquireDataLease} from './lib/data-lease.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url)), data=path.resolve(root,process.env.PPT_AGENT_DATA||'data'), port=Number(process.env.PORT||4357);
 fs.mkdirSync(data,{recursive:true});
 try{await acquireDataLease(data);}catch(error){console.error(error.message);process.exit(1);}
-const projects=new Map(), credentials=new Map(), tasks=new Map();
+const projects=new Map(), tasks=new Map();
 const projectEvents=createProjectEvents();
 const projectStore=createProjectStore(data,{onChange:(p,state)=>projectEvents.publish(p,state),onError:error=>console.error('Project save failed:',error.code||error.name)});
 process.on('exit',()=>projectStore.flushAll());
 // Preserve running/queued state so startup can accurately mark it interrupted.
 // Exiting the process terminates transports; it is not a user cancellation.
 for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>{projectStore.flushAll();projectEvents.close();process.exit(0);});
-const credentialVault=credentialStore(data),credentialWarnings=new Map(),credentialWrites=new Set();
+const credentialVault=credentialStore(data),credentials=sharedCredentials(credentialVault,data),credentialWrites=new Set();
+await credentials.restore();
 const uploads=new Set(),queueDispatch=new Map();
 const automaticDispatch=new Map();
 const automaticRunner=createAutomaticRunner({
@@ -96,11 +98,7 @@ for(const name of fs.readdirSync(data)) {
 }
 for(const p of projects.values()){
   interruptAutomaticMode(p);
-  try{
-    const c=await credentialVault.load(p.id);if(!c)continue;
-    credentials.set(p.id,c);
-    p.provider=Object.fromEntries(['text','image','elementImage','rebuild'].map(type=>[type,c[type]?{baseURL:c[type].baseURL,model:c[type].model}:null]));
-  }catch{credentialWarnings.set(p.id,'本机保存的 API 配置无法解密，请重新填写并保存');}
+  delete p.provider;
 }
 function save(p,options={}) { if(p.task?.status==='running'&&p.task.message!==p.task.progressMessage){p.task.progressMessage=p.task.message;recordProgress(p.task,{kind:'step',message:p.task.message});}projectStore.save(p,options);
 }
@@ -111,7 +109,7 @@ for(const p of projects.values())if(p.visualMode==='ai'&&p.selectedTheme&&!p.arc
   catch{console.warn('未能复用项目代表页：'+p.id);}
 }
 function project(id) { const p=projects.get(id); if(!p) throw Error('项目不存在'); return p; }
-function clean(p) { const c=credentials.get(p.id)||{}, {reuseCheckpoint,rebuildEditHistory,rebuildPageChanges,contentGenerationDraft,speakerScriptDraft,...publicProject}=p;return {...publicProject,...automaticModePublic(p),progressSections:progressSectionsOf(p),contentDraftAvailable:contentGenerationDraft?.stamp===contentGenerationStamp(p),adaptiveSchedulingEnabled:true,progressEventsEnabled:true,artifactStorageEnabled:true,progressSectionsRegenerationEnabled:true,designConcurrentEditingEnabled:true,enterVisualStageEnabled:true,manualCropEnabled:true,documentFormatEnabled:true,tableContentEnabled:true,formulaContentEnabled:true,projectTransferEnabled:true,supplementImagesEnabled:true,apiPersistence:credentialVault.mode,apiPersistenceWarning:credentialWarnings.get(p.id)||null,downstreamReuse:downstreamReuseState(p),contentRestore:contentRestoreState(p),imageTaskQueue:publicImageTasks(p),imageTaskQueueEnabled:true,designTaskQueueEnabled:true,imageTaskReorderEnabled:true,executionConcurrency:concurrencyLimit(p.executionConcurrency),...visualPublic(p,{data,getImage,save}),...styleFavoritesPublic(p,data),...speakerScriptPublic(p),analysisResumeCount:p.analysisDraft?.stamp===materialStamp(p)?p.analysisDraft.readings.filter(r=>r.status==='read'&&readingCoversMaterial(r,p.materials.find(m=>m.id===r.id))).length:0,pageDesigns:Object.fromEntries(p.slides.map((s,i)=>[i,pageDesignState(p,i)]).filter(([,d])=>d)),reconstructionCurrent:reconstructionCurrent(p),analysisCurrent:analysisCurrent(p),apiReady:!!c.text?.key,imageReady:!!c.image?.key,elementImageReady:!!(c.elementImage?.key||c.image?.key),ocrReady:!!c.text?.key,rebuildReady:!!visualModelConfig(c),rebuildConfigured:!!c.rebuild?.key,rebuildModel:visualModelConfig(c)?.model||null,rebuildSource:c.rebuild?.key?'rebuild':'text'}; }
+function clean(p) { const c=credentials.get(p.id)||{}, {reuseCheckpoint,rebuildEditHistory,rebuildPageChanges,contentGenerationDraft,speakerScriptDraft,...publicProject}=p;return {...publicProject,...automaticModePublic(p),progressSections:progressSectionsOf(p),contentDraftAvailable:contentGenerationDraft?.stamp===contentGenerationStamp(p),adaptiveSchedulingEnabled:true,progressEventsEnabled:true,artifactStorageEnabled:true,progressSectionsRegenerationEnabled:true,designConcurrentEditingEnabled:true,enterVisualStageEnabled:true,manualCropEnabled:true,documentFormatEnabled:true,tableContentEnabled:true,formulaContentEnabled:true,projectTransferEnabled:true,supplementImagesEnabled:true,apiPersistence:credentialVault.mode,apiPersistenceWarning:credentials.warning,apiConfigurationScope:'shared',provider:Object.fromEntries(['text','image','elementImage','rebuild'].map(type=>[type,c[type]?{baseURL:c[type].baseURL,model:c[type].model}:null])),downstreamReuse:downstreamReuseState(p),contentRestore:contentRestoreState(p),imageTaskQueue:publicImageTasks(p),imageTaskQueueEnabled:true,designTaskQueueEnabled:true,imageTaskReorderEnabled:true,executionConcurrency:concurrencyLimit(p.executionConcurrency),...visualPublic(p,{data,getImage,save}),...styleFavoritesPublic(p,data),...speakerScriptPublic(p),analysisResumeCount:p.analysisDraft?.stamp===materialStamp(p)?p.analysisDraft.readings.filter(r=>r.status==='read'&&readingCoversMaterial(r,p.materials.find(m=>m.id===r.id))).length:0,pageDesigns:Object.fromEntries(p.slides.map((s,i)=>[i,pageDesignState(p,i)]).filter(([,d])=>d)),reconstructionCurrent:reconstructionCurrent(p),analysisCurrent:analysisCurrent(p),apiReady:!!c.text?.key,imageReady:!!c.image?.key,elementImageReady:!!(c.elementImage?.key||c.image?.key),ocrReady:!!c.text?.key,rebuildReady:!!visualModelConfig(c),rebuildConfigured:!!c.rebuild?.key,rebuildModel:visualModelConfig(c)?.model||null,rebuildSource:c.rebuild?.key?'rebuild':'text'}; }
 function ensure(p,test,message) { if(!test) throw Error(message); }
 function unlocked(p) { ensure(p,projects.get(p.id)===p,'项目不存在');ensure(p,!tasks.has(p.id)&&!uploads.has(p.id),'当前任务或材料发送中，请等待完成或先取消');ensure(p,!credentialWrites.has(p.id),'API 配置正在保存，请稍后重试'); }
 function confirmContent(p){return enterVisualStage(p);}
@@ -263,21 +261,28 @@ async function performAction(p,b,res,fromQueue=false) {
   if(await workspaceAction(p,b,{credentials,launch,ensure,event,save,materialsChanged,run,root,data,getImage,system})){save(p);return json(res,200,clean(p));}
   if(await supplementImageAction(p,b,{credentials,launch,ensure,event,save,root,data,system})){save(p);return json(res,200,clean(p));}
   if(b.action==='configure') {
-    const c={...credentials.get(p.id)};delete c.ocr;
-    for(const type of ['text','image','elementImage','rebuild']) if(b[type]!==undefined){
-      const v=b[type];if(!v||(!v.baseURL&&!v.model&&!v.key)){delete c[type];continue;}
-      const same=c[type]?.baseURL===String(v.baseURL).trim().replace(/\/$/,'')&&c[type]?.model===String(v.model).trim();
-      const key=v.key||(same?c[type]?.key:null);if(typeof key!=='string'||!key.trim()||key.length>2000||!v.model||!v.baseURL)throw Error('请填写 API 地址、密钥及模型；修改通道后需重新输入密钥');
-      c[type]={baseURL:String(v.baseURL).trim().replace(/\/$/,''),key:key.trim(),model:String(v.model).trim().slice(0,150)};
-    }
-    if(!c.text) throw Error('文字 API 配置不能为空');
     credentialWrites.add(p.id);
     try{
-      await credentialVault.save(p.id,c);credentials.set(p.id,c);credentialWarnings.delete(p.id);
-      p.provider=Object.fromEntries(['text','image','elementImage','rebuild'].map(type=>[type,c[type]?{baseURL:c[type].baseURL,model:c[type].model}:null]));p.apiTests={};save(p); return json(res,200,clean(p));
+      await credentials.update(c=>{
+        delete c.ocr;
+        for(const type of ['text','image','elementImage','rebuild']) if(b[type]!==undefined){
+          const v=b[type];if(!v||(!v.baseURL&&!v.model&&!v.key)){delete c[type];continue;}
+          const same=c[type]?.baseURL===String(v.baseURL).trim().replace(/\/$/,'')&&c[type]?.model===String(v.model).trim();
+          const key=v.key||(same?c[type]?.key:null);if(typeof key!=='string'||!key.trim()||key.length>2000||!v.model||!v.baseURL)throw Error('请填写 API 地址、密钥及模型；修改通道后需重新输入密钥');
+          c[type]={baseURL:String(v.baseURL).trim().replace(/\/$/,''),key:key.trim(),model:String(v.model).trim().slice(0,150)};
+        }
+        if(!c.text) throw Error('文字 API 配置不能为空');
+        return c;
+      });
+      for(const item of projects.values()){delete item.provider;item.apiTests={};}
+      save(p); return json(res,200,clean(p));
     }finally{credentialWrites.delete(p.id);wakeImageQueue(p);}
   }
-  if(b.action==='forgetKey') {credentialVault.clear(p.id);credentials.delete(p.id);credentialWarnings.delete(p.id);return json(res,200,clean(p));}
+  if(b.action==='forgetKey') {
+    credentialWrites.add(p.id);
+    try{await credentials.clear();for(const item of projects.values()){delete item.provider;item.apiTests={};}save(p);return json(res,200,clean(p));}
+    finally{credentialWrites.delete(p.id);wakeImageQueue(p);}
+  }
   if(b.action==='testAPI') {
     launch(p,'测试文字 API',async signal=>{const r=await chat(credentials.get(p.id)?.text,'Reply briefly.','请回复：连接成功',signal); if(signal.aborted) throw Error('已取消'); p.lastUsage=r.usage; p.apiTest={at:new Date().toISOString(),ok:true};});
   } else if(b.action==='requirements') {
@@ -469,7 +474,7 @@ const server=http.createServer(async(req,res)=>{
           ensure(p,!fs.lstatSync(dir).isSymbolicLink()&&path.dirname(fs.realpathSync(dir))===fs.realpathSync(data),'项目目录不在数据目录内');
           fs.rmSync(dir,{recursive:true,force:true});
         }
-        projects.delete(p.id);credentials.delete(p.id);credentialWarnings.delete(p.id);
+        projects.delete(p.id);
         return json(res,200,{deleted:true,id:p.id});
       }
       if(parts.length===4&&parts[3]==='archive'&&req.method==='POST') {

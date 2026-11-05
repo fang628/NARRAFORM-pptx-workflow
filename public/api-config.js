@@ -1,12 +1,25 @@
 export const apiTypes=['text','image','rebuild','elementImage'];
 export function apiPersistenceMessage(project){
   if(project.apiPersistenceWarning)return project.apiPersistenceWarning;
+  if(project.apiConfigurationScope==='shared')return project.apiPersistence==='windows-dpapi'
+    ? '所有项目共用一套 API，填写完整后自动保存，修改与清除对全部项目生效。密钥使用 Windows 当前用户加密保存在本机，重启服务自动恢复。'
+    : '所有项目共用一套 API，修改与清除对全部项目生效。当前服务仅在内存保留密钥，重启后需要重新填写。';
   return project.apiPersistence==='windows-dpapi'
     ? '填写完整后自动保存。密钥使用 Windows 当前用户加密保存在本机，重启服务自动恢复；清除密钥会同时删除保存的副本。'
     : '填写完整后自动保存。当前服务仅在内存保留密钥，重启后需要重新填写。';
 }
 const labels={text:'主模型',image:'生图模型',elementImage:'元素生图模型',rebuild:'高性能视觉模型'};
 const readiness={text:'apiReady',image:'imageReady',elementImage:'elementImageReady',rebuild:'rebuildConfigured'};
+// Refresh untouched fields when another project/window changes the shared API.
+// Preserve an unfinished manual edit instead of silently discarding it.
+export function reconcileAPIValues(values,previous,provider){
+  return Object.fromEntries(apiTypes.map(type=>{
+    const value=values[type],before=previous?.[type]||{baseURL:type==='text'?'https://api.openai.com/v1':'',model:''};
+    const untouched=!value.key&&value.baseURL===before.baseURL&&value.model===before.model;
+    const next=provider?.[type]||{baseURL:type==='text'?'https://api.openai.com/v1':'',model:''};
+    return [type,untouched?{baseURL:next.baseURL,model:next.model,key:''}:value];
+  }));
+}
 export function apiConfigurationPlan(values,project){
   const payload={},pending=[];
   for(const type of apiTypes){

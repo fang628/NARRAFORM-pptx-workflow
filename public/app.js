@@ -11,7 +11,7 @@ import {optionalPageCount} from './page-count.js';
 import {materialLimits,pageLimits,supplementInfo,supplementImageDialog,supplementImageRequests} from './material-images.js';
 import {rebuildRegionDialog,initRebuildRegionEditor} from './visual-ui.js';
 import {themeAssetDialogs,themeDirectionOptions,themePromptReview} from './theme-assets.js';
-import {apiTypes,createAPIAutosave,apiPersistenceMessage} from './api-config.js';
+import {apiTypes,createAPIAutosave,apiPersistenceMessage,reconcileAPIValues} from './api-config.js';
 import {taskProgress,imageTaskChoices,imageTaskDialog,imageTaskOptions,taskChoicePayload,bindImageTaskSorting,projectResultKey,captureLiveView,restoreLiveView} from './task-progress.js';
 import {initMaterialCropEditor,originalMaterialCount,imageOrigin,materialImageDialog,imageLibrary,extractionButtons,extractionReport} from './material-images.js';
 import {visualConcepts,visualPreview,visualDelivery,visualDialogs,previewApprovalDialogContent,previewImageURL,layoutPreviewGrid,bindRebuildMentions,rebuildFeedbackRequest} from './visual-ui.js';
@@ -574,7 +574,7 @@ if(designBatchPending){toast('正在保存并确认内容与设计，请稍候')
   if(b.dataset.revise!==undefined){editMode='revise';editIndex=Number(b.dataset.revise);if(!p.apiReady){openAPI();return;}await saveSlides();$('#editTitle').textContent='修改第 '+(editIndex+1)+' 页';$('#editForm').reset();$('#uploadConsent').hidden=true;$('#editHint').textContent='修改后需要重新确认内容、方案和预览。';$('#editDialog').showModal();}
 }));
 
-let apiFormProject=null,apiFormEpoch=0;
+let apiFormProject=null,apiFormEpoch=0,apiFormProvider=null;
 const acknowledgedAPIKeys=new Map();
 function apiSaveState(kind,message){const el=$('#apiSaveState');el.dataset.state=kind;el.textContent=message;}
 function apiSnapshot(){
@@ -583,6 +583,12 @@ function apiSnapshot(){
   for(const type of apiTypes){const raw=form.elements[type+'Key'].value.trim();values[type]={baseURL:form.elements[type+'Base'].value.trim().replace(/\/$/,''),model:form.elements[type+'Model'].value.trim(),key:raw===acknowledgedAPIKeys.get(type)?'':raw};}
   return {project:p,values,epoch:apiFormEpoch};
 }
+function syncSharedAPIFields(){
+  if(p?.apiConfigurationScope!=='shared'||apiFormProject!==p.id)return;
+  const form=$('#apiForm'),snapshot=apiSnapshot(),values=reconcileAPIValues(snapshot.values,apiFormProvider,p.provider);
+  for(const type of apiTypes){for(const [part,suffix]of [['baseURL','Base'],['model','Model']]){const field=form.elements[type+suffix];if(field.value.trim().replace(/\/$/,'')!==values[type][part])field.value=values[type][part];}form.elements[type+'Key'].placeholder=p.provider?.[type]?'留空保留已保存的密钥':'输入密钥';}
+  apiFormProvider=structuredClone(p.provider||{});
+}
 function clearAcknowledgedAPIKeys(){const form=$('#apiForm');for(const type of apiTypes){const field=form.elements[type+'Key'];if(field!==document.activeElement&&field.value.trim()===acknowledgedAPIKeys.get(type)){field.value='';acknowledgedAPIKeys.delete(type);}}}
 const apiAutosave=createAPIAutosave({
   read:apiSnapshot,blocked:()=>busy()||sending,state:apiSaveState,
@@ -590,16 +596,16 @@ const apiAutosave=createAPIAutosave({
   applied:(result,snapshot,plan)=>{
     if(p?.id!==result.id)return;p=result;nav();
     if(apiFormProject===p.id&&apiFormEpoch===snapshot.epoch){
-      for(const type of apiTypes){if(plan.payload[type]?.key)acknowledgedAPIKeys.set(type,plan.payload[type].key);$('#apiForm').elements[type+'Key'].placeholder=p.provider?.[type]?'留空保留当前会话密钥':'输入密钥';}
+      for(const type of apiTypes){if(plan.payload[type]?.key)acknowledgedAPIKeys.set(type,plan.payload[type].key);$('#apiForm').elements[type+'Key'].placeholder=p.provider?.[type]?'留空保留已保存的密钥':'输入密钥';}
       clearAcknowledgedAPIKeys();syncAPIStatus();
     }
   }
 });
-function syncAPIStatus(){if(!$('#apiDialog').open)return;$('#apiPersistenceHint').textContent=apiPersistenceMessage(p);const f=$('#apiForm');f.elements.textKey.required=!p.apiReady;for(const type of apiTypes){const result=p.apiTests?.[type],el=$(`[data-api-result="${type}"]`);if(el)el.textContent=result?(result.ok?'✓ '+result.message+' · '+(result.ms||0)+'ms':'连接失败 · '+result.message):'尚未测试';}$('#apiForm').querySelectorAll('input,select,button:not(.close):not(#forgetKey)').forEach(e=>e.disabled=busy());f.elements.executionConcurrency.disabled=busy()||p.executionConcurrency===undefined;if(p.executionConcurrency===undefined)$('#concurrencySaveState').textContent='当前后台尚未加载更新；重启本地服务后可设置并发上限。';}
+function syncAPIStatus(){if(!$('#apiDialog').open)return;syncSharedAPIFields();$('#forgetKey').textContent=p.apiConfigurationScope==='shared'?'清除全部项目密钥':'清除当前密钥';$('#apiPersistenceHint').textContent=apiPersistenceMessage(p);const f=$('#apiForm');f.elements.textKey.required=!p.apiReady;for(const type of apiTypes){const result=p.apiTests?.[type],el=$(`[data-api-result="${type}"]`);if(el)el.textContent=result?(result.ok?'✓ '+result.message+' · '+(result.ms||0)+'ms':'连接失败 · '+result.message):'尚未测试';}$('#apiForm').querySelectorAll('input,select,button:not(.close):not(#forgetKey)').forEach(e=>e.disabled=busy());f.elements.executionConcurrency.disabled=busy()||p.executionConcurrency===undefined;if(p.executionConcurrency===undefined)$('#concurrencySaveState').textContent='当前后台尚未加载更新；重启本地服务后可设置并发上限。';}
 function openAPI(){
   if(sending){toast('正在发送材料，请等待完成');return;}if(!p){toast('请先创建一个项目');return;}
   const f=$('#apiForm');
-  if(apiFormProject!==p.id){apiAutosave.reset();apiFormEpoch++;acknowledgedAPIKeys.clear();f.reset();apiFormProject=p.id;for(const type of apiTypes){f.elements[type+'Base'].value=p.provider?.[type]?.baseURL||(type==='text'?'https://api.openai.com/v1':'');f.elements[type+'Model'].value=p.provider?.[type]?.model||'';f.elements[type+'Key'].placeholder=p.provider?.[type]?'留空保留当前会话密钥':'输入密钥';}}
+  if(apiFormProject!==p.id){apiAutosave.reset();apiFormEpoch++;acknowledgedAPIKeys.clear();f.reset();apiFormProject=p.id;apiFormProvider=structuredClone(p.provider||{});for(const type of apiTypes){f.elements[type+'Base'].value=p.provider?.[type]?.baseURL||(type==='text'?'https://api.openai.com/v1':'');f.elements[type+'Model'].value=p.provider?.[type]?.model||'';f.elements[type+'Key'].placeholder=p.provider?.[type]?'留空保留已保存的密钥':'输入密钥';}}
   f.elements.executionConcurrency.value=String(p.executionConcurrency||3);$('#apiDialog').showModal();syncAPIStatus();apiAutosave.flush().catch(()=>{});
 }
 async function persistAPIConfiguration(){await apiAutosave.flush({strict:true});}
@@ -680,7 +686,7 @@ $('#imagePromptForm').onsubmit=e=>{e.preventDefault();safe(async()=>{
 $('#apiButton').onclick=openAPI;
 $('#apiForm').elements.executionConcurrency.onchange=()=>safe(async()=>{await act('setConcurrency',{limit:Number($('#apiForm').elements.executionConcurrency.value)});$('#concurrencySaveState').textContent='已保存 · 并发上限 '+p.executionConcurrency+'，等待请求立即按新上限调度；执行过程可查看资源池与队列。';});
 $('#apiForm').onsubmit=e=>{e.preventDefault();const submit=e.submitter?.value;safe(async()=>{await persistAPIConfiguration();if(submit==='test'){await act('testAPI',{type:'text'});syncAPIStatus();}else{$('#apiDialog').close();toast(p.apiPersistence==='windows-dpapi'?'API 已在本机加密保存，重启自动恢复':'API 已保存到当前服务会话');}});};
-$('#forgetKey').onclick=()=>safe(async()=>{apiAutosave.reset();await apiAutosave.settled();apiAutosave.reset();await act('forgetKey');apiFormProject=null;apiFormEpoch++;acknowledgedAPIKeys.clear();$('#apiForm').reset();$('#apiDialog').close();toast('当前项目密钥已清除');});
+$('#forgetKey').onclick=()=>safe(async()=>{apiAutosave.reset();await apiAutosave.settled();apiAutosave.reset();await act('forgetKey');apiFormProject=null;apiFormEpoch++;acknowledgedAPIKeys.clear();$('#apiForm').reset();$('#apiDialog').close();toast(p.apiConfigurationScope==='shared'?'全部项目的通用密钥已清除':'当前项目密钥已清除');});
 $('#apiForm').addEventListener('input',e=>{if(e.target.matches('input'))apiAutosave.schedule();});
 $('#apiForm').addEventListener('change',e=>{if(e.target.matches('input'))apiAutosave.schedule();});
 $('#apiForm').addEventListener('focusout',e=>{if(e.target.matches('input')){clearAcknowledgedAPIKeys();apiAutosave.flush().catch(()=>{});}});
