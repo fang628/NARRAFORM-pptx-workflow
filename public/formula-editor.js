@@ -11,10 +11,17 @@ export function collectFormula(row,n){
   catch{return {latex:String(source?.value||'').trim().replace(/^\$\$\s*|\s*\$\$$/g,''),markdown:source?.value||''};}
 }
 export async function bindFormulaEditors(root){
-  const editors=[...root.querySelectorAll('.tree-formula-editor')];if(!editors.length)return;
+  const editors=[...root.querySelectorAll('.tree-formula-editor')],previews=[...root.querySelectorAll('math-field[read-only]')];if(!editors.length&&!previews.length)return;
   try{
     library??=import('/vendor/mathlive/mathlive.min.mjs').then(module=>{module.MathfieldElement.fontsDirectory='/vendor/mathlive/fonts';module.MathfieldElement.soundsDirectory=null;module.MathfieldElement.locale='zh-CN';return module;}).catch(error=>{library=null;throw error;});
     await library;
+    await customElements.whenDefined('math-field');
+    for(const field of previews){
+      if(!field.isConnected||field.dataset.formulaBound)continue;
+      field.readOnly=true;field.mathVirtualKeyboardPolicy='manual';
+      field.setValue(formulaLatex(field.dataset.formulaLatex||field.textContent),{silenceNotifications:true});
+      field.dataset.formulaBound='true';
+    }
     for(const editor of editors){
       if(!editor.isConnected)continue;
       const field=editor.querySelector('math-field'),source=editor.querySelector('[data-formula-source]'),state=editor.querySelector('.formula-edit-state');
@@ -28,9 +35,11 @@ export async function bindFormulaEditors(root){
         if(updating||source.disabled)return;
         const latex=field.getValue('latex');source.value='$$\n'+latex+'\n$$';
         try{formulaLatex(latex);state.textContent='';}catch(error){state.textContent=error.message;}
-        source.dispatchEvent(new Event('input',{bubbles:true}));
+        // Notify the form without feeding our own update back into setValue(),
+        // which resets the caret inside fractions and superscripts on each key.
+        updating=true;try{source.dispatchEvent(new Event('input',{bubbles:true}));}finally{updating=false;}
       });
-      source.addEventListener('input',()=>{try{updating=true;field.setValue(formulaLatex(source.value),{silenceNotifications:true});state.textContent='';}catch(error){state.textContent=error.message;}finally{updating=false;}});
+      source.addEventListener('input',()=>{if(updating)return;try{updating=true;field.setValue(formulaLatex(source.value),{silenceNotifications:true});state.textContent='';}catch(error){state.textContent=error.message;}finally{updating=false;}});
       editor.addEventListener('click',event=>{const button=event.target.closest('[data-formula-insert]');if(!button||source.disabled)return;field.focus();field.insert(button.dataset.formulaInsert);});
     }
   }catch{

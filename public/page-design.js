@@ -1,4 +1,6 @@
 import {sourcePanel,foldHint} from './provenance.js';
+import {mathFieldMarkup,renderMathText} from './math-markup.js';
+import {renderInlineText} from './inline-text.js';
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function contentPageCountNotice(p){
   const actual=p.slides?.length||0,expected=p.brief?.pages;
@@ -10,13 +12,15 @@ export function contentPageCountNotice(p){
 export function designPreview(markdown,p,index){
   const lines=markdown.split('\n').filter(l=>!l.startsWith('<!--')),out=[];
   const renderLine=l=>{
-  const head=/^(#{1,3}) (.*)/.exec(l);if(head)return `<h${Math.min(4,head[1].length+1)}>${h(head[2])}</h${Math.min(4,head[1].length+1)}>`;
-  return `<div class="design-line" style="--design-indent:${Math.min(6,(l.match(/^ */)?.[0].length||0)/2)}">${h(l).replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')||'&nbsp;'}</div>`;
+  const formatted=value=>renderMathText(value,text=>renderInlineText(text.replace(/\\([<>])/g,'$1')).replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>'));
+  const head=/^(#{1,3}) (.*)/.exec(l);if(head)return `<h${Math.min(4,head[1].length+1)}>${formatted(head[2])}</h${Math.min(4,head[1].length+1)}>`;
+  return `<div class="design-line" style="--design-indent:${Math.min(6,(l.match(/^ */)?.[0].length||0)/2)}">${formatted(l)||'&nbsp;'}</div>`;
   };
   for(let i=0;i<lines.length;i++){
-    if(/^\s*\$\$\s*$/.test(lines[i])){
-      let end=i+1;while(end<lines.length&&!/^\s*\$\$\s*$/.test(lines[end]))end++;
-      if(end<lines.length){out.push('<math-field read-only class="design-formula" aria-label="设计稿公式">'+h(lines.slice(i+1,end).map(l=>l.trim()).join('\n'))+'</math-field>');i=end;continue;}
+    if(/^\s*(\$\$|\\\[)\s*$/.test(lines[i])){
+      const close=lines[i].trim()==='$$'?'$$':'\\]';
+      let end=i+1;while(end<lines.length&&lines[end].trim()!==close)end++;
+      if(end<lines.length){out.push(mathFieldMarkup(lines.slice(i+1,end).map(l=>l.trim()).join('\n'),{block:true}));i=end;continue;}
     }
     const source=/^(#{1,3})\s+原材料对应索引\s*$/.exec(lines[i]);
     if(!source){out.push(renderLine(lines[i]));continue;}

@@ -1,5 +1,5 @@
 """Web release adapter: validate OOXML, exact native text, object inventory and hashes."""
-import json, sys, zipfile, hashlib, posixpath
+import json, sys, zipfile, hashlib, posixpath, re
 from collections import Counter
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -8,6 +8,22 @@ P='http://schemas.openxmlformats.org/presentationml/2006/main'
 A='http://schemas.openxmlformats.org/drawingml/2006/main'
 R='http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 M='http://schemas.openxmlformats.org/officeDocument/2006/math'
+# Saved text may carry lightweight sup/sub markup; native PPTX stores the same
+# content as runs with positive/negative baseline. Compare readable text only:
+# strip the markup, then map exactly the Unicode superscript/subscript characters
+# that public/inline-text.js converts to native baseline runs. Every other
+# character (minus sign, units, fullwidth/compatibility forms) stays exact, so no
+# global NFKC normalization is applied and real text edits cannot be masked.
+INLINE_UNICODE_SCRIPTS={
+ '⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9',
+ '⁺':'+','⁻':'-','⁼':'=','⁽':'(','⁾':')','ⁱ':'i','ⁿ':'n','ʰ':'h','ʲ':'j','ˡ':'l','ˢ':'s','ʳ':'r','ʷ':'w','ˣ':'x','ʸ':'y',
+ 'ᵃ':'a','ᵇ':'b','ᶜ':'c','ᵈ':'d','ᵉ':'e','ᶠ':'f','ᵍ':'g','ᵏ':'k','ᵐ':'m','ᵒ':'o','ᵖ':'p','ᵗ':'t','ᵘ':'u','ᵛ':'v','ᶻ':'z',
+ '₀':'0','₁':'1','₂':'2','₃':'3','₄':'4','₅':'5','₆':'6','₇':'7','₈':'8','₉':'9',
+ '₊':'+','₋':'-','₌':'=','₍':'(','₎':')','ₐ':'a','ₑ':'e','ₒ':'o','ₓ':'x','ₔ':'ə','ₕ':'h','ₖ':'k','ₗ':'l','ₘ':'m','ₙ':'n','ₚ':'p','ₛ':'s','ₜ':'t','ᵢ':'i','ᵣ':'r','ᵤ':'u','ᵥ':'v','ⱼ':'j',
+}
+def plain_inline(text):
+    source=re.sub(r'</?(?:sup|sub)>', '', str(text), flags=re.I)
+    return ''.join(INLINE_UNICODE_SCRIPTS.get(char, char) for char in source)
 def check(deck, spec, pages=None, baseline=None):
     errors=[]
     if pages is not None and baseline:
@@ -40,9 +56,12 @@ def check(deck, spec, pages=None, baseline=None):
             # Multi-line text can contain separate runs; compare each native text shape.
             actual=Counter(''.join(t.text or '' for t in s.findall(f'.//{{{A}}}t')) for s in r.findall(f'.//{{{P}}}sp') if s.find(f'{{{P}}}txBody') is not None and s.find(f'.//{{{M}}}oMath') is None)
             def normalize(counts):
+                # Runs may split on sup/sub and carry ± baseline; readable text is the
+                # same, so compare plain text after stripping light tags and folding
+                # Unicode script glyphs to their base characters.
                 normalized=Counter()
                 for text,count in counts.items():
-                    normalized[text.replace('\n','').replace('\r','')]+=count
+                    normalized[plain_inline(text).replace('\n','').replace('\r','')]+=count
                 return normalized
             if normalize(expected)!=normalize(actual):errors.append(f'S{i+1}: exact native text mismatch')
             formulas=[e for e in elements if e['type']=='formula']

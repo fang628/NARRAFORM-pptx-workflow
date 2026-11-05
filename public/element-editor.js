@@ -83,7 +83,7 @@ export function bindTreeInteractions(root,{getNodes,onMove,canDrag}){
     });
     tree.addEventListener('pointerdown',e=>{
       const handle=e.target.closest('[data-tree-drag]'),card=e.target.closest('[data-node]');
-      if(!card||e.button!==0||!e.isPrimary||!canDrag()||(!handle&&e.target.closest('input,textarea,select,math-field,button,a,summary,details')))return;
+      if(!card||e.button!==0||!e.isPrimary||!canDrag()||(!handle&&e.target.closest('input,textarea,select,math-field,button,a,summary,details,.inline-text-editor')))return;
       if(handle)e.preventDefault();const capture=handle||card,page=Number(tree.dataset.treePage),id=card.dataset.node,nodes=getNodes(page),source=nodes.find(n=>n.id===id),branch=card.closest('[data-tree-branch]');if(source.type==='text'&&['title','subtitle'].includes(source.role))return;
       let active=false,mode=null,candidate=null,marked=null,last={x:e.clientX,y:e.clientY},raf=0,ghost=null;
       const start={...last},live=tree.querySelector('.tree-live-status');

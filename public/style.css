@@ -1166,6 +1166,21 @@ button:is(.close,.danger,[data-delete],[data-delete-project],[data-delete-style]
 .formula-source textarea{width:100%;box-sizing:border-box;margin-top:8px;background:#f7f6ef;border:1px solid #c4c0ac;font:13px/1.6 var(--mono);color:#34342e}
 .formula-edit-state{display:block;font-size:11px;color:#7a5730;line-height:1.6}
 .design-formula{display:block;margin:10px 0;max-width:100%;overflow:auto;background:transparent;color:inherit;border:0}
+.design-formula{font-size:22px;min-height:2em;padding:8px 0;line-height:normal}
+.inline-formula{display:inline-block;max-width:100%;vertical-align:middle;margin:0 2px;padding:2px 0;border:0;background:transparent;color:inherit;font-size:1.1em;line-height:normal}
+math-field[read-only]::part(menu-toggle),math-field[read-only]::part(virtual-keyboard-toggle){display:none}
+.inline-text-editor{min-width:0;position:relative;flex:1}
+.inline-text-editor>.tree-inline-text,.inline-text-editor>.tree-caption-inline{width:100%;box-sizing:border-box}
+.circuit-tree .tree-image-annotation .inline-text-editor>.tree-caption-inline{width:100%}
+.tree-rich-text-preview{white-space:pre-wrap;overflow-wrap:anywhere;min-height:32px;padding:8px 14px;color:inherit;font:inherit;line-height:1.7;cursor:text}
+.tree-rich-text-preview sup,.tree-rich-text-preview sub,.design-line sup,.design-line sub{font-size:.75em;line-height:0}
+.inline-text-editor.has-rich-text:not(.is-editing)>textarea{display:none}
+.inline-text-editor.is-editing>.tree-rich-text-preview{display:none}
+.inline-text-tools{display:none;justify-content:flex-end;gap:14px;padding:0 12px 4px}
+.inline-text-editor.is-editing>.inline-text-tools{display:flex}
+.inline-text-tools button{padding:2px 4px;min-width:24px;font:12px/1.2 var(--mono);color:#716b46}
+.inline-text-editor.is-editing>textarea{border:1px solid #aaa37c!important;background:#faf9f4!important}
+.tree-rich-text-preview:focus-visible{outline:1px solid #aaa37c;outline-offset:-1px}
 .project-transfer-panel{flex:none;display:grid;grid-template-columns:auto 1fr;align-items:center;gap:8px 16px;margin:0 0 12px;padding:0 0 12px;border-bottom:1px solid #bcb9ab}
 .project-transfer-heading{display:flex;align-items:center;margin:0}
 .project-transfer-heading h3{margin:0;font-size:14px;line-height:1.4;color:#34342f}

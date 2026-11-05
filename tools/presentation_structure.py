@@ -33,6 +33,16 @@ def paragraphs(node):
         for run in paragraph.findall('a:r', NS):
             rp = run.find('a:rPr', NS)
             style = dict(rp.attrib) if rp is not None else {}
+            # DrawingML encodes superscript/subscript as a positive/negative baseline
+            # percentage. Keep the raw attribute and expose the normalized script kind.
+            try:
+                baseline = float(style.get('baseline', '0') or 0)
+            except (TypeError, ValueError):
+                baseline = 0
+            if baseline > 0:
+                style['vertical'] = 'superscript'
+            elif baseline < 0:
+                style['vertical'] = 'subscript'
             runs.append({'text': ''.join(run.itertext()), 'style': style})
         result.append({'text': text, 'level': int(pr.get('lvl', '0')) if pr is not None else 0, 'runs': runs})
     return result
@@ -91,6 +101,11 @@ def read_presentation(source):
                     table = node.find('a:graphic/a:graphicData/a:tbl', NS)
                     if table is not None:
                         record['table'] = [['\n'.join(p['text'] for p in paragraphs(c.find('a:txBody', NS))) for c in row.findall('a:tc', NS)] for row in table.findall('a:tr', NS)]
+                        cell_paragraphs = [[paragraphs(c.find('a:txBody', NS)) for c in row.findall('a:tc', NS)] for row in table.findall('a:tr', NS)]
+                        # Only duplicate paragraph runs when a cell really has sup/sub;
+                        # plain tables keep their existing compact representation.
+                        if any(run.get('style', {}).get('vertical') for row in cell_paragraphs for cell in row for paragraph in cell for run in paragraph.get('runs', [])):
+                            record['tableParagraphs'] = cell_paragraphs
                         grid = [float(c.get('w', 0)) for c in table.findall('a:tblGrid/a:gridCol', NS)]
                         rows = table.findall('a:tr', NS)
                         heights = [float(row.get('h', 0)) for row in rows]
