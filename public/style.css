@@ -1171,6 +1171,7 @@ button:is(.close,.danger,[data-delete],[data-delete-project],[data-delete-style]
 math-field[read-only]::part(menu-toggle),math-field[read-only]::part(virtual-keyboard-toggle){display:none}
 .inline-text-editor{min-width:0;position:relative;flex:1}
 .inline-text-editor>.tree-inline-text,.inline-text-editor>.tree-caption-inline{width:100%;box-sizing:border-box}
+.inline-text-editor>[hidden]{display:none!important}
 .circuit-tree .tree-image-annotation .inline-text-editor>.tree-caption-inline{width:100%}
 .tree-rich-text-preview{white-space:pre-wrap;overflow-wrap:anywhere;min-height:32px;padding:8px 14px;color:inherit;font:inherit;line-height:1.7;cursor:text}
 .tree-rich-text-preview sup,.tree-rich-text-preview sub,.design-line sup,.design-line sub{font-size:.75em;line-height:0}
@@ -1202,3 +1203,110 @@ math-field[read-only]::part(menu-toggle),math-field[read-only]::part(virtual-key
 @media(max-width:520px){.project-transfer-panel{grid-template-columns:1fr}.project-transfer-actions{grid-template-columns:repeat(2,minmax(0,1fr));justify-content:stretch}}
 @media(prefers-reduced-motion:reduce){.project-transfer-actions .project-transfer-card,.transfer-card-arrow{transition:none}}
 .project-transfer-state{grid-column:1/-1;font-size:12px;line-height:1.6;color:#716637;margin:0;overflow-wrap:anywhere}
+
+/* Content tree: nesting owns indentation; every text strip shares one content column. */
+.circuit-tree{--indent:36px;margin-top:10px;margin-bottom:14px}
+.circuit-tree .tree-level,.circuit-tree .tree-title-root>.tree-children>.tree-level{padding-top:6px}
+.circuit-tree .tree-level-meta{height:18px}
+.circuit-tree .tree-siblings{list-style:none;padding:0;margin:0}
+.circuit-tree .tree-branch{margin-bottom:5px}
+.circuit-tree .tree-branch::after{bottom:-15px}
+.circuit-tree .tree-title-root>.tree-children:has(>.tree-subtitle-branch){padding-top:8px}
+.circuit-tree .tree-subtitle-branch{padding-left:0;margin-bottom:5px}
+.circuit-tree .tree-subtitle-branch::before{top:-8px;bottom:-5px;left:-21px}
+.circuit-tree .subtitle-circuit{left:-24px;width:24px}
+.circuit-tree .element-node{padding:5px 9px}
+.circuit-tree .element-node-head{display:flex;align-items:center;gap:5px;flex-wrap:nowrap;min-height:24px;margin:0;padding:0}
+.circuit-tree .tree-branch-marker{min-width:12px;font-size:11px;line-height:1;color:#8a8260;font-variant-numeric:tabular-nums}
+.circuit-tree[data-tree-page] .element-node:is([data-field-type="text"],[data-field-type="group"]){display:grid;grid-template-columns:104px minmax(0,1fr);gap:6px 10px;align-items:center;min-height:40px;box-sizing:border-box;padding:5px 9px!important}
+.circuit-tree[data-tree-page] .element-node:is([data-field-type="text"],[data-field-type="group"])>.inline-text-editor,
+.circuit-tree[data-tree-page] .element-node:is([data-field-type="text"],[data-field-type="group"])>.tree-inline-text{grid-column:2;grid-row:1;min-width:0;margin:0!important}
+.circuit-tree[data-tree-page] .element-node .tree-inline-text,
+.circuit-tree[data-tree-page] .element-node .tree-rich-text-preview,
+.circuit-tree[data-tree-page] .element-node .tree-caption-inline{font-size:13px!important;line-height:1.55!important}
+.circuit-tree[data-tree-page] .element-node:is([data-field-type="text"],[data-field-type="group"]) .tree-inline-text{display:block;width:100%!important;min-height:25px;box-sizing:border-box;margin:0!important;padding:1px 78px 1px 4px!important;resize:none}
+.circuit-tree[data-tree-page] .element-node:is([data-field-type="text"],[data-field-type="group"]) .tree-rich-text-preview{min-height:25px;box-sizing:border-box;margin:0;padding:1px 78px 1px 4px}
+.circuit-tree [data-field-role="title"]>.inline-text-editor,
+.circuit-tree [data-field-type="group"]>.inline-text-editor{font-weight:700}
+.circuit-tree [data-field-role="title"] .tree-inline-text,
+.circuit-tree [data-field-type="group"] .tree-inline-text{font-weight:700!important}
+.circuit-tree .element-node>.tree-node-editor:not([open]){display:contents}
+.circuit-tree .element-node>.tree-node-editor[open]{grid-column:1/-1}
+.circuit-tree .tree-relation-toggle{position:static;grid-column:2;grid-row:2;justify-self:start;display:inline-flex;align-items:center;gap:5px;width:auto;height:15px;min-height:0;max-width:100%;margin:0;padding:0 4px;border:0;background:transparent;color:#777466;text-align:left;font:10px/15px var(--sans);white-space:nowrap;cursor:pointer;box-shadow:none}
+.circuit-tree .tree-relation-toggle>span,.circuit-tree .tree-relation-toggle>i{display:none}
+.circuit-tree .tree-relation-icon{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.2;flex:none}
+.circuit-tree .tree-header-annotation{flex:1;align-items:center;min-width:0;padding-right:78px}
+.circuit-tree .tree-header-annotation .tree-annotation-role{flex-basis:70px;width:70px!important;padding:2px 3px!important;font-size:10px!important}
+.circuit-tree .tree-header-annotation .inline-text-editor{min-width:0}
+.circuit-tree .has-header-annotation .tree-image-content{grid-template-columns:minmax(0,1fr)}
+.circuit-tree .tree-image-captions:empty{display:none}
+.circuit-tree .tree-relation-toggle:hover{color:#494531;background:rgba(255,238,105,.2)}
+.circuit-tree .tree-relation-toggle:focus-visible{outline:1px solid #a99b52;outline-offset:2px}
+.circuit-tree[data-tree-page] .element-node[data-field-type="group"] .tree-inline-text,
+.circuit-tree[data-tree-page] .element-node[data-field-type="group"] .tree-rich-text-preview{padding-right:78px!important}
+.circuit-tree[data-tree-page] .element-node[data-field-type="group"]{row-gap:1px}
+.circuit-tree .tree-type-fold{min-height:0;line-height:1.2;cursor:pointer;box-shadow:none}
+.circuit-tree .tree-type-fold:hover{background:#d8d6c9}
+.circuit-tree .tree-drag-handle{opacity:0;transition:opacity .15s}
+.circuit-tree .element-node:hover .tree-drag-handle,.circuit-tree .element-node:focus-within .tree-drag-handle{opacity:.65}
+.circuit-tree .tree-formula-editor{padding:5px 9px 6px}
+.circuit-tree .tree-formula-editor math-field{min-height:46px;padding:4px 8px;font-size:20px}
+.circuit-tree .formula-tools{gap:4px 12px;margin:4px 0}
+.circuit-tree .formula-tools button{min-height:22px;padding:1px 0}
+.circuit-tree .formula-source>summary{padding:2px 0;font-size:10px}
+.circuit-tree .formula-edit-state:empty{display:none}
+.circuit-tree .tree-table-content{padding:5px 8px 6px}
+.circuit-tree .tree-table-scroll textarea{height:32px;min-height:28px;padding:3px 6px!important;line-height:1.5!important}
+.circuit-tree .tree-table-actions{gap:5px 8px;margin-top:4px}
+.circuit-tree .tree-table-scroll .tree-inline-text.tree-table-cell{width:100%!important;min-width:0;margin:0!important;padding:3px 6px!important;height:auto;min-height:28px;font-size:12px!important;line-height:1.5!important}
+.circuit-tree .tree-table-scroll .tree-rich-text-preview{min-height:28px;margin:0;padding:3px 6px!important;font-size:12px!important;line-height:1.5!important;box-sizing:border-box}
+.circuit-tree .tree-table-scroll .inline-text-tools{justify-content:flex-start;gap:4px;padding:2px 3px}
+.circuit-tree .tree-table-scroll .inline-text-tools button{padding:2px;min-width:20px;font-size:10px}
+.circuit-tree .tree-table-scroll .inline-text-editor.is-editing>textarea{border-color:#aaa37c!important;background:#faf9f4!important}
+.design-markdown .design-line{line-height:1.65}
+.circuit-tree{position:relative;isolation:isolate}
+.circuit-tree .tree-circuit-link,.circuit-tree .subtitle-circuit,
+.circuit-tree .tree-siblings::before,.circuit-tree .tree-branch::after,
+.circuit-tree .tree-subtitle-branch::before{display:none!important}
+.tree-traces{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:3;fill:none;stroke:var(--trace);stroke-width:1;stroke-linecap:square;stroke-linejoin:bevel}
+.tree-traces circle{fill:#eeede7}
+.tree-traces .tree-trace-junction{fill:var(--trace);stroke:none}
+.circuit-tree .element-node,.circuit-tree .tree-level-meta{z-index:1}
+.circuit-tree[data-tree-page] .element-node[data-field-role="title"]{min-height:64px}
+.circuit-tree[data-tree-page] .element-node:is([data-field-role="title"],[data-field-role="subtitle"]){grid-template-columns:56px minmax(0,1fr)}
+.circuit-tree[data-tree-page] .element-node[data-field-type="text"][data-field-role="title"]{grid-template-columns:64px minmax(0,1fr);row-gap:2px;padding:7px 10px!important}
+.circuit-tree[data-tree-page] .element-node[data-field-role="title"]>.element-node-head{grid-column:1;grid-row:1;min-height:18px}
+.circuit-tree[data-tree-page] .element-node[data-field-role="title"] .element-type{font-size:12px!important;padding:3px 6px;line-height:1.3}
+.circuit-tree[data-tree-page] .element-node[data-field-role="title"]>.inline-text-editor,
+.circuit-tree[data-tree-page] .element-node[data-field-role="title"]>.tree-inline-text{grid-column:2;grid-row:1;align-self:start;margin-top:9px!important}
+.circuit-tree[data-tree-page] .element-node[data-field-role="title"]>.element-node-head{align-self:start}
+.circuit-tree[data-tree-page] .element-node[data-field-role="title"] .tree-inline-text,
+.circuit-tree[data-tree-page] .element-node[data-field-role="title"] .tree-rich-text-preview{font-size:18px!important;line-height:1.5!important;min-height:34px}
+@media(max-width:700px){
+  .circuit-tree{--indent:24px}
+  .circuit-tree[data-tree-page] .element-node:is([data-field-type="text"],[data-field-type="group"]){grid-template-columns:90px minmax(0,1fr);gap:5px}
+  .circuit-tree[data-tree-page] .element-node:is([data-field-role="title"],[data-field-role="subtitle"]){grid-template-columns:56px minmax(0,1fr)}
+  .circuit-tree .element-node-head{gap:3px}
+  .circuit-tree .tree-relation-toggle{font-size:9px;line-height:15px;height:15px}
+  .circuit-tree[data-tree-page] .element-node[data-field-type="group"] .tree-inline-text,
+  .circuit-tree[data-tree-page] .element-node[data-field-type="group"] .tree-rich-text-preview{padding-right:32px!important}
+}
+
+/* Headings share the same continuous tree as the content branches. */
+.circuit-tree .tree-heading-family{padding-bottom:0;margin-bottom:0;border-bottom:0}
+.circuit-tree .tree-heading-family:has(.tree-heading-subtitles:not(:empty))>.page-title-field{margin-bottom:4px}
+.circuit-tree .tree-heading-subtitles:not(:empty){margin-top:4px}
+.circuit-tree .tree-heading-subtitles>.tree-subtitle-branch{margin-left:calc(var(--indent) / 2);margin-bottom:0}
+.circuit-tree .tree-content-root{padding-top:0}
+.circuit-tree .tree-content-root>.tree-children:empty{display:none}
+.tree-item-accent{position:absolute;right:88px;bottom:5px;width:58px;height:9px;opacity:.16;background:repeating-linear-gradient(135deg,#928b5e 0 1px,transparent 1px 5px);mask-image:linear-gradient(90deg,transparent,#000);pointer-events:none}
+.tree-title-accent{position:absolute;right:12px;bottom:6px;width:34%;max-width:290px;height:46px;pointer-events:none;background:linear-gradient(#c4b55a,#c4b55a) right bottom/58px 2px no-repeat,repeating-linear-gradient(135deg,#928b5e 0 1px,transparent 1px 5px) right bottom 6px/100% 10px no-repeat;mask-image:linear-gradient(90deg,transparent,#000 40%);opacity:.28}
+.tree-title-accent::before{content:"";position:absolute;right:0;top:13px;width:16px;height:7px;border-top:1px solid #a59b64;border-right:1px solid #a59b64}
+.tree-title-accent::after{content:"TYPE";position:absolute;right:26px;top:-3px;font:700 32px/1 var(--mono);letter-spacing:5px;color:#9c956f;opacity:.35}
+.circuit-tree [data-field-role="title"]:focus-within .tree-title-accent{opacity:.14}
+.circuit-tree [data-field-role="title"] .tree-item-accent{display:none}
+.circuit-tree[data-tree-page] .element-node[data-field-role="title"]>.inline-text-editor{max-width:calc(100% - 170px)}
+.circuit-tree[data-tree-page] .element-node[data-field-role="title"] :is(.tree-inline-text,.tree-rich-text-preview){border:1px solid transparent!important;background:#ece9dc!important;border-radius:2px;box-sizing:border-box;padding:2px 8px!important}
+.circuit-tree[data-tree-page] .element-node[data-field-role="title"] .tree-inline-text:hover{border-color:transparent!important;background:#efecdf!important}
+.circuit-tree[data-tree-page] .element-node[data-field-role="title"] .tree-inline-text:focus{border-color:transparent!important;background:#f3f0e3!important;outline:none}
+@media(max-width:700px){.circuit-tree[data-tree-page] .element-node[data-field-role="title"]>.inline-text-editor{max-width:100%}}

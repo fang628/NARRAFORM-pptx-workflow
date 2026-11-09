@@ -9,13 +9,17 @@ CANDIDATES = [
 ]
 
 
-def choose_matte(image, background):
+def choose_matte(image, background=None):
     rgba = np.asarray(image.convert('RGBA'))
     rgb = rgba[:, :, :3].astype(np.float32)
-    base = np.asarray(background.convert('RGB').resize(image.size, Image.Resampling.LANCZOS)).astype(np.float32)
-    difference = np.linalg.norm(rgb-base, axis=2)
-    mask = (difference > 28) & (rgba[:, :, 3] > 32)
-    mode = 'reference-foreground'
+    if background is None:
+        mask=rgba[:,:,3]>32
+        mode='source-colours'
+    else:
+        base = np.asarray(background.convert('RGB').resize(image.size, Image.Resampling.LANCZOS)).astype(np.float32)
+        difference = np.linalg.norm(rgb-base, axis=2)
+        mask = (difference > 28) & (rgba[:, :, 3] > 32)
+        mode = 'reference-foreground'
     if mask.sum() < 8:
         mask = rgba[:, :, 3] > 32
         mode = 'source-colours'

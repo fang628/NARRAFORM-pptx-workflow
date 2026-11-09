@@ -1,14 +1,23 @@
 {
   "source": "pptx-workflow",
   "agentPolicyVersion": "agent-visual-v4",
-  "version": "f3ac24490ad8c4ef",
+  "version": "a1fad553ad89d0b9",
   "previousVersions": [
+    "bae5344c81b0a105",
+    "f1849671466acc58",
+    "de6ed1fb9fef3891",
     "b6ac8e3906419fe6",
     "96582974efd86018",
     "e90c07817ffb584a",
-    "bfd13f56dfd91f6d"
+    "bfd13f56dfd91f6d",
+    "f3ac24490ad8c4ef",
+    "9ddf9fee753581d7",
+    "ae4608b14e248945",
+    "b0cd07a57d64ba02",
+    "7c171342fa5cd2c6",
+    "3b830e8f885ee2b0"
   ],
-  "copiedAt": "2026-10-19T15:06:03.865Z",
+  "copiedAt": "2026-11-09T00:05:41.036Z",
   "files": [
     {
       "file": "README.md",
@@ -27,8 +36,8 @@
     },
     {
       "file": "shared/design-principles.md",
-      "sha256": "3012a87aac78950ea397f3ad30f4d167eed6c294cc8db21c7802239d06f6d3da",
-      "bytes": 9586
+      "sha256": "eb3b2b501c14a25e7ff4466dcf76acfee24131e381b3faecc4ae38b7e5eaa363",
+      "bytes": 9955
     },
     {
       "file": "shared/incremental-rework.md",
@@ -37,8 +46,8 @@
     },
     {
       "file": "shared/preview-contract.md",
-      "sha256": "f809d1a2e326947fd260bd4f2e88af63dcd99c3b53cd6153f1464f671224595b",
-      "bytes": 4486
+      "sha256": "8fc6f80ff6db9dfcfdc7837b12a73876c1b955daa7a3a1c891c5ebf25661cfda",
+      "bytes": 4565
     },
     {
       "file": "shared/references/splits/arc-horizontal-dome.png",
@@ -142,13 +151,13 @@
     },
     {
       "file": "stages/13-design/references/gen-prompt-scope.md",
-      "sha256": "31270c80123acf03ddbe3d57098055bfebd698532f1de1fbe48c5f7f780eef83",
-      "bytes": 8370
+      "sha256": "6abbbcdbac31bf3133c807dccd0820775c493c702bdcfdc4b980dc2d45ee8360",
+      "bytes": 8454
     },
     {
       "file": "stages/13-design/references/layout-intent.md",
-      "sha256": "7890d60eb1085c1a3d868663116e68f7f3473aa45d99c1187c3898ee51b9a5b7",
-      "bytes": 2581
+      "sha256": "d9a5254b5c70d4f1bb6778905cd40d632a74678f189c17c9ce941fc177b93b62",
+      "bytes": 2690
     },
     {
       "file": "stages/13-design/references/layout-splits.md",
@@ -167,13 +176,13 @@
     },
     {
       "file": "stages/13-design/references/reference-index.md",
-      "sha256": "40824234e1b319b37e0e209715addd53f5621f7fe058c1be9e3b0433cf324fb2",
-      "bytes": 4424
+      "sha256": "0f378b41ca7452312d552fb96cb94de9813086f7f5c3cc39a494cb15b02b46ba",
+      "bytes": 4410
     },
     {
       "file": "stages/13-design/references/style-guide.md",
-      "sha256": "cf7864d647fb4b8941a852fac8a617f3cd5bba23e19bad38c710702ae558e4ca",
-      "bytes": 6466
+      "sha256": "3041b1bb630565076719f9689e1fbec14579dddcf3dfd732c9a518b53ed50472",
+      "bytes": 6625
     },
     {
       "file": "stages/13-design/references/style-tokens.json",
@@ -182,13 +191,13 @@
     },
     {
       "file": "stages/13-design/references/title-page.md",
-      "sha256": "d9197289b45fe39f3da538e64fba1e1488ef5db59651ffc9f99066d757b684a1",
-      "bytes": 3276
+      "sha256": "dee4a9a839b52e2094d50fe791c82f31a23cd08bbf11da3e61f0623ce69f8fa4",
+      "bytes": 3344
     },
     {
       "file": "stages/13-design/references/toc-page.md",
-      "sha256": "0753e89cb009626ecb87196f12e738240f2169e12a4d323b6c124819d6abff5d",
-      "bytes": 2425
+      "sha256": "d381e6a671204e746a481e5446e6444a5514bf04a9716ec78dfb21ad20b2ee98",
+      "bytes": 2804
     },
     {
       "file": "stages/13-design/references/typography-cjk.md",
@@ -197,8 +206,8 @@
     },
     {
       "file": "stages/32-asset-rebuild/steps/rebuild.md",
-      "sha256": "f93bfb28d854762fe61c38c48c73f613b1a235ac38eee3c4b7c4e8097ba73396",
-      "bytes": 3108
+      "sha256": "2cab57aa7ef093039c46c7fb4814e298f6ca9d72cd2baee442d31e7dcb4ffa53",
+      "bytes": 9200
     }
   ]
 }

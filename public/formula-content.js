@@ -14,6 +14,14 @@ export function formulaLatex(value){
   return source;
 }
 export const formulaMarkdown=value=>'$$\n'+formulaLatex(value)+'\n$$';
+// Inline prose math is only recognized when the body carries a real math
+// signal; bare currency pairs ($5 ... $10), ordinary underscores and plain
+// numbers therefore stay text. Explicit \(...\) delimiters are trusted LaTeX.
+export function isFormulaLatexLike(value){
+  const source=String(value??'').trim();
+  if(!source||source.length>formulaLimit)return false;
+  return /\\[a-zA-Z]+|[\^_{}]|√/.test(source)||/(?:[A-Za-z0-9)\]]\s*[=<>+\-*/×÷±≤≥≠≈]\s*[A-Za-z0-9(\[])/.test(source);
+}
 export const validateFormulaContent=value=>{const latex=formulaLatex(value);return {latex,markdown:formulaMarkdown(latex)};};
 const symbols={'α':'\\alpha ','β':'\\beta ','γ':'\\gamma ','δ':'\\delta ','ε':'\\epsilon ','θ':'\\theta ','λ':'\\lambda ','μ':'\\mu ','π':'\\pi ','σ':'\\sigma ','Σ':'\\sum ','∑':'\\sum ','∫':'\\int ','∞':'\\infty ','≤':'\\le ','≥':'\\ge ','≠':'\\ne ','×':'\\times ','·':'\\cdot ','±':'\\pm ','∂':'\\partial ','∇':'\\nabla '};
 export function mathTreeLatex(node){

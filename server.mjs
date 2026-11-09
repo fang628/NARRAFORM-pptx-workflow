@@ -4,6 +4,8 @@ import {optimizingOriginalPPT,originalPPTSources,importOriginalPPTSlides,preserv
 import {styleFavoritesPublic} from './lib/style-favorites.mjs';
 import {enterVisualStage} from './lib/content-stage.mjs';
 import {syncPageDesignText} from './lib/page-design-text.mjs';
+import {savePageContentAction,savePipelinePageContentAction} from './lib/page-content-save.mjs';
+import {contentEditorView} from './lib/content-editor-view.mjs';
 import {designEditingActive,designOutputBusy,concurrentDesignEditActions} from './public/design-editing.js';
 import {regenerateProgressSections} from './lib/progress-regeneration.mjs';
 import {artifactInventory,cleanArtifactCache,publicArtifactReport} from './lib/artifact-storage.mjs';
@@ -20,7 +22,7 @@ import {editRegionImage} from './lib/image-edit-region.mjs';
 import {textFieldValidator,textGenerationRetryLimit} from './lib/text-retry.mjs';
 import {presetStyleRecord} from './lib/style-registry.mjs';
 import {providerTimeoutMs} from './lib/provider.mjs';
-import {imagePromptCheck} from './lib/image-prompt-check.mjs';
+import {imagePromptCheck,finalizePromptDraft} from './lib/image-prompt-check.mjs';
 import {prepareAIImageEdit,imageEditExecution} from './lib/ai-image-edit.mjs';
 import {materialTextLimit,materialText,readingCoversMaterial} from './public/material-text-policy.js';
 import {supplementImageAction} from './lib/supplement-images.mjs';
@@ -31,10 +33,11 @@ import {captureReusableResults,downstreamReuseState,reuseDownstream,contentResto
 import {isQueuedTask,isDesignTask,enqueueImageTask,checkImageTaskGuard,publicImageTasks,interruptImageTasks,moveQueuedImageTask} from './lib/image-task-queue.mjs';
 import {pageStructurePrompt,validateGeneratedTitlePage} from './lib/page-options.mjs';
 import {materialImageAction} from './lib/material-images.mjs';
+import {normalizeCompositeMaterialVisibility} from './lib/material-visibility.mjs';
 import {materialDocument} from './lib/material-document.mjs';
 import {photoAssessmentRule} from './lib/photo-assessment.mjs';
 import {removeMaterials} from './lib/material-removal.mjs';
-import {runConcurrent,concurrencyLimit} from './lib/concurrency.mjs';
+import {runConcurrent,concurrencyLimit,projectWorkerLimit} from './lib/concurrency.mjs';
 import {designRulesFor} from './lib/design-rules.mjs';
 import http from 'node:http';
 import fs from 'node:fs';
@@ -51,7 +54,7 @@ import {readMaterialWithEvidence} from './lib/material-reading.mjs';
 import {sourceSchema,sourceEvidenceCatalog,sourcePromptEvidenceCatalog} from './lib/sources.mjs';
 import {validateSourceReferences as validReferences} from './lib/source-references.mjs';
 import {contentWithEvidence} from './lib/content-evidence.mjs';
-import {generateContentPipeline,contentPipelinePublic} from './lib/content-pipeline.mjs';
+import {generateContentPipeline,contentPipelinePublic,pageGenerationSubset} from './lib/content-pipeline.mjs';
 import {materialImageCatalog,validateGeneratedImageReuse} from './lib/content-images.mjs';
 import {checkContentPages} from './lib/content-check.mjs';
 import {materialFidelityPolicy} from './lib/content-policy.mjs';
@@ -98,6 +101,7 @@ for(const name of fs.readdirSync(data)) {
   try { const p=JSON.parse(fs.readFileSync(path.join(data,name,'project.json'),'utf8')); if(p.task?.status==='running') p.task={...p.task,status:'interrupted',message:'服务重启导致任务中断，请检查 API 配置后重试'}; if(p.task?.status==='interrupted')p.task.jobs=(p.task.jobs||[]).map(j=>['running','queued'].includes(j.status)?{...j,status:'interrupted'}:j); interruptImageTasks(p);if(p.provider)delete p.provider.ocr;projects.set(p.id,p); } catch {}
 }
 for(const p of projects.values()){
+  normalizeCompositeMaterialVisibility(p.materials);
   interruptAutomaticMode(p);
   delete p.provider;
 }
@@ -110,7 +114,7 @@ for(const p of projects.values())if(p.visualMode==='ai'&&p.selectedTheme&&!p.arc
   catch{console.warn('未能复用项目代表页：'+p.id);}
 }
 function project(id) { const p=projects.get(id); if(!p) throw Error('项目不存在'); return p; }
-function clean(p) { const c=credentials.get(p.id)||{}, {reuseCheckpoint,rebuildEditHistory,rebuildPageChanges,contentGenerationDraft,contentPipelineDraft,speakerScriptDraft,...publicProject}=p;return {...publicProject,...automaticModePublic(p),progressSections:progressSectionsOf(p),contentDraftAvailable:contentGenerationDraft?.stamp===contentGenerationStamp(p)||contentPipelineDraft?.stamp===contentGenerationStamp(p),contentPipeline:contentPipelinePublic(p,contentGenerationStamp(p)),adaptiveSchedulingEnabled:true,progressEventsEnabled:true,artifactStorageEnabled:true,progressSectionsRegenerationEnabled:true,designConcurrentEditingEnabled:true,enterVisualStageEnabled:true,manualCropEnabled:true,documentFormatEnabled:true,tableContentEnabled:true,formulaContentEnabled:true,projectTransferEnabled:true,supplementImagesEnabled:true,apiPersistence:credentialVault.mode,apiPersistenceWarning:credentials.warning,apiConfigurationScope:'shared',provider:Object.fromEntries(['text','image','elementImage','rebuild'].map(type=>[type,c[type]?{baseURL:c[type].baseURL,model:c[type].model}:null])),downstreamReuse:downstreamReuseState(p),contentRestore:contentRestoreState(p),imageTaskQueue:publicImageTasks(p),imageTaskQueueEnabled:true,designTaskQueueEnabled:true,imageTaskReorderEnabled:true,executionConcurrency:concurrencyLimit(p.executionConcurrency),...visualPublic(p,{data,getImage,save}),...styleFavoritesPublic(p,data),...speakerScriptPublic(p),analysisResumeCount:p.analysisDraft?.stamp===materialStamp(p)?p.analysisDraft.readings.filter(r=>r.status==='read'&&readingCoversMaterial(r,p.materials.find(m=>m.id===r.id))).length:0,pageDesigns:Object.fromEntries(p.slides.map((s,i)=>[i,pageDesignState(p,i)]).filter(([,d])=>d)),reconstructionCurrent:reconstructionCurrent(p),analysisCurrent:analysisCurrent(p),apiReady:!!c.text?.key,imageReady:!!c.image?.key,elementImageReady:!!(c.elementImage?.key||c.image?.key),ocrReady:!!c.text?.key,rebuildReady:!!visualModelConfig(c),rebuildConfigured:!!c.rebuild?.key,rebuildModel:visualModelConfig(c)?.model||null,rebuildSource:c.rebuild?.key?'rebuild':'text'}; }
+function clean(p) { const editorView=contentEditorView(p,contentGenerationStamp(p));const c=credentials.get(p.id)||{}, {reuseCheckpoint,rebuildEditHistory,rebuildPageChanges,contentGenerationDraft,contentPipelineDraft,speakerScriptDraft,...publicProject}=p;return {...publicProject,...automaticModePublic(p),progressSections:progressSectionsOf(p),contentDraftAvailable:contentGenerationDraft?.stamp===contentGenerationStamp(p)||contentPipelineDraft?.stamp===contentGenerationStamp(p),contentPipeline:contentPipelinePublic(p,contentGenerationStamp(p)),adaptiveSchedulingEnabled:true,optionalProjectConcurrencyEnabled:true,progressEventsEnabled:true,artifactStorageEnabled:true,progressSectionsRegenerationEnabled:true,designConcurrentEditingEnabled:true,enterVisualStageEnabled:true,manualCropEnabled:true,pageContentSaveEnabled:true,documentFormatEnabled:true,tableContentEnabled:true,formulaContentEnabled:true,projectTransferEnabled:true,supplementImagesEnabled:true,apiPersistence:credentialVault.mode,apiPersistenceWarning:credentials.warning,apiConfigurationScope:'shared',provider:Object.fromEntries(['text','image','elementImage','rebuild'].map(type=>[type,c[type]?{baseURL:c[type].baseURL,model:c[type].model}:null])),downstreamReuse:downstreamReuseState(p),contentRestore:contentRestoreState(p),imageTaskQueue:publicImageTasks(p),imageTaskQueueEnabled:true,designTaskQueueEnabled:true,imageTaskReorderEnabled:true,executionConcurrency:concurrencyLimit(p.executionConcurrency),...visualPublic(p,{data,getImage,save}),...styleFavoritesPublic(p,data),...speakerScriptPublic(p),analysisResumeCount:p.analysisDraft?.stamp===materialStamp(p)?p.analysisDraft.readings.filter(r=>r.status==='read'&&readingCoversMaterial(r,p.materials.find(m=>m.id===r.id))).length:0,slides:editorView.slides,pageDesigns:Object.fromEntries(editorView.slides.map((s,i)=>[i,pageDesignState(editorView,i)]).filter(([,d])=>d)),reconstructionCurrent:reconstructionCurrent(p),analysisCurrent:analysisCurrent(p),apiReady:!!c.text?.key,imageReady:!!c.image?.key,elementImageReady:!!(c.elementImage?.key||c.image?.key),ocrReady:!!c.text?.key,rebuildReady:!!visualModelConfig(c),rebuildConfigured:!!c.rebuild?.key,rebuildModel:visualModelConfig(c)?.model||null,rebuildSource:c.rebuild?.key?'rebuild':'text'}; }
 function ensure(p,test,message) { if(!test) throw Error(message); }
 function unlocked(p) { ensure(p,projects.get(p.id)===p,'项目不存在');ensure(p,!tasks.has(p.id)&&!uploads.has(p.id),'当前任务或材料发送中，请等待完成或先取消');ensure(p,!credentialWrites.has(p.id),'API 配置正在保存，请稍后重试'); }
 function confirmContent(p){return enterVisualStage(p);}
@@ -157,7 +161,7 @@ async function understandMaterials(p,signal,includeImages,options={}){
         if(m.kind==='image'&&!useOCR){const file=getImage(p,m.id);ensure(p,(m.size||fs.statSync(file).size)<=20_000_000,'图片材料已保留；单张图片超过模型识别的 20 MB 上限');user=[{type:'text',text:user},{type:'image_url',image_url:{url:`data:image/${path.extname(file)==='.png'?'png':'jpeg'};base64,${fs.readFileSync(file).toString('base64')}`}}];}
         const r=await readMaterialWithEvidence({config:credentials.get(p.id)?.text,system,user,material:useOCR?{...m,kind:'document'}:m,examinedText,catalog,signal});
         if(signal.aborted)throw Error('已取消');remember({...r.reading,status:'read',coverage:useOCR?'ocr':m.kind==='image'?'image':'text',readChars:examinedText.length,totalChars:(m.text||'').length,partial:!!m.truncated||!!m.needsOCR||(m.text||'').length>examinedText.length});p.lastUsage=r.usage;save(p);
-      },{signal,limit:()=>concurrencyLimit(p.executionConcurrency),label:m=>'理解材料 · '+m.name});
+      },{signal,limit:()=>projectWorkerLimit(p.executionConcurrency),label:m=>'理解材料 · '+m.name});
       // Document figures become available as each document finishes. Their
       // already observed captions/evidence require no duplicate vision request.
       for(const m of sourceMaterials(p).filter(m=>!sources.some(old=>old.id===m.id))){
@@ -186,7 +190,7 @@ function launch(p,label,fn,{onComplete,priorStage}={}) {
   const revision={version:p.version};
   const queuedRequest=p.imageTaskQueue?.find(job=>job.id===p.task.queueId)?.request;
   const interactive=queuedRequest?.index!==undefined||/第\s*\d+\s*页|修改|改写|单页/.test(label);
-  Promise.resolve().then(()=>withExecutionContext({projectId:p.id,version:revision.version,revision,limit:()=>p.executionConcurrency??3,priority:interactive?50:10,isCurrent:()=>projects.get(p.id)===p&&!p.archivedAt&&(p.version===revision.version||designEditingActive(p))},()=>fn(controller.signal))).then(()=>{p.task={...p.task,status:'done',message:p.task.completionMessage||label+'完成',finishedAt:new Date().toISOString()};recordProgress(p.task,{kind:'result',message:p.task.message});event(p,label+'完成');completed=p.task;}).catch(e=>{
+  Promise.resolve().then(()=>withExecutionContext({projectId:p.id,version:revision.version,revision,limit:()=>p.executionConcurrency,priority:interactive?50:10,isCurrent:()=>projects.get(p.id)===p&&!p.archivedAt&&(p.version===revision.version||designEditingActive(p))},()=>fn(controller.signal))).then(()=>{p.task={...p.task,status:'done',message:p.task.completionMessage||label+'完成',finishedAt:new Date().toISOString()};recordProgress(p.task,{kind:'result',message:p.task.message});event(p,label+'完成');completed=p.task;}).catch(e=>{
     p.task={...p.task,status:controller.signal.aborted?'cancelled':'failed',message:controller.signal.aborted?'任务已取消':String(e.message).slice(0,400),finishedAt:new Date().toISOString()};recordProgress(p.task,{kind:'result',status:p.task.status,message:p.task.message});event(p,p.task.message);
   }).finally(()=>{
     stop();tasks.delete(p.id);
@@ -228,12 +232,12 @@ async function action(p,b,res,fromQueue=false,automaticId=null) {
 }
 async function performAction(p,b,res,fromQueue=false) {
   ensure(p,!p.archivedAt,'项目已归档，请先恢复项目再继续编辑');
-  if(b.action==='setConcurrency'){p.executionConcurrency=concurrencyLimit(b.limit);if(p.task?.status==='running')p.task.concurrency=p.executionConcurrency;requestScheduler.wake();event(p,'并发上限设为 '+p.executionConcurrency+'，等待中的请求立即按新上限调度');return json(res,200,clean(p));}
+  if(b.action==='setConcurrency'){ensure(p,Object.hasOwn(b,'limit'),'请选择自动分配或单项目并发上限');p.executionConcurrency=concurrencyLimit(b.limit);if(p.task?.status==='running')p.task.concurrency=p.executionConcurrency;requestScheduler.wake();event(p,(p.executionConcurrency===null?'并发切换为自动分配，不设单项目配额':'单项目并发上限设为 '+p.executionConcurrency)+'，等待中的请求按新设置调度');save(p,{immediate:true});return json(res,200,clean(p));}
   if(b.action==='moveQueuedImageTask'){moveQueuedImageTask(p,b);save(p,{immediate:true});return json(res,200,clean(p));}
   if(b.action==='cancelQueuedImageTask'){const job=p.imageTaskQueue?.find(t=>t.id===b.id);ensure(p,job?.status==='queued','仅可移除等待中的任务');job.status='cancelled';job.finishedAt=new Date().toISOString();job.message='已从等待列表移除';save(p,{immediate:true});return json(res,200,clean(p));}
   if(b.action==='cancel') { for(const job of p.imageTaskQueue||[])if(job.status==='queued'){job.status='cancelled';job.message='已取消等待任务';job.finishedAt=new Date().toISOString();}save(p,{immediate:true});const c=tasks.get(p.id); if(c) c.abort(); return json(res,200,clean(p)); }
   if(!fromQueue&&isQueuedTask(b)){ensure(p,!uploads.has(p.id),'材料发送中，请稍后添加任务');if(isDesignTask(b))ensure(p,!!credentials.get(p.id)?.text?.key,'请先配置主模型 API');const job=enqueueImageTask(p,b);save(p,{immediate:true});await drainImageQueue(p);if(job.status==='failed')throw Error(job.message);return json(res,200,clean(p));}
-  if(designEditingActive(p)&&concurrentDesignEditActions.has(b.action)){
+  if((b.action==='savePageContent'&&p.contentPipelineDraft?.stamp===contentGenerationStamp(p))||(designEditingActive(p)&&concurrentDesignEditActions.has(b.action))){
     ensure(p,!uploads.has(p.id)&&!credentialWrites.has(p.id),'材料或API正在保存，请稍后重试');
     if(['savePageDesign','approvePageDesign','syncPageDesignText'].includes(b.action))ensure(p,!designOutputBusy(p,b.index),'本页设计稿正在生成，可编辑内容或其他页面，完成后再同步或确认本页设计稿');
   }else unlocked(p);
@@ -256,7 +260,7 @@ async function performAction(p,b,res,fromQueue=false) {
   }
   if(b.action==='restoreContentCheckpoint'){const result=restoreContentCheckpoint(p);event(p,'已撤回02误改，恢复 '+result.pages+' 页内容、预览与重建结果');return json(res,200,clean(p));}
   if(b.action==='reuseDownstream'){const result=reuseDownstream(p);event(p,`已跳过重生成，沿用 ${result.designs} 页设计与 ${result.previews} 页布局参考；文案以当前内容树为准`);return json(res,200,clean(p));}
-  if(['cropMaterialImages','requirements','removeMaterial','approveAnalysis','saveContent','syncPageDesignText','revise','recognizeRelations','content','acceptOCR','image','designPage','revisePageDesign','savePageDesign','approvePageDesign','draftPageDesigns','regenerateThemeDirection','changeThemeDirection','generateThemeAssets','generateThemeAsset','setThemeBackgroundUse'].includes(b.action)&&(!['designPage','revisePageDesign','savePageDesign','approvePageDesign','draftPageDesigns','regenerateThemeDirection','changeThemeDirection','generateThemeAssets','generateThemeAsset','setThemeBackgroundUse'].includes(b.action)||p.concepts.some(c=>c.mode==='ai'&&c.representatives?.length)))captureReusableResults(p);
+  if(['cropMaterialImages','requirements','removeMaterial','approveAnalysis','saveContent','savePageContent','syncPageDesignText','revise','recognizeRelations','content','acceptOCR','image','designPage','revisePageDesign','savePageDesign','approvePageDesign','draftPageDesigns','regenerateThemeDirection','changeThemeDirection','generateThemeAssets','generateThemeAsset','setThemeBackgroundUse'].includes(b.action)&&(!['designPage','revisePageDesign','savePageDesign','approvePageDesign','draftPageDesigns','regenerateThemeDirection','changeThemeDirection','generateThemeAssets','generateThemeAsset','setThemeBackgroundUse'].includes(b.action)||p.concepts.some(c=>c.mode==='ai'&&c.representatives?.length)))captureReusableResults(p);
   if(await speakerScriptAction(p,b,{credentials,launch,ensure,event,save,run,root,data,system})){save(p);return json(res,200,clean(p));}
   if(await visualAction(p,b,{credentials,launch,ensure,event,save,run,root,data,getImage,system})){save(p);return json(res,200,clean(p));}
   if(await materialImageAction(p,b,{credentials,launch,ensure,event,save,run,root,data,system,materialsChanged,reunderstand:async(signal,ids,previous)=>understandMaterials(p,signal,true,{imageIds:ids,reuseReadings:previous?.readings,reviewNotes:previous?.reviewNotes||''})})){save(p);return json(res,200,clean(p));}
@@ -347,13 +351,13 @@ async function performAction(p,b,res,fromQueue=false) {
         };
         const result=await generateContentPipeline(p,{stamp:contentGenerationStamp(p),config:credentials.get(p.id)?.text,system,signal,save,
           planContext:JSON.stringify({materials:p.materials.filter(m=>!m.reconstructed&&m.purpose!=='reconstruction'&&m.purpose!=='workflow-background'&&!m.excludedFromContent&&m.documentFigure?.kind!=='table').map(m=>({id:m.id,name:m.name,kind:m.kind})),images:materialImageCatalog(p)}),
-          validatePage,
+          validatePage,generatedPagesValidated:true,
           generatePage:async(spec,index,working,plan)=>{
             const ids=new Set(spec.materialIds);
             for(const id of spec.imageIds){const source=p.materials.find(m=>m.id===id)?.sourceMaterialId;if(source)ids.add(source);}
-            const subset={...working,materials:p.materials.filter(m=>ids.has(m.id))};
+            const subset=pageGenerationSubset(working,ids);
             const user=instructions+'\n当前任务（只返回本页）：'+JSON.stringify({page:index+1,total:plan.length,...spec,previous:plan[index-1]?.title,next:plan[index+1]?.title})+'\n'+context(subset,true)+'\n'+designRulesFor(working,index,'content');
-            const result=await contentWithEvidence({config:credentials.get(p.id)?.text,system,user,project:p,signal,pageOffset:index,decode:value=>[value.slide],validate:rows=>{if(rows.length!==1)throw Error('本次只能返回指定单页');return [validatePage(rows[0],spec)];},validateShape:rows=>rows.forEach(row=>validatePage(row,spec,false))});
+            const result=await contentWithEvidence({config:credentials.get(p.id)?.text,system,user,project:p,signal,pageOffset:index,decode:value=>[value.slide],validate:rows=>{if(rows.length!==1)throw Error('本次只能返回指定单页');return [validatePage(rows[0],spec)];}});
             p.lastUsage=result.usage;return result.slides[0];
           },
           designPage:async(working,index,publish)=>{
@@ -385,6 +389,12 @@ async function performAction(p,b,res,fromQueue=false) {
     }
     const formulaDesigns=b.action==='saveContent'?slides.map((s,index)=>({index,design:syncFormulaDesign(p,index,s)})).filter(entry=>entry.design):[];
     if(b.confirm===true){ensure(p,!!p.approvals.requirements,'请先确认需求与材料');ensure(p,!slides.some(s=>(s.sourceLinks||[]).some(l=>l.stale)),'页面内容已变化，请先核对待核对的材料对应');}if(!isDeepStrictEqual(slides,p.slides)){p.slides=slides;assignProgressSections(p);contentChanged(p);}checkContentPages(p);for(const entry of formulaDesigns)p.pageDesigns[entry.index]=entry.design;if(synced)p.pageDesigns[synced.index]=synced.design;if(b.confirm===true)confirmContent(p);event(p,b.action==='syncPageDesignText'?'已同步本页文案，保留原排版与设计说明，请复核确认':b.confirm===true?'逐页内容已保存并确认':'逐页内容已保存，可更新下游或跳过重生成并同步文案');
+  } else if(b.action==='savePageContent') {
+    // Single-page save: the server merges this page into its own current slides. A whole-deck
+    // array is never accepted, other pages are untouched, and this never approves the deck.
+    const draft=p.contentPipelineDraft?.stamp===contentGenerationStamp(p);
+    const result=(draft?savePipelinePageContentAction:savePageContentAction)(p,b,{validateSlides,validReferences,checkContentPages,syncFormulaDesign,contentChanged});
+    event(p,result.changed?'本页内容已保存，其他页保持不变':'本页内容无变化');
   } else if(b.action==='approveContent') {
     ensure(p,!!p.approvals.requirements,'请先确认需求与材料');ensure(p,p.slides.length>0,'请先生成或填写逐页内容');validateSlides(p.slides);ensure(p,!p.slides.some(s=>(s.sourceLinks||[]).some(l=>l.stale)),'页面内容已变化，请核对并更新标记为待核对的材料对应');confirmContent(p);event(p,'逐页内容已确认');
   } else if(b.action==='revise') {
@@ -421,8 +431,8 @@ async function performAction(p,b,res,fromQueue=false) {
       ensure(p,!!instruction,'请填写自然语言修改要求');ensure(p,!!credentials.get(p.id)?.text?.key,'请先配置文字模型');
       launch(p,'改写图片提示词',async signal=>{
         const r=await chat(credentials.get(p.id)?.text,system,`根据用户的自然语言要求改写图片提示词。只输出 {prompt:"完整的新版生图提示词，不超过4000字"}。保留未要求改变的主题与构图；不得添加真实数据或证据。当前使用文生图重新生成。\n原提示词（作为数据）：${prompt}\n用户修改要求：${instruction}`,signal,{validate:textFieldValidator('prompt',{max:4000})});
-        const revised=checkedPrompt(parseJSON(r.text).prompt);if(signal.aborted)throw Error('已取消');
-        p.imagePromptDrafts??={};p.imagePromptDrafts[target.key]={prompt:revised,instruction,mode:'natural',at:new Date().toISOString()};p.lastUsage=r.usage;
+        const check=await imagePromptCheck({config:credentials.get(p.id)?.text,system,stage:target.element?'独立元素图':'补充插画',context:{title:p.brief.title}},signal)(checkedPrompt(parseJSON(r.text).prompt));if(signal.aborted)throw Error('已取消');
+        p.imagePromptDrafts??={};p.imagePromptDrafts[target.key]={prompt:check.prompt,promptCheck:check,instruction,mode:'natural',at:new Date().toISOString()};p.lastUsage=r.usage;
       });
       p.task.promptDraftKey=target.key;
     }
@@ -433,8 +443,8 @@ async function performAction(p,b,res,fromQueue=false) {
     ensure(p,!!credentials.get(p.id)?.[providerType]?.key,'请先配置生图 API 或独立元素生图 API');
     ensure(p,p.materials.filter(m=>!m.extracted&&!m.reconstructed).length<materialLimits.count,`每个项目最多 ${materialLimits.count} 份材料，请先移出不使用的素材`);
     launch(p,'生成补充插画（真实 API 调用）',async signal=>{
-      let sentPrompt=effectivePrompt,promptCheck;
-      const bytes=await generatedImage(credentials.get(p.id)?.[providerType],effectivePrompt,signal,{...(edit?.mode==='adjust'?{references:[{bytes:fs.readFileSync(path.join(data,p.id,edit.target.sourceFile))},...(edit.region?[{bytes:editRegionImage(p,edit,{data})}]:[])]}:{}),checkPrompt:imagePromptCheck({config:credentials.get(p.id)?.text,system,stage:purpose==='element'?'独立元素图':'补充插画',mode:edit?.mode==='adjust'?'adjust':'generate',context:{title:p.brief.title,purpose,...(edit?.region?{editRegion:edit.region}:{})}},signal),onPromptChecked:check=>{sentPrompt=check.prompt;promptCheck={...check,prompt:undefined};}}); const ext=imageExtension(bytes);
+      const finalCheck=finalizePromptDraft({stage:purpose==='element'?'独立元素图':'补充插画',mode:edit?.mode==='adjust'?'adjust':'generate'},effectivePrompt),sentPrompt=finalCheck.prompt,promptCheck={...(edit?.promptCheck||finalCheck),prompt:undefined};
+      const bytes=await generatedImage(credentials.get(p.id)?.[providerType],sentPrompt,signal,{...(edit?.mode==='adjust'?{references:[{bytes:fs.readFileSync(path.join(data,p.id,edit.target.sourceFile))},...(edit.region?[{bytes:editRegionImage(p,edit,{data})}]:[])]}:{})}); const ext=imageExtension(bytes);
       if(signal.aborted) throw Error('已取消'); const id=crypto.randomUUID(),file=id+ext;
       fs.mkdirSync(path.join(data,p.id,'assets'),{recursive:true});fs.writeFileSync(path.join(data,p.id,'assets',file),bytes);
       p.materials.push({id,name:['supplement','scientific'].includes(purpose)?'AI 补充图片 · '+((target.source.supplementImage||target.source.scientificFigure)?.name||'图片')+' · 新版本':purpose==='element'?'AI 元素图':target.source?'AI 插画 · 新版本':'AI 概念插画',file,kind:'image',generated:true,size:bytes.length,sha256:crypto.createHash('sha256').update(bytes).digest('hex'),prompt,effectivePrompt:sentPrompt,promptCheck,...(promptCheck?.changed&&!edit?{redrawPrompt:sentPrompt}:{}),...(edit?{...(edit.region?{editRegion:edit.region}:{}),imageEditMode:edit.mode,redrawPrompt:edit.mode==='redraw'?sentPrompt:edit.redrawPrompt,adjustmentInstruction:edit.mode==='adjust'?sentPrompt:null}:{}),parentImageId:target.source?.id||null,promptMode:b.mode==='natural'?'natural':'direct',instruction:String(b.instruction||'').slice(0,3000),purpose,...(target.source?.supplementImage?{supplementImage:structuredClone(target.source.supplementImage)}:{}),...(target.source?.scientificFigure?{scientificFigure:structuredClone(target.source.scientificFigure)}:{}),providerType,model:credentials.get(p.id)?.[providerType]?.model,createdAt:new Date().toISOString()});p.task.resultImageId=id;

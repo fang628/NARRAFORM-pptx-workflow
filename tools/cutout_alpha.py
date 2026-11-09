@@ -14,21 +14,10 @@ def prepare_chroma_cutout(image, artistic=False, expected_colour=None):
     chroma = np.linalg.norm(key-expected) < 45 if expected is not None else ((key[0] > 180 and key[2] > 180 and key[1] < 90) or (key[1] > 180 and key[0] < 90 and key[2] < 90))
     if not chroma or (np.linalg.norm(border-key, axis=1) < 35).mean() <= .97:
         raise ValueError('返回图未提供可靠的均匀纯色底，改用参考底图本地分离')
-    # Derive alpha and unmix RGB against the measured selected matte. Existing
-    # provider alpha does not prove that the solid background has been removed.
-    delta = rgb-key
-    opacity = np.max(np.where(delta >= 0, delta/np.maximum(255-key, 1), -delta/np.maximum(key, 1)), axis=2)
-    opacity = np.clip(opacity, 0, 1)
-    opacity[opacity < .025] = 0
-    opacity[opacity > .995] = 1
-    coverage = float((opacity > .05).mean())
-    if coverage < .002 or coverage > .85:
-        raise ValueError('纯色底分离后没有可靠的独立主体')
-    restored = np.clip((rgb-key*(1-opacity[:, :, None]))/np.maximum(opacity[:, :, None], .01), 0, 255)
-    rgba[:, :, :3] = restored.astype(np.uint8)
-    rgba[:, :, 3] = (opacity*255).astype(np.uint8)
+    from refined_matte import reference_matte
+    rgba, detail = reference_matte(rgb.astype(np.float32), np.broadcast_to(key, rgb.shape).astype(np.float32), artistic, uniform_matte=True)
     result, report = prepare_cutout(Image.fromarray(rgba), False)
-    report.update(mode='chroma-background-matte', matteColour=[int(v) for v in key])
+    report.update(detail, mode='chroma-background-matte', mattingMode=detail['mode'], matteColour=[int(v) for v in key])
     return result, report
 
 
@@ -50,22 +39,7 @@ def prepare_cutout(image, artistic=False):
         # Explicit chroma matte preserves white lettering and enclosed holes.
         chroma = (key[0]>180 and key[2]>180 and key[1]<90) or (key[1]>180 and key[0]<90 and key[2]<90)
         if chroma and (np.linalg.norm(border-key,axis=1)<35).mean()>.97:
-            # Estimate the minimum physically possible alpha against the known
-            # matte, then unmix it. A distance threshold makes pale stroke edges
-            # opaque too early and leaves a pink/green fringe on dark slides.
-            delta=rgb-key
-            opacity=np.max(np.where(delta>=0,delta/np.maximum(255-key,1),-delta/np.maximum(key,1)),axis=2)
-            opacity=np.clip(opacity,0,1)
-            opacity[opacity<.025]=0
-            opacity[opacity>.995]=1
-            coverage=float((opacity>.05).mean())
-            if coverage<.002 or coverage>.85:
-                raise ValueError('纯色底分离后没有可靠的独立主体')
-            restored=np.clip((rgb-key*(1-opacity[:,:,None]))/np.maximum(opacity[:,:,None],.01),0,255)
-            rgba[:,:,:3]=restored.astype(np.uint8)
-            alpha=(opacity*255).astype(np.uint8)
-            rgba[:,:,3]=alpha
-            mode='chroma-background-matte'
+            return prepare_chroma_cutout(Image.fromarray(rgba), artistic, ''.join(f'{int(v):02X}' for v in key))
         else:
             neutral = (border.max(axis=1) - border.min(axis=1) <= 24) & (border.min(axis=1) >= 205)
             if neutral.mean() < .97:

@@ -7,7 +7,7 @@ export function projectResultKey(project){
 }
 function viewKey(element){
   const contexts=['data-slide','data-node','data-page-design','data-theme-review','data-release-page'].map(attr=>[attr,element.closest('['+attr+']')?.getAttribute(attr)??null]);
-  const attributes=[...element.attributes].filter(a=>['id','name','type'].includes(a.name)||a.name.startsWith('data-')&&!['data-caption-node','data-single-saved'].includes(a.name)).map(a=>[a.name,a.value]);
+  const attributes=[...element.attributes].filter(a=>['id','name','type'].includes(a.name)||a.name.startsWith('data-')&&!['data-caption-node','data-single-saved','data-inline-bound'].includes(a.name)).map(a=>[a.name,a.value]);
   return JSON.stringify([element.tagName,contexts,attributes]);
 }
 function viewEntries(root,selector){
@@ -129,10 +129,11 @@ export function bindImageTaskSorting(root,{canSort,getTasks,onMove,onBusyChange=
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const states={queued:'等待中',running:'执行中',done:'已完成',failed:'失败',cancelled:'已取消',interrupted:'已中断',skipped:'已跳过'};
 const seconds=ms=>Math.max(0,Math.round(ms/1000))+' 秒';
+const requestBudgetLabel=task=>task.concurrency==null?'自动分配 · 无单项目限制':'请求并发上限 '+escape(task.concurrency);
 function queueView(task,entries,now){
   const jobs=task.jobs||[];if(!jobs.length)return '';
   const count=status=>jobs.filter(j=>j.status===status).length;
-  return `<section class="execution-queue"><div class="execution-queue-heading"><strong>任务队列</strong><span>请求并发上限 ${task.concurrency||3}</span></div><div class="execution-counts"><span>执行中 <b>${count('running')}</b></span><span>等待 <b>${count('queued')}</b></span><span>完成 <b>${count('done')}</b> / ${jobs.length}</span>${count('failed')?`<span>失败 <b>${count('failed')}</b></span>`:''}</div><div class="execution-jobs">${jobs.map(job=>{
+  return `<section class="execution-queue"><div class="execution-queue-heading"><strong>任务队列</strong><span>${requestBudgetLabel(task)}</span></div><div class="execution-counts"><span>执行中 <b>${count('running')}</b></span><span>等待 <b>${count('queued')}</b></span><span>完成 <b>${count('done')}</b> / ${jobs.length}</span>${count('failed')?`<span>失败 <b>${count('failed')}</b></span>`:''}</div><div class="execution-jobs">${jobs.map(job=>{
     const logs=job.entries||entries.filter(e=>e.jobId===job.id),latest=logs.at(-1),elapsed=job.status==='running'?seconds(now-Date.parse(job.at)):Number.isFinite(job.durationMs)?seconds(job.durationMs):'';
     return `<article class="execution-job" data-job-id="${escape(job.id)}" data-state="${escape(job.status)}"><div><strong>${escape(job.message)}</strong><span>${states[job.status]||escape(job.status)}</span><time>${elapsed}</time></div>${latest?`<p>${escape(latest.message)}</p>`:''}${logs.length?`<details ${job.status==='running'?'open':''}><summary>步骤与判断摘要 · ${logs.length}</summary>${logs.map(e=>`<p class="execution-job-log" data-state="${escape(e.status)}"><span>${e.kind==='summary'?'判断摘要':e.kind==='request'?'模型调用':'处理步骤'} · ${states[e.status]||escape(e.status)}</span>${escape(e.message)}</p>`).join('')}</details>`:''}</article>`;
   }).join('')}</div></section>`;
@@ -141,6 +142,6 @@ export function taskProgress(task,now=Date.now(),imageTasks=[],queueEnabled=fals
   if(!task)return imageQueueView(imageTasks,queueEnabled,sortEnabled)+'<p>尚无执行记录</p>';
   const elapsed=(task.finishedAt?Date.parse(task.finishedAt):task.status==='running'?now:NaN)-Date.parse(task.startedAt);
   const entries=task.progress?.length?task.progress:[{kind:'result',status:task.status,message:task.message,at:task.startedAt}];
-  const resources=task.scheduler?`<div class="execution-counts" aria-label="动态资源池"><span>模型请求 <b>${task.scheduler.active}</b></span><span>等待额度 <b>${task.scheduler.queued}</b></span>${(task.scheduler.pools||[]).map(pool=>`<span>${pool.kind==='image'?'生图':'理解/检查'} <b>${pool.active}/${pool.limit}</b>${pool.cooldownMs>0?' · 限流退避':''}</span>`).join('')}</div>`:'';
+  const resources=task.scheduler?`<div class="execution-counts" aria-label="动态资源池"><span>全服务请求 <b>${task.scheduler.active}/${task.scheduler.globalLimit??12}</b></span><span>等待额度 <b>${task.scheduler.queued}</b></span>${(task.scheduler.pools||[]).map(pool=>`<span>${pool.kind==='image'?'生图':'理解/检查'} <b>${pool.active}/${pool.limit}</b>${pool.cooldownMs>0?' · 限流退避':''}</span>`).join('')}</div>`:'';
   return imageQueueView(imageTasks,queueEnabled,sortEnabled)+`<div class="execution-status" data-state="${escape(task.status)}"><span>${escape(states[task.status]||task.status)}</span><strong>${escape(task.label)}</strong><time>${Number.isFinite(elapsed)?seconds(elapsed):''}</time></div>${task.priorStage?.status==='done'?`<p class="execution-prior-stage">✓ ${escape(task.priorStage.label)}已完成，当前任务基于已保存的理解结果执行。</p>`:''}${resources}${queueView(task,entries,now)}<ol class="execution-timeline">${entries.filter(e=>e.kind!=='job'&&!e.jobId).map((entry,i)=>`<li data-state="${escape(entry.status)}" class="execution-${escape(entry.kind)}"><div class="execution-meta"><span>${entry.kind==='summary'?'判断摘要':entry.kind==='request'?'模型调用':entry.kind==='result'?'执行结果':'处理步骤'} / ${String(i+1).padStart(2,'0')}</span><time>${Number.isFinite(entry.durationMs)?seconds(entry.durationMs):escape(new Date(entry.at).toLocaleTimeString('zh-CN',{hour12:false}))}</time></div><p>${escape(entry.message)}</p>${entry.status==='running'?'<span class="execution-wait">等待模型返回…</span>':''}</li>`).join('')}</ol>`;
 }

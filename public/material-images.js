@@ -20,8 +20,8 @@ export function extractionButtons(m,disabled=false){
   if(m.generated||m.reconstructed)return '';
   const manual=m.kind==='image'?`<button type="button" class="secondary" data-crop-material="${m.id}" ${disabled?'disabled':''}>手动裁切分离 ↗</button>`:'';
   if(m.extracted)return `<div class="image-extraction-actions">${manual}</div>`;
-  const local=/\.(pdf|docx|pptx)$/i.test(m.file),region=m.kind==='image'||/\.pdf$/i.test(m.file);
-  return `<div class="image-extraction-actions">${manual}${local?`<button type="button" class="secondary" data-extract-images="${m.id}" ${disabled?'disabled':''}>提取文档图片 ↗</button>`:''}${region?`<button type="button" class="secondary" data-separate-images="${m.id}" ${disabled?'disabled':''}>AI 识别分离 ↗</button>`:''}</div>`;
+  const region=m.kind==='image'||/\.pdf$/i.test(m.file);
+  return manual||region?`<div class="image-extraction-actions">${manual}${region?`<button type="button" class="secondary" data-separate-images="${m.id}" ${disabled?'disabled':''}>AI 识别分离 ↗</button>`:''}</div>`:'';
 }
 export function extractionReport(m){const r=m.imageExtraction;return !r?'':`<div class="image-extraction-report" role="status">已收录 ${r.total} 张 · 本次新增 ${r.added} 张${r.duplicates?' · 重复 '+r.duplicates+' 张':''}${r.warnings.map(w=>`<p>${h(w)}</p>`).join('')}</div>`;}
 export function imageLibrary(p,editor,running=false){

@@ -144,7 +144,10 @@ def difference_report(spec,out):
 def main():
     spec=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
     out=Path(sys.argv[2]);out.mkdir(parents=True,exist_ok=True)
-    result=geometry(spec,out) if spec['operation']=='geometry' else difference_report(spec,out)
+    if spec['operation']=='elements':
+        from element_quality import analyze
+        result=analyze(spec)
+    else:result=geometry(spec,out) if spec['operation']=='geometry' else difference_report(spec,out)
     (out/'analysis.json').write_text(json.dumps(result,ensure_ascii=False),encoding='utf-8')
     print(json.dumps(result,ensure_ascii=False))
 

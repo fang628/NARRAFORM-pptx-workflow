@@ -1,12 +1,13 @@
 // Shared, dependency-free inline text protocol for content tree, web preview and
 // PPTX export. Saved text is ordinary text plus lightweight, non-nested
-// <sup>…</sup> / <sub>…</sub> tags. Nothing else is interpreted: unknown tags and
-// incomplete tag-like text stay literal, so this is never an HTML execution path.
-// Common Unicode superscript/subscript characters (m², H₂O) stay literal and
-// readable; ordinary underscores, carets or exponents are never rewritten.
+// <sup>…</sup> / <sub>…</sub> tags and explicit inline LaTeX \(…\). Nothing else
+// is interpreted: unknown tags and incomplete tag-like text stay literal, so this
+// is never an HTML execution path.
+import {formulaLatex,isFormulaLatexLike} from './formula-content.js';
 export const inlineTextVersion=1;
 export const inlineScriptNames=['sup','sub'];
-export const inlineTextRule='段内上标/下标用轻量标记保存：上标 <sup>文字</sup>，下标 <sub>文字</sub>；只标记真正需要上标或下标的片段（单位平方立方、化学式、变量上下标、参考文献角标等），其余文字保持原样。标记不嵌套、不带属性、不成对时不要输出；不要用标记包裹整段文字，也不把普通下划线、乘方写法、普通数字或指数擅自转成上下标。材料中已有的 Unicode 上下标字符（如 m²、H₂O）按可读字符原样保留，不删除也不改写。独立公式仍使用 type=formula 的 LaTeX，不用上下标标记代替公式。';
+export const inlineMathRule='句内根式、分式、多层上下标等数学结构用行内LaTeX保存：只把公式本身写成 \\(...\\) 并与同一文本节点的普通文字混排，例如“增长率为 \\(\\sqrt{a^2+b^2}\\)”；不把整句变成公式，不虚构公式、变量或数值。简单单位平方/化学式仍优先用 <sup>…</sup> / <sub>…</sub>；普通货币符号、下划线、乘方写法或没有明确数学含义的 LaTeX 源串保持原样。独立公式仍用 type=formula 的 LaTeX，不用行内标记代替。';
+export const inlineTextRule='段内上标/下标用轻量标记保存：上标 <sup>文字</sup>，下标 <sub>文字</sub>；只标记真正需要上标或下标的片段（单位平方立方、化学式、变量上下标、参考文献角标等），其余文字保持原样。标记不嵌套、不带属性、不成对时不要输出；不要用标记包裹整段文字，也不把普通下划线、乘方写法、普通数字或指数擅自转成上下标。材料中已有的 Unicode 上下标字符（如 m²、H₂O）按可读字符原样保留，不删除也不改写。独立公式仍使用 type=formula 的 LaTeX，不用上下标标记代替公式。'+inlineMathRule;
 
 const escapeMap={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
 const escapeInlineText=value=>String(value??'').replace(/[&<>"']/g,char=>escapeMap[char]);
@@ -60,6 +61,42 @@ export function formatInlineRuns(runs){
   return (runs||[]).map(run=>run?.text?(run.script?`<${run.script}>${run.text}</${run.script}>`:run.text):'').join('');
 }
 
+// Inline LaTeX spans embedded in prose. Explicit \(...\) is always trusted math;
+// $...$ is math only when it carries a real math signal, so "$5 ... $10" and
+// ordinary underscores stay text. Invalid or unsafe LaTeX is left literal.
+export function inlineMathSegments(value){
+  const source=String(value??''),found=[];
+  const add=(start,end,body,delimiter)=>{
+    if(!body.trim())return;
+    try{const latex=formulaLatex(body);found.push({start,end,latex,delimiter});}catch{}
+  };
+  for(const match of source.matchAll(/\\\(([^\n]*?)\\\)/g))add(match.index,match.index+match[0].length,match[1],'paren');
+  for(const match of source.matchAll(/(?<![\\$])\$(?!\$)([^\n$]+?)\$(?!\$)/g))if(isFormulaLatexLike(match[1]))add(match.index,match.index+match[0].length,match[1],'dollar');
+  found.sort((a,b)=>a.start-b.start||b.end-a.end);
+  const segments=[];let end=0;
+  for(const segment of found){if(segment.start<end)continue;segments.push(segment);end=segment.end;}
+  return segments;
+}
+export function hasInlineMath(value){
+  return inlineMathSegments(value).length>0;
+}
+export function inlineMathMarkup(latex,{delimiter='paren'}={}){
+  const value=formulaLatex(latex);
+  return delimiter==='dollar'?'$'+value+'$':'\\('+value+'\\)';
+}
+// Split a plain text fragment into alternating text/math parts. The raw math
+// source is kept for callers that must not silently drop an unsupported context.
+export function splitInlineMath(value){
+  const source=String(value??''),segments=inlineMathSegments(source),parts=[];let at=0;
+  for(const segment of segments){
+    if(segment.start>at)parts.push({type:'text',text:source.slice(at,segment.start)});
+    parts.push({type:'math',latex:segment.latex,raw:source.slice(segment.start,segment.end),delimiter:segment.delimiter});
+    at=segment.end;
+  }
+  if(at<source.length)parts.push({type:'text',text:source.slice(at)});
+  return parts.length?parts:[{type:'text',text:source}];
+}
+
 // Canonical saved text: lower-case tags, no empty runs, otherwise unchanged.
 export function normalizeInlineText(value){
   return formatInlineRuns(parseInlineText(value).runs);
@@ -73,6 +110,18 @@ export function assertInlineText(value){
   if(danglingTagPattern.test(source.replace(scriptTagPattern,''))){
     throw Error('上下标标记格式无效：只能使用完整的 <sup>文字</sup> 或 <sub>文字</sub>，不能嵌套、添加属性或不闭合');
   }
+  const opens=(source.match(/\\\(/g)||[]).length,closes=(source.match(/\\\)/g)||[]).length;
+  if(opens!==closes)throw Error('行内公式标记格式无效：只能使用成对的 \\(...\\)');
+  for(const match of source.matchAll(/\\\(([^\n]*?)\\\)/g)){
+    let depth=0,balanced=true;
+    for(const [index,char] of [...match[1]].entries()){
+      if(char==='{'&&match[1][index-1]!=='\\')depth++;
+      else if(char==='}'&&match[1][index-1]!=='\\'&&--depth<0){balanced=false;break;}
+    }
+    if(!balanced||depth!==0)throw Error('行内公式无效：花括号未成对');
+    try{formulaLatex(match[1]);}
+    catch{throw Error('行内公式无效：请检查 \\(...\\) 中的LaTeX语法或不支持的命令');}
+  }
   return source;
 }
 
@@ -80,16 +129,26 @@ export function inlinePlainLength(value){
   return plainInlineText(value).length;
 }
 
-// Safe truncation by readable characters; a tag is never cut in half.
+// Safe truncation by readable characters; a tag or inline formula is never cut
+// in half. Math source is kept atomic and omitted rather than broken.
 export function truncateInlineText(value,max){
   const limit=Math.floor(Number(max));
   if(!Number.isFinite(limit)||limit<=0)return '';
   let remaining=limit;const runs=[];
   for(const run of parseInlineText(value).runs){
+    for(const part of splitInlineMath(run.text)){
+      if(remaining<=0)break;
+      if(part.type==='math'){
+        const raw=part.raw||'' , needed=Math.max(1,raw.length);
+        if(needed<=remaining){runs.push({text:raw,script:run.script});remaining-=needed;}
+        else{remaining=0;break;}
+      }else{
+        const text=[...part.text].slice(0,remaining).join('');
+        remaining-=text.length;
+        if(text)runs.push({...run,text});
+      }
+    }
     if(remaining<=0)break;
-    const text=[...run.text].slice(0,remaining).join('');
-    remaining-=text.length;
-    if(text)runs.push({...run,text});
   }
   return formatInlineRuns(runs);
 }
@@ -121,6 +180,39 @@ export function nativeInlineText(value){
     else merged.push({...run});
   }
   return merged.map(run=>({text:run.text,options:run.script==='sup'?{superscript:true}:run.script==='sub'?{subscript:true}:{}}));
+}
+
+// Native text + inline math parts for PPTX builders. Text runs keep the exact
+// sup/sub/Unicode behavior of nativeInlineText; math segments stay structured
+// until they are converted to OMML and replace their placeholder run.
+export function nativeInlineTextParts(value){
+  const source=String(value??'');
+  if(!hasInlineMath(source))return nativeInlineText(source);
+  const parts=[];
+  const pushText=(text,script)=>{
+    if(!text)return;
+    let buffer='';
+    const flush=()=>{if(buffer){parts.push({type:'text',text:buffer,script:script||null});buffer='';}};
+    for(const char of text){
+      const unicodeScript=unicodeScriptKind(char);
+      if(!script&&unicodeScript){flush();parts.push({type:'text',text:unicodeScriptText(char),script:unicodeScript});continue;}
+      buffer+=char;
+    }
+    flush();
+  };
+  for(const run of parseInlineText(source).runs){
+    for(const part of splitInlineMath(run.text)){
+      if(part.type==='math'&&!run.script)parts.push({type:'math',latex:part.latex});
+      else pushText(part.type==='math'?part.raw:part.text,run.script);
+    }
+  }
+  const merged=[];
+  for(const part of parts){
+    const previous=merged.at(-1);
+    if(part.type==='text'&&previous?.type==='text'&&previous.script===part.script)previous.text+=part.text;
+    else merged.push({...part});
+  }
+  return merged;
 }
 
 // Unicode compatibility for script characters kept as readable glyphs in saved text.

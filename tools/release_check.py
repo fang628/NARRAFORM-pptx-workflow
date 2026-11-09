@@ -1,5 +1,5 @@
 """Web release adapter: validate OOXML, exact native text, object inventory and hashes."""
-import json, sys, zipfile, hashlib, posixpath, re
+import json, sys, zipfile, hashlib, posixpath, re, io
 from collections import Counter
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -8,6 +8,56 @@ P='http://schemas.openxmlformats.org/presentationml/2006/main'
 A='http://schemas.openxmlformats.org/drawingml/2006/main'
 R='http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 M='http://schemas.openxmlformats.org/officeDocument/2006/math'
+A14='http://schemas.microsoft.com/office/drawing/2010/main'
+MC='http://schemas.openxmlformats.org/markup-compatibility/2006'
+
+def effective_xml(data):
+    """Inspect the Office 2010+ active branch, never count its fallback twice."""
+    # iterparse returns (event, (prefix, URI)); retain document-local aliases.
+    namespaces={prefix:uri for _,(prefix,uri) in ET.iterparse(io.BytesIO(data),events=('start-ns',))}
+    supported={A14,A,P,M,R,'http://schemas.microsoft.com/office/powerpoint/2010/main'}
+    root=ET.fromstring(data)
+    def resolve(parent):
+        for child in list(parent):
+            if child.tag!=f'{{{MC}}}AlternateContent':
+                resolve(child)
+                continue
+            choice=next((branch for branch in child.findall(f'{{{MC}}}Choice')
+                         if branch.get('Requires') and all(namespaces.get(prefix) in supported for prefix in branch.get('Requires').split())),None)
+            if choice is None:choice=child.find(f'{{{MC}}}Fallback')
+            if choice is None:raise ValueError('Unsupported AlternateContent without fallback')
+            resolve(choice)
+            position=list(parent).index(child)
+            for offset,node in enumerate(list(choice)):parent.insert(position+offset,node)
+            parent.remove(child)
+    resolve(root)
+    return root
+
+def original_shape_name(shape):
+    node=shape.find(f'.//{{{P}}}cNvPr')
+    name=node.get('name','') if node is not None else ''
+    return re.sub(r'^!!nf-page-\d+--','',name)
+# Saved prose may embed inline math as \(...\). Native PPTX stores that part as
+# a14:m/m:oMath next to the ordinary runs, so text comparison removes the saved
+# math marker here and the inline math signature is checked separately.
+INLINE_MATH_PATTERN=re.compile(r'\\\((.+?)\\\)',re.S)
+INLINE_DOLLAR_PATTERN=re.compile(r'(?<![\\$])\$(?!\$)([^\n$]+?)\$(?!\$)')
+INLINE_MATH_SIGNAL=re.compile(r'\\[a-zA-Z]+|[\^_{}]|√|(?:[A-Za-z0-9)\]]\s*[=<>+\-*/×÷±≤≥≠≈]\s*[A-Za-z0-9(\[])')
+def inline_math_latex(text):
+    source=str(text);found=[]
+    for match in INLINE_MATH_PATTERN.finditer(source):found.append((match.start(),match.end(),match.group(1)))
+    for match in INLINE_DOLLAR_PATTERN.finditer(source):
+        body=match.group(1)
+        if INLINE_MATH_SIGNAL.search(body):found.append((match.start(),match.end(),body))
+    found.sort()
+    return [latex for _,_,latex in found]
+def strip_inline_math(text):
+    source=str(text);spans=[]
+    for match in INLINE_MATH_PATTERN.finditer(source):spans.append((match.start(),match.end()))
+    for match in INLINE_DOLLAR_PATTERN.finditer(source):
+        if INLINE_MATH_SIGNAL.search(match.group(1)):spans.append((match.start(),match.end()))
+    for start,end in sorted(spans,reverse=True):source=source[:start]+source[end:]
+    return source
 # Saved text may carry lightweight sup/sub markup; native PPTX stores the same
 # content as runs with positive/negative baseline. Compare readable text only:
 # strip the markup, then map exactly the Unicode superscript/subscript characters
@@ -32,7 +82,7 @@ def check(deck, spec, pages=None, baseline=None):
     with zipfile.ZipFile(deck) as z:
         names=z.namelist()
         if z.testzip() or len(names)!=len(set(names)): errors.append('ZIP integrity failure')
-        xml={n:ET.fromstring(z.read(n)) for n in names if n.endswith(('.xml','.rels'))}
+        xml={n:effective_xml(z.read(n)) for n in names if n.endswith(('.xml','.rels'))}
         for n,r in xml.items():
             if not n.endswith('.rels'): continue
             base=posixpath.dirname(posixpath.dirname(n)) if n!='_rels/.rels' else ''
@@ -51,10 +101,12 @@ def check(deck, spec, pages=None, baseline=None):
                 audits.append(baseline['slides'][i]);continue
             r=xml.get(f'ppt/slides/slide{i+1}.xml')
             if r is None:errors.append('Missing slide');continue
-            expected=Counter(e['text'] for e in elements if e['type']=='text')
-            actual=Counter(''.join(s.itertext()) for s in r.findall(f'.//{{{P}}}sp/{{{P}}}txBody/{{{A}}}p/{{{A}}}r/{{{A}}}t'))
-            # Multi-line text can contain separate runs; compare each native text shape.
-            actual=Counter(''.join(t.text or '' for t in s.findall(f'.//{{{A}}}t')) for s in r.findall(f'.//{{{P}}}sp') if s.find(f'{{{P}}}txBody') is not None and s.find(f'.//{{{M}}}oMath') is None)
+            text_elements=[e for e in elements if e['type']=='text']
+            expected=Counter(strip_inline_math(e['text']) for e in text_elements)
+            # Multi-line text can contain separate runs; compare each native text
+            # shape. Standalone formulas use oMathPara and carry no sentence text.
+            text_shapes=[s for s in r.findall(f'.//{{{P}}}sp') if s.find(f'{{{P}}}txBody') is not None and s.find(f'.//{{{M}}}oMathPara') is None]
+            actual=Counter(''.join(t.text or '' for t in s.findall(f'.//{{{A}}}r/{{{A}}}t')) for s in text_shapes)
             def normalize(counts):
                 # Runs may split on sup/sub and carry ± baseline; readable text is the
                 # same, so compare plain text after stripping light tags and folding
@@ -64,19 +116,31 @@ def check(deck, spec, pages=None, baseline=None):
                     normalized[plain_inline(text).replace('\n','').replace('\r','')]+=count
                 return normalized
             if normalize(expected)!=normalize(actual):errors.append(f'S{i+1}: exact native text mismatch')
+            def signature(math):
+                import unicodedata
+                text=unicodedata.normalize('NFKC',''.join(t.text or '' for t in math.findall(f'.//{{{M}}}t'))).replace(' ','')
+                constructors=Counter(e.tag for e in math.iter() if e.tag.rsplit('}',1)[-1] in ('f','rad','sSup','sSub','sSubSup','nary','m','d','limLow','limUpp'))
+                return text,constructors
             formulas=[e for e in elements if e['type']=='formula']
-            math_shapes=[s for s in r.findall(f'.//{{{P}}}sp') if s.find(f'.//{{{M}}}oMath') is not None]
+            math_shapes=[s for s in r.findall(f'.//{{{P}}}sp') if s.find(f'.//{{{M}}}oMathPara') is not None]
             if len(math_shapes)!=len(formulas):errors.append(f'S{i+1}: native formula count mismatch')
             if formulas:
                 from formula_omml import convert
-                import unicodedata
-                def signature(math):
-                    text=unicodedata.normalize('NFKC',''.join(t.text or '' for t in math.findall(f'.//{{{M}}}t'))).replace(' ','')
-                    constructors=Counter(e.tag for e in math.iter() if e.tag.rsplit('}',1)[-1] in ('f','rad','sSup','sSub','sSubSup','nary','m','d','limLow','limUpp'))
-                    return text,constructors
                 for equation in formulas:
-                    shape=next((s for s in math_shapes if s.find(f'.//{{{P}}}cNvPr').get('name')==equation['key']),None)
+                    shape=next((s for s in math_shapes if original_shape_name(s)==equation['key']),None)
                     if shape is None or signature(shape.find(f'.//{{{M}}}oMath'))!=signature(ET.fromstring(convert(equation['latex']))):errors.append(f'S{i+1}: native formula mismatch '+equation['key'])
+            expected_inline=[latex for e in text_elements for latex in inline_math_latex(e['text'])]
+            if expected_inline:
+                from formula_omml import convert
+                actual_inline=[]
+                for shape in text_shapes:
+                    for wrapper in shape.findall(f'.//{{{A14}}}m'):
+                        math=wrapper.find(f'{{{M}}}oMath')
+                        if math is not None:actual_inline.append(math)
+                if len(actual_inline)!=len(expected_inline):errors.append(f'S{i+1}: inline math count mismatch')
+                else:
+                    for latex,math in zip(expected_inline,actual_inline):
+                        if signature(math)!=signature(ET.fromstring(convert(latex))):errors.append(f'S{i+1}: inline math mismatch '+latex[:60])
             tree=r.find(f'{{{P}}}cSld/{{{P}}}spTree')
             objects=[s for s in tree if s.tag in {f'{{{P}}}sp',f'{{{P}}}pic',f'{{{P}}}cxnSp',f'{{{P}}}graphicFrame'}]
             if len(objects)!=len(elements):errors.append(f'S{i+1}: object inventory mismatch')
