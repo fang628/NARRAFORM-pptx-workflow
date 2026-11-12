@@ -40,9 +40,10 @@ import numpy as np
 sys.path.insert(0, __file__.rsplit('\\', 1)[0] if '\\' in __file__ else __file__.rsplit('/', 1)[0])
 from shape_reference import image, seed_polygon, hex_color
 from shape_paint import fit_shape_paint
+from native_effects import detect_native_effects,without_soft_exterior
 
 SCENE = (1600, 900)
-PAINT_TYPES = ('shape', 'rect', 'ellipse')
+PAINT_TYPES = ('shape', 'rect', 'ellipse','line')
 MASK_SUPPORT = 8
 ALPHA_EPS = 1e-6
 
@@ -170,7 +171,7 @@ def main():
     ref = image(spec['reference'], SCENE)
     page_height, page_width = ref.shape[:2]
     page_background = image(spec['background'], SCENE) if spec.get('background') else None
-    elements = [element for element in (spec.get('elements') or []) if isinstance(element, dict)]
+    elements = [{**element,'_verticalGradientOnly':True} for element in (spec.get('elements') or []) if isinstance(element, dict)]
     target_keys = spec.get('targetKeys')
     target_set = set(target_keys) if target_keys is not None else None
 
@@ -236,6 +237,10 @@ def main():
                             'frontBoxes': len(front_boxes)}}
         row = {'key': key}
         polygon = seed_polygon(element)
+        if element.get('type')=='line':
+            lower=_load_rgb(underlays.get(key),(page_height,page_width)) if underlays.get(key) else None
+            props,evidence=detect_native_effects(ref,element,lower,front_alpha,list(exclude_global)+list(front_boxes),own_alpha)
+            return {'key':key,'status':'fitted' if props else 'kept','properties':{**props,'nativeEffectEvidence':evidence},'diagnostics':{'effects':evidence}}
         if not polygon:
             row.update({'status': 'unsupported', 'reason': 'no-seed-polygon', 'properties': {},
                         'paintKeys': [], 'confidence': None, 'diagnostics': detail,
@@ -243,6 +248,9 @@ def main():
                         'reasons': ['no-seed-polygon']})
             return row
         contour = np.rint(np.asarray(polygon, float)).astype(np.int32).reshape(-1, 1, 2)
+        if own_alpha is not None and not element.get('glow') and not element.get('shadow') and float(element.get('opacity',1))*float(element.get('fillOpacity',1))>=.98:
+            rendered_contours=cv2.findContours((own_alpha>=128).astype(np.uint8),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)[0]
+            if rendered_contours:contour=max(rendered_contours,key=cv2.contourArea)
 
         fill_translucent, stroke_translucent = element_translucency(element)
         underlay = None
@@ -266,8 +274,12 @@ def main():
             detail['stroke']['skippedReason'] = 'underlay-missing-for-translucent-stroke'
             fit_element = {**element, 'colorOpacity': 0}
 
+        effects,effect_evidence=detect_native_effects(ref,element,underlay if underlay_source=='underlay' else None,
+                                                     front_alpha,list(exclude_global)+list(front_boxes),own_alpha)
+        clean_reference=without_soft_exterior(ref,element,underlay,effects,own_alpha)
+
         try:
-            paint = fit_shape_paint(ref, contour, fit_element,
+            paint = fit_shape_paint(clean_reference, contour, fit_element,
                                     list(exclude_global) + list(front_boxes), front_alpha,
                                     diagnostics=detail, background=underlay,
                                     visible_alpha=own_alpha)
@@ -321,10 +333,17 @@ def main():
             if color and 'color' not in properties:
                 properties['color'] = color
                 properties['strokeGradient'] = None
+        properties.update(effects)
+        properties['nativeEffectEvidence']=effect_evidence
+        detail['effects']=effect_evidence
+        effective_glow=effects.get('glow',element.get('glow'))
+        effective_shadow=effects.get('shadow',element.get('shadow'))
+        if effective_shadow and not effective_glow:
+            properties.update(strokeWidth=0,strokeGradient=None,colorOpacity=0)
         # Independent ridge evidence (normal-profile median colour) must agree with the fitted
         # stroke gradient. A fit that drifts to the dark fill/background while the actual rim is
         # bright is not a stroke measurement; keep the audited stroke parameters instead.
-        if 'strokeGradient' in properties and isinstance(outline, dict) and outline.get('color'):
+        if properties.get('strokeGradient') and isinstance(outline, dict) and outline.get('color'):
             ridge_color = paint_color(outline['color'])
             fitted_stops = [paint_color(stop.get('color')) for stop in properties['strokeGradient'].get('stops') or []
                             if isinstance(stop, dict)]
@@ -376,7 +395,7 @@ def main():
         if isinstance(detail.get('stroke'), dict) and detail['stroke'].get('consistencyRejected'):
             reasons.append('stroke:inconsistent-with-ridge')
 
-        measured_paint = any(properties.get(name) is not None for name in ('fill', 'gradient', 'strokeGradient', 'color'))
+        measured_paint = any(properties.get(name) is not None for name in ('fill', 'gradient', 'strokeGradient', 'color','glow','shadow'))
         if detail.get('underlayMissing') and not measured_paint:
             status = 'uncertain-kept'
         elif measured_paint:

@@ -256,6 +256,7 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
     if int(limit.get('sharedInstances',1))>=2 and len(pixels)>=1000:
         max_knots=min(5,max(max_knots,int(limit.get('maxStops',max_knots))))
     def evaluate(kind,angle=0,center=(.5,.5),knots=None):
+        if element.get('_verticalGradientOnly') and (kind!='linear' or abs(angle-90)>.001):return None
         if over_budget():return None
         state['evaluated']+=1
         t=np.asarray(paint_coordinate(kind,xx,yy,element,angle,center),float)
@@ -302,6 +303,9 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
     current_kind=current.get('type') if isinstance(current,dict) and current.get('type') in GRADIENT_KINDS else None
 
     def coarse_kind(paint_kind,near_current):
+        if element.get('_verticalGradientOnly'):
+            if paint_kind=='linear':coarse('linear',90)
+            return
         if paint_kind=='linear':
             if near_current and isinstance(current,dict) and current.get('type')=='linear':
                 base=float(current.get('angle',0) or 0)
@@ -321,6 +325,7 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
             for y in (.05,.3,.5,.7,.95):coarse(paint_kind,center=(x,y))
 
     def refine(kinds,fine=False):
+        if element.get('_verticalGradientOnly'):return
         # Retain several direction/focus hypotheses: an early coarse winner can be
         # a reversed or displaced approximate solution with compensating colours.
         for first in [seed for kind in kinds for seed in geometry_seeds(kind,2 if fine else 3)]:

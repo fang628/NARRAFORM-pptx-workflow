@@ -630,9 +630,30 @@ def _quad_slant_from_properties(properties):
             return None
         if not np.isfinite(angle):
             return None
-        return {'family': 'parallelogram', 'angle': max(5.0, min(85.0, angle)),
-                'sign': -1 if geometry.get('slantSign') == -1 else 1}
+        width, height = float(properties['w']), float(properties['h'])
+        depth = min(.49, height / math.tan(math.radians(max(5., min(85., angle)))) / width)
+        return {'family': 'parallelogram', 'angle': math.degrees(math.atan2(height, depth * width)),
+                'sign': 1 if geometry.get('slantSign') == -1 else -1}
     if shape not in ('trapezoid', 'freeform'):
+        return None
+    commands=(properties.get('customGeometry') or {}).get('commands')
+    if commands:
+        # Rounded parallelograms retain their corner curves. Long straight side
+        # segments, not the curve control handles, define the slope evidence.
+        sides=[];current=first=None
+        for command in commands:
+            op=command.get('op');points=command.get('points') or []
+            end=points[-1] if points else first if op=='Z' else None
+            if op in ('L','Z') and current is not None and end is not None:
+                dx=(end[0]-current[0])*properties['w'];dy=(end[1]-current[1])*properties['h']
+                angle=math.degrees(math.atan2(abs(dy),abs(dx)))
+                if abs(dy)>=properties['h']*.5 and 5<=angle<=85:
+                    sides.append({'angle':angle,'sign':1 if dx*dy>0 else -1})
+            if op=='M':first=end
+            if end is not None:current=end
+        if len(sides)==2 and sides[0]['sign']==sides[1]['sign'] and abs(sides[0]['angle']-sides[1]['angle'])<=.75:
+            return {'family':'parallelogram','angle':sum(s['angle'] for s in sides)/2,
+                    'sign':sides[0]['sign'],'parallelCommands':True}
         return None
     if shape == 'trapezoid' and not properties.get('customGeometry'):
         points = prototype(properties, [properties[k] for k in ('x','y','w','h')], 'quad')
@@ -665,6 +686,10 @@ def _quad_slant_from_properties(properties):
     if len(slanted)==2 and slanted[0]['sign']!=slanted[1]['sign'] and abs(slanted[0]['angle']-slanted[1]['angle'])<=.75:
         return {'family':'trapezoid','angle':sum(side['angle'] for side in slanted)/2,
                 'sign':0,'symmetric':True,'points':points}
+    if len(slanted)==2 and slanted[0]['sign']==slanted[1]['sign'] and abs(slanted[0]['angle']-slanted[1]['angle'])<=.75:
+        return {'family':'parallelogram','angle':sum(side['angle'] for side in slanted)/2,
+                'sign':slanted[0]['sign'],'points':points,'parallelCustom':True,
+                'sideIndices':[side['index'] for side in slanted]}
     if len(slanted) != 1:
         return None
     side = slanted[0]
@@ -689,6 +714,9 @@ def _quad_polygon(properties):
     width, height = float(properties.get('w', 0) or 0), float(properties.get('h', 0) or 0)
     if width <= 0 or height <= 0:
         return None
+    if (properties.get('customGeometry') or {}).get('commands'):
+        points=seed_polygon(properties)
+        return np.asarray(points,float) if points else None
     if properties.get('shape') == 'trapezoid' and not properties.get('customGeometry'):
         return prototype(properties,[x,y,width,height],'quad')
     shape = str(properties.get('shape') or '').lower()
@@ -763,8 +791,37 @@ def _merged_slant_properties(row, descriptor, angle):
         depth = float(properties.get('h', 0) or 0) / math.tan(math.radians(target)) / max(1e-6, float(properties.get('w', 0) or 0))
         if depth < .005 or depth > .49:
             return None
+        if descriptor.get('parallelCommands'):
+            old=descriptor['sign']/math.tan(math.radians(descriptor['angle']))
+            new=descriptor['sign']/math.tan(math.radians(target))
+            delta=(new-old)*properties['h']/properties['w']
+            commands=[]
+            for command in properties['customGeometry']['commands']:
+                points=[]
+                for x,y in command.get('points') or []:
+                    # For each side keep its outermost endpoint fixed. Every
+                    # curve handle receives the same side shear as its anchors.
+                    pivot=(0 if x>=.5 else 1) if descriptor['sign']<0 else (1 if x>=.5 else 0)
+                    xx=x+delta*(y-pivot)
+                    if xx<-.00001 or xx>1.00001:return None
+                    points.append([round(min(1,max(0,xx)),6),y])
+                commands.append({**command,'points':points})
+            properties['customGeometry']={**properties['customGeometry'],'commands':commands}
+            return properties
+        if descriptor.get('parallelCustom'):
+            points=np.asarray(descriptor['points'],float).copy()
+            for index in descriptor['sideIndices']:
+                first,second=index,(index+1)%4
+                upper,lower=(first,second) if points[first,1]<points[second,1] else (second,first)
+                dx=descriptor['sign']*abs(points[lower,1]-points[upper,1])*depth
+                if min(abs(points[upper,0]),abs(points[upper,0]-1))<.02:
+                    points[lower,0]=points[upper,0]+dx
+                else:points[upper,0]=points[lower,0]-dx
+            if np.any(points[:,0]<0) or np.any(points[:,0]>1):return None
+            properties['customGeometry']={'points':np.round(points,5).tolist(),'closed':True}
+            return properties
         properties['shapeGeometry'] = {**(properties.get('shapeGeometry') or {}),'slantAngle': round(target, 1),
-                                       'slantSign': descriptor['sign']}
+                                       'slantSign': -descriptor['sign']}
         return properties
     if family == 'trapezoid':
         target = max(5.0, min(85.0, angle))
@@ -823,7 +880,7 @@ _VALID_FIELD = None
 
 
 def merge_measured_slant_groups(results, distance, valid, target_keys, originals=None):
-    """Bounded S3 measured-slant joint fit. Only near slopes of the same family/direction merge;
+    """Bounded S3 measured-slant joint fit. Near screen-space slopes share direction across families;
     positions, widths/heights (quads), line midpoints/lengths, corners and colors stay untouched."""
     global _DISTANCE_FIELD, _VALID_FIELD
     _DISTANCE_FIELD, _VALID_FIELD = distance, valid
@@ -838,20 +895,22 @@ def merge_measured_slant_groups(results, distance, valid, target_keys, originals
         if any(r.get('parameter')=='slant' for r in original.get('recognitionRejections',[])):continue
         if row.get('status')=='retained':
             metric=row.get('metrics') or {}
+            if row.get('family')=='line' and not metric:
+                metric=_row_boundary_metric({'family':'line','properties':original}) or {}
             if metric.get('support',0)<.85 or metric.get('p95',99)>2.5:continue
             row['properties']={key:value for key,value in original.items() if key in (
                 'x','y','w','h','type','shape','shapeGeometry','customGeometry','flipH','flipV','rotate','adjustments')}
         descriptor = _measured_slant(row)
         if descriptor:
             candidates.append((row, descriptor))
-    candidates.sort(key=lambda item: (item[1]['family'], item[1]['sign'], item[1]['angle'],
+    candidates.sort(key=lambda item: (item[1]['sign'], item[1]['angle'],
                                      str(item[0].get('key'))))
     scopes={}
     for row,descriptor in candidates:
         original=originals.get(row['key'],{})
         label=(original.get('parameterGroups') or {}).get('slant')
-        scope=(descriptor['family'],descriptor['sign'],'explicit' if label else 'local',
-               label or original.get('role') or original.get('frameKind') or '')
+        scope=(descriptor['family'] if descriptor['sign']==0 else 'edge',descriptor['sign'],
+               'explicit' if label else 'local',label or '')
         scopes.setdefault(scope,[]).append((row,descriptor))
     groups=[]
     for scope,members in scopes.items():
@@ -906,7 +965,8 @@ def merge_measured_slant_groups(results, distance, valid, target_keys, originals
         # Only near-noise changes or a clear boundary improvement are applied.
         if spread > .75 and old_cost - new_cost < .15:
             continue
-        family = group[0][1]['family']
+        families={d['family'] for _,d in group}
+        family = next(iter(families)) if len(families)==1 else 'mixed'
         evidence = {'group': 'slant-%s-%s-%d-%d' % (family, 'neg' if group[0][1]['sign'] < 0
                                                 else 'pos' if group[0][1]['sign'] > 0 else 'axis',
                                                 round(representative * 10),group_index),
@@ -951,6 +1011,11 @@ def main():
                 continue
             results.append({'key':proposal['key'],'status':'accepted','family':'line','properties':properties,
                             'metrics':{'p95':proposal.get('medianResidual'),'support':proposal.get('support')}})
+        proposed={row['key'] for row in results}
+        # A line already agreeing with the reference still supplies boundary
+        # evidence to a shared slope; the joint validator decides whether to keep it.
+        results.extend({'key':key,'status':'retained','family':'line','properties':{}}
+                       for key in sorted(line_keys-proposed))
     for e in spec.get('elements', []):
         if e.get('key') in keys and e.get('type')!='line':
             try:

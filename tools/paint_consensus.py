@@ -169,7 +169,7 @@ def merge_whole(elements, samples, records):
             xs.extend((evidence['xx']-element['x'])/element['w']*width)
             ys.extend((evidence['yy']-element['y'])/element['h']*height)
         pixels, xs, ys = np.asarray(pixels), np.asarray(xs), np.asarray(ys)
-        template = {'x': 0, 'y': 0, 'w': width, 'h': height}
+        template = {'x': 0, 'y': 0, 'w': width, 'h': height,'_verticalGradientOnly':any(e.get('_verticalGradientOnly') for e in members)}
         # Translucent groups need independent underlays/alpha evidence; node-only sharing handles them.
         if any(e.get('opacity',1)*e.get('fillOpacity',1)<.98 or any(s.get('opacity',1)<.98 for s in (e.get('gradient') or {}).get('stops',[])) for e in members):
             continue
