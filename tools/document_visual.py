@@ -184,7 +184,7 @@ def main():
         with pymupdf.open(source) as doc:
             if doc.needs_pass:
                 raise ValueError('PDF 已加密，请先解锁')
-            for i in range(min(len(doc), 100)):
+            for i in range(min(len(doc), 1000)):
                 page = doc[i]
                 file = target/('S%02d.png' % (i+1))
                 # Cached pages for this exact source hash are never rendered twice.

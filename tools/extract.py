@@ -1,7 +1,7 @@
 """Extract source text and safe, offset-addressed typography (no executable HTML)."""
 import sys, json, pathlib, zipfile, re, contextlib, xml.etree.ElementTree as ET
 
-LIMIT = 120000
+LIMIT = 2_000_000
 W = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
 M = '{http://schemas.openxmlformats.org/officeDocument/2006/math}'
 
@@ -384,6 +384,8 @@ if __name__ == '__main__':
     try:
         with contextlib.redirect_stdout(sys.stderr):
             result = extract(pathlib.Path(sys.argv[1]))
+        result['extractionVersion'] = 2
+        result['sourceLimit'] = LIMIT
         if len(sys.argv)>2:
             # Existing projects keep canonical evidence text and all old offsets.
             import difflib

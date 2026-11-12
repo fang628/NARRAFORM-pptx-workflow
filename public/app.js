@@ -34,7 +34,8 @@ let selectionSummary=null,collectingMaterials=false,titlePageOptionAvailable=fal
 let archivePending=false,designBatchPending=false,materialDeletionPending=false;
 let renderedResultKey='',projectRequestRevision=0,activeTaskOrigin=null,liveDraftRecovery=[];
 let deleteArchiveTarget=null,deleteArchivePending=false;
-let sendQueue=[],materialDraft='',sending=false,treeUndo=null,readerMaterialId=null;
+let sendQueue=[],materialDraft=null,sending=false,treeUndo=null,readerMaterialId=null;
+const materialPromptDirty=()=>materialDraft!==null&&materialDraft!==(p?.materialInstruction||'');
 const documentRequests=new Map();let readerRevision=0;
 async function loadDocumentFormat(m){
   if(!p?.documentFormatEnabled||m.richText||m.documentView||!m.file?.match(/\.(docx|pdf|md)$/i))return false;
@@ -170,7 +171,7 @@ function render({keepView=false}={}){
 }
 async function refreshProjects(){const [list,archived]=await Promise.all([api('/api/projects'),api('/api/projects?archived=true')]);$('#projects').innerHTML='<option value="">选择项目</option>'+list.map(x=>`<option value="${x.id}" ${x.id===p?.id?'selected':''}>${h(x.demo?'[示例] '+x.title:x.title)}</option>`).join('');$('#archiveCount').textContent=archived.length;$('#projectArchiveList').innerHTML=archived.length?archived.map(x=>`<article class="archived-project"><div><h3>${h(x.demo?'[示例] '+x.title:x.title)}</h3><p>${x.pages} 页 · ${x.materials} 份材料 · ${h(new Date(x.archivedAt).toLocaleDateString('zh-CN'))} 归档</p></div><div class="archived-project-actions"><button type="button" class="secondary" data-restore-project="${h(x.id)}">恢复项目 ↗</button><button type="button" class="text-button archive-delete" data-delete-project="${h(x.id)}" data-project-title="${h(x.title)}" aria-label="删除归档项目：${h(x.title)}">删除</button></div></article>`).join(''):'<div class="archive-empty">暂无归档项目</div>';syncArchiveButton();}
 function syncArchiveButton(){const button=$('#archiveProject');button.disabled=!p||busy()||sending||collectingMaterials||archivePending||designBatchPending;button.title=busy()?'任务执行中，请完成或取消后归档':'归档后可在「已归档」中恢复';}
-async function load(id){$('#supplementImageDialog').close();$('#supplementImageForm').reset();delete $('#supplementImageDialog').dataset.projectId;rebuildRegionEditor.close();projectRequestRevision++;activeTaskOrigin=null;aiImageEditor.close();materialCropEditor.close();$('#addImageTaskDialog').close();$('#themePromptReviewDialog').close();$('#themeAssetPromptDialog').close();$('#themeDirectionDialog').close();themeAssetEdit=null;themeDirectionEdit=null;$('#materialImageDialog').close();$('#materialReader').close();$('#imagePromptDialog').close();$('#sourceDialog').close();sendQueue=[];selectionSummary=null;materialDraft='';p=await api('/api/projects/'+id);if(p.archivedAt){p=null;throw Error('此项目已归档，请在「已归档」中恢复');}localStorage.setItem('ppt-agent-project',id);tab=p.stage>=6?4:p.stage>=5?3:p.stage>=4?2:p.stage>=1?1:0;render();await refreshProjects();}
+async function load(id){$('#supplementImageDialog').close();$('#supplementImageForm').reset();delete $('#supplementImageDialog').dataset.projectId;rebuildRegionEditor.close();projectRequestRevision++;activeTaskOrigin=null;aiImageEditor.close();materialCropEditor.close();$('#addImageTaskDialog').close();$('#themePromptReviewDialog').close();$('#themeAssetPromptDialog').close();$('#themeDirectionDialog').close();themeAssetEdit=null;themeDirectionEdit=null;$('#materialImageDialog').close();$('#materialReader').close();$('#imagePromptDialog').close();$('#sourceDialog').close();sendQueue=[];selectionSummary=null;materialDraft=null;p=await api('/api/projects/'+id);if(p.archivedAt){p=null;throw Error('此项目已归档，请在「已归档」中恢复');}localStorage.setItem('ppt-agent-project',id);tab=p.stage>=6?4:p.stage>=5?3:p.stage>=4?2:p.stage>=1?1:0;render();await refreshProjects();}
 async function act(action,extra={},next){if(!p)throw Error('请先创建项目');const keepView=tab===4||designEditingActive(p)||action==='savePageContent',queued=busy()&&imageAction(action,extra);projectRequestRevision++;p=await api(`/api/projects/${p.id}/action`,{action,...extra});if(next!==undefined)tab=next;if(p.task?.status==='running'&&activeTaskOrigin?.id!==p.task.id)activeTaskOrigin={id:p.task.id,tab};render({keepView});if(queued)toast('已加入任务列表；可独立执行的单页请求将优先调度');return p;}
 async function safe(fn){try{await fn();}catch(e){toast(e.message);}}
 function schedulePoll(delay){
@@ -236,7 +237,7 @@ function finishThemePromptRewrite(){
   }
 }
 async function prepareThemeAssetGeneration(){
-  if(sendQueue.length||materialDraft.trim())throw Error('请先发送待处理材料，再生成底图');
+  if(sendQueue.length||materialPromptDirty())throw Error('请先发送待处理材料，再生成底图');
   const form=$('#briefForm');
   if(form){if(!form.reportValidity())throw Error('请先补全演示需求');const brief=readBrief(form);if(!sameBrief(brief))await act('requirements',{brief},0);}
 }
@@ -289,7 +290,7 @@ function bindForms(){
     await persistTreePage(page,slides);treeUndo={projectId:p.id,version:p.version,slides:previous,page};syncTreeUndo();toast('分支已移动，关系与成品预览已更新');
   })});
   const form=$('#briefForm');if(form)form.onsubmit=e=>{e.preventDefault();safe(async()=>{
-    if(sendQueue.length||materialDraft.trim())throw Error('还有待发送材料，请先点击“发送材料”');
+    if(sendQueue.length||materialPromptDirty())throw Error('还有待发送材料，请先点击“发送材料”');
     if($('#analysisNotes')&&($('#analysisNotes').value!==(p.analysis.reviewNotes||'')||$$('[data-analysis-title]').some((el,i)=>el.value.trim()!==p.analysis.outline[i].title)))throw Error('材料理解或内容主题有未保存修改，请先点击“保存修改并确认”');
     const b=readBrief(form),progressSections=progressSectionsDraft();if(!p)await create(b,false,progressSections);else{
       await act('requirements',{brief:b,...(progressSections?{progressSections}:{})});
@@ -316,18 +317,19 @@ function queueFiles(files){
 async function sendMaterials(){
   if(collectingMaterials)throw Error('正在读取文件夹，请稍候');
   if(sending||busy())return;
-  materialDraft=$('#pasteText')?.value||materialDraft;
-  if(!sendQueue.length&&!materialDraft.trim())throw Error('请选择文件或填写文字材料');
+  materialDraft=$('#pasteText')?.value??materialDraft;
+  if(!sendQueue.length&&materialDraft===null)throw Error('请选择文件或填写材料理解要求');
   const form=$('#briefForm');if(!form.reportValidity())return;
   const brief=readBrief(form);
-  if(originalMaterialCount(p)+sendQueue.length+(materialDraft.trim()?1:0)>materialLimits.count)throw Error(`材料总数超过 ${materialLimits.count} 份，请先移除部分文件`);
+  if(originalMaterialCount(p)+sendQueue.length>materialLimits.count)throw Error(`材料总数超过 ${materialLimits.count} 份，请先移除部分文件`);
   sending=true;$$('#main button,#main input,#main textarea,#main select').forEach(e=>e.disabled=true);
-  let succeeded=0,failed=0;
+  let succeeded=0,failed=0,promptSaved=false;
   try{
   if(!p)await create(brief);else if(!sameBrief(brief))await act('requirements',{brief},0);
-  if(materialDraft.trim()){
-    sendQueue.push({id:crypto.randomUUID(),file:new File([materialDraft],'文字材料-'+new Date().toISOString().replace(/[:.]/g,'-')+'.txt',{type:'text/plain'}),status:'queued',fromText:true});
-    materialDraft='';$('#pasteText').value='';
+  if(materialDraft!==null){
+    await act('saveMaterialInstruction',{instruction:materialDraft},0);
+    promptSaved=true;
+    materialDraft=null;$('#pasteText').value='';
   }
   const projectId=p.id;
     for(const q of sendQueue){
@@ -337,7 +339,7 @@ async function sendMaterials(){
       }catch(e){q.status='failed';q.error=e.message;failed++;}updateQueue();
     }
   }finally{sendQueue=sendQueue.filter(q=>q.status!=='sent');selectionSummary=null;sending=false;tab=0;render();await refreshProjects();}
-  toast(`已发送 ${succeeded} 份材料${failed?`，${failed} 份失败，可重新发送`:'，可以开始识别与理解'}`);
+  toast(succeeded||failed?`已发送 ${succeeded} 份材料${failed?`，${failed} 份失败，可重新发送`:'，可以开始识别与理解'}`:promptSaved?'补充文字已保存，将用于材料理解':'没有待发送材料');
   $('#materialInbox')?.scrollIntoView({behavior:'smooth',block:'start'});
 }
 function readMaterial(id,linkId,slideIndex,range){const m=p.materials.find(m=>m.id===id);if(!m)return;readerMaterialId=id;
@@ -368,7 +370,7 @@ document.addEventListener('click',e=>safe(async()=>{
   if(b.matches('[data-automatic-toggle]')){
     if(!p)throw Error('请先创建项目');
     if(p.autoMode?.enabled){await act('setAutomaticMode',{enabled:false});toast('已退出自动模式，当前任务继续完成');return;}
-    if(sending||collectingMaterials||sendQueue.length||materialDraft.trim())throw Error('请先发送待处理材料');
+    if(sending||collectingMaterials||sendQueue.length||materialPromptDirty())throw Error('请先发送待处理材料');
     if(!p.apiReady||!p.imageReady){openAPI();toast('自动模式需要主模型和生图 API');return;}
     const form=$('#briefForm');if(form){if(!form.reportValidity())return;const brief=readBrief(form),progressSections=progressSectionsDraft();if(!sameBrief(brief)||progressSections)await act('requirements',{brief,...(progressSections?{progressSections}:{})});}
     else if(captureLiveView($('#main')).drafts.length)throw Error('请先保存当前页面的修改，再开启自动模式');
@@ -411,7 +413,7 @@ if(designBatchPending){toast('正在保存并确认内容与设计，请稍候')
     const visualTreatment=$('#themeAssets input[name=visualTreatment]:checked')?.value||p.visualTreatment||'flat';
     const intent=themeFoundationAction(p,visualTreatment);
     if(intent.mode==='review'){
-      if(sendQueue.length||materialDraft.trim())throw Error('请先发送待处理材料，再生成底图');
+      if(sendQueue.length||materialPromptDirty())throw Error('请先发送待处理材料，再生成底图');
       const form=$('#briefForm');if(form&&!busy()&&!sameBrief(readBrief(form)))throw Error('需求已修改，请先保存并重新规划提示词');
       openThemePromptReview();return;
     }
@@ -541,7 +543,7 @@ if(designBatchPending){toast('正在保存并确认内容与设计，请稍候')
     return;
   }
   if(b.id==='analyzeMaterials'){
-    if(sendQueue.length||materialDraft.trim())throw Error('请先发送待处理材料');
+    if(sendQueue.length||materialPromptDirty())throw Error('请先发送待处理材料');
     if(!p.apiReady){openAPI();toast('连接模型后即可识别材料');return;}
     const form=$('#briefForm');if(!form.reportValidity())return;
     const brief=readBrief(form),progressSections=progressSectionsDraft(),includeImages=!!$('#includeImages')?.checked;
@@ -585,7 +587,7 @@ if(designBatchPending){toast('正在保存并确认内容与设计，请稍候')
   }
   if(b.dataset.nav!==undefined){if(tab===1&&$('#slidesForm')&&JSON.stringify(collectSlides())!==JSON.stringify(p.slides))await saveSlides();tab=Number(b.dataset.nav);render();if(b.dataset.intakeSection)document.getElementById(b.dataset.intakeSection)?.scrollIntoView({behavior:'smooth',block:'start'});return;}
   if(b.dataset.action==='reuseDownstream'){
-    if(sendQueue.length||materialDraft.trim())throw Error('请先发送待处理材料，再同步文案');
+    if(sendQueue.length||materialPromptDirty())throw Error('请先发送待处理材料，再同步文案');
     await flushSlideEdits();const form=$('#briefForm');if(form&&!sameBrief(readBrief(form))){if(!form.reportValidity())return;await act('requirements',{brief:readBrief(form)});}
     await act('reuseDownstream');toast('已沿用原布局与图片，新文案已同步到后续设计');return;
   }
@@ -721,7 +723,7 @@ $('#cancelTask').onclick=()=>safe(()=>act('cancel'));
 $('#openArchives').onclick=()=>safe(async()=>{await refreshProjects();$('#projectArchiveDialog').showModal();});
 $('#archiveProject').onclick=()=>safe(async()=>{
   if(!p||archivePending)return;if(busy()||sending||collectingMaterials||designBatchPending)throw Error('请等待任务或材料选择、发送完成后归档');
-  if(sendQueue.length||materialDraft.trim())throw Error('还有待发送材料，请先发送或移除后再归档');
+  if(sendQueue.length||materialPromptDirty())throw Error('还有待发送材料，请先发送或移除后再归档');
   archivePending=true;syncArchiveButton();
   try{
     const projectId=p.id,form=$('#briefForm'),drafts=$$('[data-design-markdown]').map(el=>({index:Number(el.dataset.designMarkdown),markdown:el.value})).filter(d=>d.markdown!==p.pageDesigns?.[d.index]?.markdown);
@@ -731,7 +733,7 @@ $('#archiveProject').onclick=()=>safe(async()=>{
     for(const d of drafts)p=await api(`/api/projects/${projectId}/action`,{action:'savePageDesign',...d});
     await apiAutosave.flush();await apiAutosave.settled();apiAutosave.reset();
     p=await api(`/api/projects/${projectId}/archive`,{archived:true});
-    p=null;tab=0;sendQueue=[];selectionSummary=null;materialDraft='';clearTimeout(pollTimer);localStorage.removeItem('ppt-agent-project');render();await refreshProjects();toast('项目已归档，可在「已归档」中恢复');
+    p=null;tab=0;sendQueue=[];selectionSummary=null;materialDraft=null;clearTimeout(pollTimer);localStorage.removeItem('ppt-agent-project');render();await refreshProjects();toast('项目已归档，可在「已归档」中恢复');
   }finally{archivePending=false;syncArchiveButton();}
 });
 $('#projectArchiveList').onclick=e=>safe(async()=>{
@@ -743,7 +745,7 @@ $('#projectArchiveList').onclick=e=>safe(async()=>{
   }
   const button=e.target.closest('[data-restore-project]');if(!button)return;
   if(sending||busy()||collectingMaterials)throw Error('请等待当前任务或材料选择完成后恢复并切换项目');
-  if(sendQueue.length||materialDraft.trim())throw Error('还有待发送材料，请先发送或移除后再切换项目');
+  if(sendQueue.length||materialPromptDirty())throw Error('还有待发送材料，请先发送或移除后再切换项目');
   const briefForm=$('#briefForm');if(p&&briefForm&&!sameBrief(readBrief(briefForm)))throw Error('需求有未保存修改，请先保存后再切换项目');
   if(p&&$$('[data-design-markdown]').some(el=>el.value!==p.pageDesigns?.[Number(el.dataset.designMarkdown)]?.markdown))throw Error('设计稿有未保存修改，请先保存后再切换项目');
   await flushSlideEdits();button.disabled=true;
@@ -761,7 +763,7 @@ $('#deleteArchiveForm').onsubmit=e=>{e.preventDefault();safe(async()=>{
   }finally{deleteArchivePending=false;button.disabled=false;cancelButton.disabled=false;button.textContent='永久删除';}
 });};
 $('#deleteArchiveDialog').addEventListener('cancel',e=>{if(deleteArchivePending)e.preventDefault();});
-$('#newProject').onclick=()=>safe(async()=>{$('#supplementImageDialog').close();$('#supplementImageForm').reset();delete $('#supplementImageDialog').dataset.projectId;rebuildRegionEditor.close();aiImageEditor.close();materialCropEditor.close();if(designBatchPending)throw Error('正在确认所有页设计，请稍候');if(sending)throw Error('正在发送材料，请等待完成');$('#imagePromptDialog').close();$('#sourceDialog').close();sendQueue=[];selectionSummary=null;materialDraft='';if(tab===1&&$('#slidesForm')&&JSON.stringify(collectSlides())!==JSON.stringify(p.slides))await saveSlides();$('#materialImageDialog').close();$('#materialReader').close();p=null;tab=0;localStorage.removeItem('ppt-agent-project');render();await refreshProjects();});
+$('#newProject').onclick=()=>safe(async()=>{$('#supplementImageDialog').close();$('#supplementImageForm').reset();delete $('#supplementImageDialog').dataset.projectId;rebuildRegionEditor.close();aiImageEditor.close();materialCropEditor.close();if(designBatchPending)throw Error('正在确认所有页设计，请稍候');if(sending)throw Error('正在发送材料，请等待完成');$('#imagePromptDialog').close();$('#sourceDialog').close();sendQueue=[];selectionSummary=null;materialDraft=null;if(tab===1&&$('#slidesForm')&&JSON.stringify(collectSlides())!==JSON.stringify(p.slides))await saveSlides();$('#materialImageDialog').close();$('#materialReader').close();p=null;tab=0;localStorage.removeItem('ppt-agent-project');render();await refreshProjects();});
 $('#projects').onchange=e=>safe(async()=>{if(sending){e.target.value=p?.id||'';throw Error('正在发送材料，请等待完成');}if(e.target.value)await load(e.target.value);});
 await safe(async()=>{const health=await api('/api/health');titlePageOptionAvailable=!!health.titlePageOption;materialStreamingAvailable=!!health.materialStreaming;const id=localStorage.getItem('ppt-agent-project');if(id){try{await load(id);return;}catch{localStorage.removeItem('ppt-agent-project');}}render();await refreshProjects();});
 
