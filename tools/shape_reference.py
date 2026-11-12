@@ -235,6 +235,30 @@ def seed_polygon(element):
     if not all(math.isfinite(v) for v in (x, y, w, h)) or w <= 2 or h <= 2:
         return None
     kind = element.get('type')
+    geometry=element.get('shapeGeometry') or {}
+    if kind in ('shape','rect') and not element.get('customGeometry') and (geometry.get('corners') or geometry.get('cornerRadius') or geometry.get('cutCorner')):
+        name=element.get('shape') or 'rect'
+        points=preset_points(name,w,h,element) or [[0,0],[1,0],[1,1],[0,1]]
+        vertices=np.asarray(points,float)*[w,h]
+        corners=geometry.get('corners') or []
+        out=[]
+        for i,p in enumerate(vertices):
+            a,b=vertices[i-1],vertices[(i+1)%len(vertices)]
+            la,lb=np.linalg.norm(a-p),np.linalg.norm(b-p)
+            u,v=(a-p)/max(1e-6,la),(b-p)/max(1e-6,lb)
+            angle=math.acos(float(np.clip(np.dot(u,v),-1,1)))
+            corner=corners[i] if i<len(corners) else {'type':'cut' if geometry.get('cutCorner') else 'round','radius':geometry.get('cornerRadius',.166667 if name=='roundRect' else 0),'distance':geometry.get('cutCorner',0)}
+            size=(corner.get('radius',0)*min(w,h)/max(.01,math.tan(angle/2)) if corner['type']=='round'
+                  else corner.get('distance',corner.get('cut',0))*min(w,h) if corner['type']=='cut' else 0)
+            size=min(size,la*.45,lb*.45)
+            entry,exit_=p+u*size,p+v*size
+            out.append(entry+[x,y])
+            if corner['type']=='round' and size>0:
+                k=4/3*math.tan((math.pi-angle)/4)*size*math.tan(angle/2)
+                c1,c2=entry-u*k,exit_-v*k
+                out.extend((1-t)**3*entry+3*(1-t)**2*t*c1+3*(1-t)*t*t*c2+t**3*exit_+[x,y] for t in np.linspace(.1,1,10))
+            elif corner['type']=='cut':out.append(exit_+[x,y])
+        return [point.tolist() for point in out]
     if kind in ('rect', 'ellipse'):
         normalized = ellipse_points() if kind == 'ellipse' else [[0, 0], [1, 0], [1, 1], [0, 1]]
         return [[x + px * w, y + py * h] for px, py in normalized]

@@ -74,6 +74,74 @@ INLINE_UNICODE_SCRIPTS={
 def plain_inline(text):
     source=re.sub(r'</?(?:sup|sub)>', '', str(text), flags=re.I)
     return ''.join(INLINE_UNICODE_SCRIPTS.get(char, char) for char in source)
+
+def expected_scripts(text):
+    source=strip_inline_math(text)
+    result=[]
+    def append(value,script=0):
+        for char in value:
+            if char in '\r\n':continue
+            kind=script
+            if not kind and char in INLINE_UNICODE_SCRIPTS:
+                kind=-1 if char in '₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₔₕₖₗₘₙₚₛₜᵢᵣᵤᵥⱼ' else 1
+            result.append((INLINE_UNICODE_SCRIPTS.get(char,char),kind))
+    start=0
+    for match in re.finditer(r'<(sup|sub)>([^<]*)</\1>',source,re.I):
+        append(source[start:match.start()]);append(match[2],-1 if match[1].lower()=='sub' else 1)
+        start=match.end()
+    append(source[start:])
+    return result
+
+def actual_scripts(shape):
+    result=[]
+    for run in shape.findall(f'.//{{{A}}}r'):
+        properties=run.find(f'{{{A}}}rPr')
+        baseline=float(properties.get('baseline',0)) if properties is not None else 0
+        kind=-1 if baseline<0 else 1 if baseline>0 else 0
+        result.extend((char,kind) for char in ''.join(t.text or '' for t in run.findall(f'{{{A}}}t')) if char not in '\r\n')
+    return result
+
+def picture_name(pic):
+    node=pic.find(f'.//{{{P}}}cNvPr')
+    return re.sub(r'^!!nf-page-\d+--','',node.get('name','')) if node is not None else ''
+
+def material_image_errors(deck,names,xml,rels,shapes,spec,index):
+    """Optional material ORIGINAL image identity check.
+    spec.materialImages[index] is [{key,id,sha256}], produced by
+    lib/material-image-insertion.mjs materialImageManifest(project,index,getImage).
+    Each key must resolve to exactly one picture; the embedded bytes (original SVG through
+    asvg:svgBlip, raster through a:blip) must match the registered sha256. Two keys sharing one
+    material are two independent picture objects and are both checked.
+    """
+    expected=(spec.get('materialImages') or [])
+    if not expected:return []
+    if not isinstance(expected,list) or index>=len(expected) or not isinstance(expected[index],list):
+        return [f'S{index+1}: materialImages page entries missing']
+    errors=[];seen=set();pics=shapes.findall(f'.//{{{P}}}pic')
+    for item in expected[index]:
+        if not isinstance(item,dict) or not all(isinstance(item.get(field),str) and item.get(field) for field in ('key','id','sha256')):
+            errors.append(f'S{index+1}: invalid materialImages entry');continue
+        key=item['key']
+        if key in seen:errors.append(f'S{index+1}: duplicate materialImages key '+key);continue
+        seen.add(key)
+        matches=[pic for pic in pics if picture_name(pic)==key]
+        if len(matches)!=1:
+            errors.append(f'S{index+1}: material image object count mismatch '+key+f' ({len(matches)})');continue
+        pic=matches[0]
+        embed=None
+        for node in pic.iter():
+            local=node.tag.rsplit('}',1)[-1]
+            if local=='svgBlip' and node.get(f'{{{R}}}embed'):embed=node.get(f'{{{R}}}embed');break
+            if local=='blip' and node.get(f'{{{R}}}embed') and embed is None:embed=node.get(f'{{{R}}}embed')
+        target=next((rel for rel in rels if rel.get('Id')==embed),None) if rels is not None and embed else None
+        if target is None:
+            errors.append(f'S{index+1}: material image has no media relationship '+key);continue
+        media=posixpath.normpath(posixpath.join('ppt/slides',target.get('Target','')))
+        if media not in names:
+            errors.append(f'S{index+1}: material image media missing '+key);continue
+        if hashlib.sha256(deck.read(media)).hexdigest()!=item['sha256']:
+            errors.append(f'S{index+1}: material image bytes mismatch '+key)
+    return errors
 def check(deck, spec, pages=None, baseline=None):
     errors=[]
     if pages is not None and baseline:
@@ -116,6 +184,18 @@ def check(deck, spec, pages=None, baseline=None):
                     normalized[plain_inline(text).replace('\n','').replace('\r','')]+=count
                 return normalized
             if normalize(expected)!=normalize(actual):errors.append(f'S{i+1}: exact native text mismatch')
+            by_name={original_shape_name(shape):shape for shape in text_shapes}
+            unused_shapes=list(text_shapes)
+            for element in text_elements:
+                wanted=expected_scripts(element['text'])
+                shape=by_name.get(element.get('key'))
+                if shape is None and not element.get('key'):
+                    expected_text=plain_inline(strip_inline_math(element['text'])).replace('\n','').replace('\r','')
+                    shape=next((candidate for candidate in unused_shapes
+                                if ''.join(char for char,_ in actual_scripts(candidate))==expected_text),None)
+                if shape in unused_shapes:unused_shapes.remove(shape)
+                if any(kind for _,kind in wanted) and (shape is None or actual_scripts(shape)!=wanted):
+                    errors.append(f'S{i+1}: native subscript/superscript mismatch '+str(element.get('key') or element['text'][:40]))
             def signature(math):
                 import unicodedata
                 text=unicodedata.normalize('NFKC',''.join(t.text or '' for t in math.findall(f'.//{{{M}}}t'))).replace(' ','')
@@ -144,6 +224,7 @@ def check(deck, spec, pages=None, baseline=None):
             tree=r.find(f'{{{P}}}cSld/{{{P}}}spTree')
             objects=[s for s in tree if s.tag in {f'{{{P}}}sp',f'{{{P}}}pic',f'{{{P}}}cxnSp',f'{{{P}}}graphicFrame'}]
             if len(objects)!=len(elements):errors.append(f'S{i+1}: object inventory mismatch')
+            errors.extend(material_image_errors(z,names,r,xml.get(f'ppt/slides/_rels/slide{i+1}.xml.rels'),tree,spec,i))
             background=(spec.get('backgrounds') or [None]*len(spec['slides']))[i]
             if background:
                 blip=r.find(f'{{{P}}}cSld/{{{P}}}bg/{{{P}}}bgPr/{{{A}}}blipFill/{{{A}}}blip')

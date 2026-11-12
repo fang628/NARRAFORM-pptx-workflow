@@ -18,6 +18,52 @@ cv2.setNumThreads(1)
 ALIASES = {'微软雅黑': 'Microsoft YaHei', '宋体': 'SimSun', '黑体': 'SimHei', '等线': 'DengXian'}
 COMMON = {'Microsoft YaHei': ['msyh.ttc', 'msyhbd.ttc'], 'SimSun': ['simsun.ttc', 'simsun.ttc'], 'SimHei': ['simhei.ttf', 'simhei.ttf'], 'DengXian': ['Deng.ttf', 'Dengb.ttf'], 'Arial': ['arial.ttf', 'arialbd.ttf'], 'Times New Roman': ['times.ttf', 'timesbd.ttf'], 'Calibri': ['calibri.ttf', 'calibrib.ttf'], 'Cambria': ['cambria.ttc', 'cambriab.ttf'], 'Consolas': ['consola.ttf', 'consolab.ttf']}
 
+# Sans/serif class is part of the accepted evidence: a Chinese black-body element must not be
+# re-typed as a serif family (or the reverse) merely because glyph distance is marginally lower.
+SANS_FAMILIES = {'Microsoft YaHei', 'SimHei', 'DengXian', 'PingFang SC', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Arial', 'Calibri', 'Segoe UI', 'Verdana', 'Helvetica'}
+SERIF_FAMILIES = {'SimSun', 'Songti SC', 'STSong', 'Noto Serif CJK SC', 'Source Han Serif SC', 'FangSong', 'Times New Roman', 'Cambria', 'Georgia', 'Garamond', 'Baskerville'}
+CJK_SANS = ['Microsoft YaHei', 'SimHei', 'DengXian', 'PingFang SC']
+CJK_SERIF = ['SimSun', 'Songti SC', 'STSong', 'FangSong']
+LATIN_SANS = ['Arial', 'Calibri', 'Segoe UI', 'Verdana', 'Helvetica']
+LATIN_SERIF = ['Times New Roman', 'Cambria', 'Georgia', 'Garamond', 'Baskerville']
+CJK_TEXT = re.compile(r'[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]')
+
+
+def family_category(name):
+    """Sans/serif class of an accepted or proposed family (None when it cannot be classified)."""
+    if not name:
+        return None
+    family = ALIASES.get(str(name).strip(), str(name).strip())
+    if family in SANS_FAMILIES:
+        return 'sans'
+    if family in SERIF_FAMILIES:
+        return 'serif'
+    text = family.replace(' ', '').lower()
+    if any(token in text for token in ('yahei', 'simhei', 'dengxian', 'pingfang', 'notosans', 'sourcehansans',
+                                       'arial', 'calibri', 'segoe', 'verdana', 'helvetica', 'sans')):
+        return 'sans'
+    if any(token in text for token in ('simsun', 'songti', 'stsong', 'fangsong', 'serif', 'times', 'cambria',
+                                       'georgia', 'garamond', 'baskerville')):
+        return 'serif'
+    return None
+
+
+def candidate_families(family, text):
+    """Same-class local search pool. Unknown families get a reasonable script default instead of a
+    cross-class search from the accepted family."""
+    cjk = bool(CJK_TEXT.search(str(text or '')))
+    category = family_category(family)
+    if category == 'serif':
+        pool = CJK_SERIF if cjk else LATIN_SERIF
+    elif category == 'sans':
+        pool = CJK_SANS if cjk else LATIN_SANS
+    elif cjk:
+        pool = CJK_SANS
+    else:
+        pool = LATIN_SERIF
+    return list(dict.fromkeys([ALIASES.get(family, family)] + pool))
+
+
 def key(s):
     return re.sub(r'[\s_-]', '', s).lower()
 
@@ -135,10 +181,17 @@ def build(spec):
             skipped.append(e['key'])
             continue
         family = ALIASES.get(e.get('fontFace'), e.get('fontFace')) or 'Microsoft YaHei'
-        cjk = bool(re.search(r'[\u3400-\u9fff]', text))
-        families = list(dict.fromkeys([family]+spec.get('families', (['Microsoft YaHei', 'SimSun', 'DengXian'] if cjk else ['Arial', 'Calibri', 'Times New Roman']))))[:4]
+        families = list(dict.fromkeys(list(e.get('families') or []) + candidate_families(family, text)))[:4]
+        declared_category = family_category(family)
         size, spacing, line = float(e['size']), float(e.get('charSpacing') or 0), float(e.get('lineSpacing') or e['size']*1.2)
         file = locate(family, e.get('bold'), e.get('italic'))
+        if not file:
+            # Declared family is not installed: fall back inside the same accepted class only.
+            for fallback in families[1:]:
+                file = locate(fallback, e.get('bold'), e.get('italic'))
+                if file:
+                    family = fallback
+                    break
         if not file:
             continue
         baseline = score(target, render(e, file, size, spacing, line))
@@ -161,8 +214,12 @@ def build(spec):
                         value = score(target, render(e, file, candidate_size, gap, candidate_line))
                         if value > best[0]+.004:
                             best = (value, {'fontFace': name, 'size': candidate_size, 'charSpacing': round(gap, 3), 'lineSpacing': round(candidate_line, 3)})
+        # Never accept a cross-class proposal: the class is part of the accepted evidence.
+        if declared_category and family_category(best[1]['fontFace']) != declared_category:
+            continue
         if best[0] > baseline+.025 and best[0] > .65:
-            proposals.append({'key': e['key'], 'properties': best[1], 'beforeScore': baseline, 'afterScore': best[0], 'confidence': .9})
+            proposals.append({'key': e['key'], 'properties': best[1], 'beforeScore': baseline, 'afterScore': best[0], 'confidence': .9,
+                              'fontClass': declared_category or family_category(best[1]['fontFace'])})
     return {'status': 'available', 'proposals': proposals, 'skipped': skipped, 'elapsedMs': round((time.monotonic()-started)*1000)}
 
 if __name__ == '__main__':

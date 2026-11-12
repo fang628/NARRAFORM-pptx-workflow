@@ -15,7 +15,15 @@
 # Optional local maintenance utilities, not part of the runtime
 /tools/clean_intermediates.ps1
 /tools/sync_workflow_library.mjs
+/tools/sync_github_commit.mjs
 /tools/workflow-library-policy.mjs
+/tools/compare-preview-prompts.mjs
+/tools/compare-step05.mjs
+/tools/replay-step05.mjs
+/tools/crop_zoom.py
+/tools/paint_quality.py
+/lib/rebuild-pipeline.mjs
+/docs/step05-*.md
 
 # Dependencies and Python environments
 node_modules/

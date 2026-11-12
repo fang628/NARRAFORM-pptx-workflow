@@ -1,6 +1,15 @@
 // Markdown/LaTeX is the portable source; HTML, images and OMML are derived views.
 export const formulaLimit=4000;
 export const formulaPlanningRule='公式按需选用：识别材料中的公式、上下标、分数、根式、求和、积分、矩阵及变量含义；仅当公式服务于本页需要说明的内容且能清晰呈现时，主动建立独立type=formula节点，latex保存准确LaTeX，markdown保存$$包围的Markdown公式。公式从属于对应观点或小标题，不把公式当普通文本、表格或图片，不拆断表达式、不虚构推导；必要变量解释另建独立短文本。设计稿和预览提示词的嵌套内容列表直接给出实际Markdown公式，重建为可编辑Office原生公式，不能用公式截图或普通文本替代。';
+export const formulaScriptRule='数学下标用 _{...} 保存，多字母下标用 _{\\mathrm{...}}，如 d_{\\mathrm{model}}、\\mathrm{step}_{\\mathrm{num}}；不能把材料或预览中实际位于基线下方的字写成 \\mathrm{step\\_num} 的字面下划线。上下标同属一个变量时使用 base_{sub}^{sup}，不能漏掉下标。文件名、代码标识或普通正文的字面下划线仍按原文保留，不能全局按下划线猜测上下标。';
+export function formulaScriptDiagnostics(value){
+  const latex=formulaLatex(value),issues=[];
+  for(const match of latex.matchAll(/\\(?:mathrm|operatorname)\{([A-Za-z]+)\\_([A-Za-z0-9]+)\}/g))issues.push({
+    kind:'literal-underscore-identifier',source:match[0],offset:match.index,
+    reason:'字面下划线不会成为数学下标；须与材料或批准预览核对，不能按名称自动改写',
+  });
+  return issues;
+}
 export function formulaLatex(value){
   let source=typeof value==='string'?value:value?.latex??value?.markdown;
   if(typeof source!=='string')throw Error('公式须包含LaTeX或Markdown公式');

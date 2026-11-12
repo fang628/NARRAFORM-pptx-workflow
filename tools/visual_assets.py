@@ -93,7 +93,7 @@ def main():
         tags = {'svg','g','defs','path','rect','circle','ellipse','line','polyline','polygon','linearGradient','radialGradient','stop','clipPath','mask','pattern'}
         tags.update({'filter','feGaussianBlur','feDropShadow','feOffset','feFlood','feComposite','feBlend','feColorMatrix','feMerge','feMergeNode'})
         attrs = {'viewBox','width','height','x','y','x1','y1','x2','y2','cx','cy','r','rx','ry','d','points','fill','stroke','stroke-width','stroke-linecap','stroke-linejoin','stroke-dasharray','fill-rule','clip-rule','opacity','fill-opacity','stroke-opacity','transform','id','offset','stop-color','stop-opacity','gradientUnits','gradientTransform','fx','fy','clip-path','mask','preserveAspectRatio','version'}
-        attrs.update({'patternUnits','patternContentUnits','patternTransform'})
+        attrs.update({'patternUnits','patternContentUnits','patternTransform','maskUnits','maskContentUnits','mask-type'})
         attrs.update({'filter','filterUnits','primitiveUnits','color-interpolation-filters','in','in2','result','stdDeviation','dx','dy','flood-color','flood-opacity','operator','k1','k2','k3','k4','mode','type','values'})
         if root.tag != '{http://www.w3.org/2000/svg}svg':
             raise ValueError('SVG needs an SVG namespace')

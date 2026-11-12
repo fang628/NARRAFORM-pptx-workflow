@@ -1,10 +1,38 @@
 """Reference-guided local extraction: preserve preview pixels, never redraw text."""
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 from cutout_alpha import prepare_cutout
 from refined_matte import reference_matte
 from object_masks import object_alpha, mask_entries, crop_alpha
+
+
+
+
+def refine_icon_edges(rgb, bg, rgba, artistic=False):
+    """Icon quality: decontaminate edges against the registered background, tighten the matte by
+    roughly half a pixel so no background fringe survives, then unsharp the opaque core."""
+    if artistic:
+        return rgba
+    alpha = rgba[:, :, 3].astype(np.float32) / 255.0
+    if alpha.max() <= 0:
+        return rgba
+    rgb = rgb.astype(np.float32)
+    out = rgb.copy()
+    edge = (alpha > 0.03) & (alpha < 0.97)
+    if edge.any():
+        weight = np.clip(alpha[edge], 0.06, 1.0)[:, None]
+        out[edge] = np.clip((rgb[edge] - (1.0 - weight) * bg[edge]) / weight, 0, 255)
+    tightened = np.clip((alpha - 0.10) / 0.85, 0.0, 1.0)
+    tightened = tightened * tightened * (3.0 - 2.0 * tightened)
+    core = tightened > 0.98
+    if core.any():
+        blurred = cv2.GaussianBlur(out, (0, 0), 1.0)
+        out[core] = np.clip(out[core] + (out[core] - blurred[core]) * 0.35, 0, 255)
+    result = rgba.copy()
+    result[:, :, :3] = out.astype(np.uint8)
+    result[:, :, 3] = np.clip(tightened * 255.0, 0, 255).astype(np.uint8)
+    return result
 
 
 def reference_cutout(image, background, artistic=False, isolation=None):
@@ -48,6 +76,15 @@ def reference_cutout(image, background, artistic=False, isolation=None):
         if touches and (area<largest if artistic else area<max(3,largest*.01)):
             rgba[labels==i,3]=0
             discarded+=1
+    rgba = refine_icon_edges(rgb, bg, rgba, artistic)
     result, report = prepare_cutout(Image.fromarray(rgba), artistic)
     report.update(detail, mode='registered-background-difference', mattingMode=detail['mode'], discardedBorderComponents=discarded, isolation=isolation_report)
+    if not artistic and result.width * result.height <= 900 * 900:
+        # Icons are small in the reference but get rendered at full slide scale: export 2x with
+        # Lanczos + conservative unsharp so the PPTX stays crisp instead of blurry.
+        big = result.resize((result.width * 2, result.height * 2), Image.Resampling.LANCZOS)
+        sharpened = big.convert('RGB').filter(ImageFilter.UnsharpMask(radius=1.0, percent=45, threshold=2))
+        big = Image.merge('RGBA', (*sharpened.split(), big.getchannel('A')))
+        report.update(width=big.width, height=big.height, upscale=2, sourceWidth=result.width, sourceHeight=result.height)
+        result = big
     return result, report
