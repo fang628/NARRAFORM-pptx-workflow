@@ -20,6 +20,8 @@ import cv2
 import numpy as np
 from shape_reference import seed_polygon
 from native_line_fit import fit_native_lines
+from parameter_confidence import weighted_median,provenance
+from structural_edges import match_panel
 
 cv2.setNumThreads(1)
 WIDTH, HEIGHT = 1600, 900
@@ -41,6 +43,10 @@ def family(element):
         return 'ellipse'
     if shape in ('rect', 'roundrect', 'parallelogram', 'trapezoid', 'freeform'):
         points = (element.get('customGeometry') or {}).get('points')
+        commands=(element.get('customGeometry') or {}).get('commands') or []
+        vertices=[c for c in commands if c.get('op')!='Z']
+        if len(vertices)==4 and all(c.get('op')==('M' if i==0 else 'L') and len(c.get('points',[]))==1 for i,c in enumerate(vertices)):
+            points=[c['points'][0] for c in vertices]
         if shape == 'freeform' and (not points or len(points) != 4) and not (
                 element.get('frameKind') == 'panel' or element.get('class') == 'freeform-panel'):
             return None
@@ -111,6 +117,20 @@ def search_side(distance, valid, x0, top, bottom, width, expected_delta=0):
     return None
 
 
+def search_vertical_side(distance, valid, x0, top, bottom, width):
+    """Fit a vertical edge directly, independently of the free-slope solution."""
+    ys=np.linspace(top+.12*(bottom-top),bottom-.12*(bottom-top),64)
+    yi=np.clip(np.rint(ys).astype(int),0,HEIGHT-1)
+    span=min(90,max(10,width*.13));best=None
+    for x in np.linspace(x0-span,x0+span,max(41,int(span*4)+1)):
+        xi=int(np.clip(round(x),0,WIDTH-1));mask=valid[yi,xi]
+        if mask.sum()<25:continue
+        values=distance[yi[mask],xi];support=float(np.mean(values<=2.5))
+        cost=float(np.mean(np.minimum(values,12)))+.025*abs(x-x0)
+        if support>=.65 and (best is None or cost<best[0]):best=(cost,x)
+    return [best[1],best[1]] if best else None
+
+
 # ------------------------------------------------------------------ geometry primitives
 def _unit(a, b):
     vector = np.asarray(b, float) - np.asarray(a, float)
@@ -168,7 +188,7 @@ def declared_corner_radius(element, width, height):
             radius = max(radius, float(np.linalg.norm((np.asarray(points[1])-points[0])*[width, height])))
     if not radius and element.get('shape') == 'roundRect':
         radius = .035 * min(width, height)
-    return min(.12 * min(width, height), radius)
+    return min(.5 * min(width, height), radius)
 
 
 def declared_corners(element, width, height):
@@ -223,6 +243,9 @@ def measure_corner(vertex, before_dir, after_dir, distance, valid, min_side, dec
         declared_size = (declared or {}).get('value')
         declared_size = declared_size * min_side if declared_size else (
             chosen['size'] if chosen else .05 * min_side)
+        if declared_type=='round' and (declared or {}).get('value'):
+            angle=math.acos(float(np.clip(np.dot(before_dir,after_dir),-1,1)))
+            declared_size/=max(.01,math.tan(angle/2))
         prior = _boundary_metric(_corner_points(vertex, before_dir, after_dir, span,
                                                 declared_type, declared_size), distance, valid)
         if prior and (chosen is None or prior['cost'] <= chosen['cost'] + .35):
@@ -241,12 +264,16 @@ def measure_corner(vertex, before_dir, after_dir, distance, valid, min_side, dec
             'confidence': round(float(improvement), 3)}
 
 
-def corner_payload(corners, min_side):
+def corner_payload(corners, min_side, ring=None):
     payload = []
-    for corner in corners:
+    for index,corner in enumerate(corners):
         if corner['type'] == 'round':
+            factor=1.
+            if ring is not None:
+                before=_unit(ring[index],ring[(index-1)%4]);after=_unit(ring[index],ring[(index+1)%4])
+                factor=math.tan(math.acos(float(np.clip(np.dot(before,after),-1,1)))/2)
             payload.append({'type': 'round',
-                            'radius': round(max(.004, min(.49, corner['size'] / max(1.0, min_side))), 5)})
+                            'radius': round(max(.004, min(.49, corner['size']*factor / max(1.0, min_side))), 5)})
         elif corner['type'] == 'cut':
             payload.append({'type': 'cut',
                             'distance': round(max(.004, min(.49, corner['size'] / max(1.0, min_side))), 5)})
@@ -294,6 +321,56 @@ def measure_quad_corners(ring, distance, valid, min_side, declared):
     return corners
 
 
+def merge_corner_symmetry(corners,mode='auto',ring=None,distance=None,valid=None):
+    """Infer symmetry from measured geometry, then test the shared local contour."""
+    same=lambda ids:len({corners[i]['type'] for i in ids})==1
+    if mode=='none':return corners
+    def factor(i):
+        if ring is None or corners[i]['type']!='round':return 1.
+        before=_unit(ring[i],ring[(i-1)%4]);after=_unit(ring[i],ring[(i+1)%4])
+        return max(.01,math.tan(math.acos(float(np.clip(np.dot(before,after),-1,1)))/2))
+    def comparable(ids):
+        values=[corners[i]['size']*factor(i) for i in ids]
+        return same(ids) and max(values)-min(values)<=max(2.,float(np.median(values))*.35)
+    def geometric(kind):
+        if ring is None:return True
+        points=np.asarray(ring,float);center=(points.min(axis=0)+points.max(axis=0))/2
+        tolerance=max(2.,float(np.min(np.ptp(points,axis=0)))*.03)
+        pairs=[[0,1],[3,2]] if kind=='horizontal' else [[0,2],[1,3]]
+        return all(np.linalg.norm(points[a]+points[b]-2*center if kind=='diagonal' else
+                                  [points[a,0]+points[b,0]-2*center[0],points[a,1]-points[b,1]])<=tolerance for a,b in pairs)
+    candidates=[]
+    if mode in ('auto','all') and comparable(range(4)) and (geometric('horizontal') or geometric('diagonal')):candidates.append(('all',[list(range(4))]))
+    for kind,groups in [('horizontal',[[0,1],[3,2]]),('diagonal',[[0,2],[1,3]])]:
+        if mode in ('auto',kind) and geometric(kind) and all(comparable(g) for g in groups):candidates.append((kind,groups))
+    result=[dict(c) for c in corners]
+    for kind,groups in candidates:
+        proposals=[]
+        for ids in groups:
+            weights=[max(0.,float(corners[i].get('confidence',0))) for i in ids]
+            if ring is not None and distance is not None and valid is not None:
+                for j,i in enumerate(ids):
+                    vertex=np.asarray(ring[i],float);span=max(8.,min(72.,.22*float(np.min(np.ptp(ring,axis=0)))))
+                    observed=_boundary_metric(_corner_points(vertex,_unit(vertex,ring[(i-1)%4]),_unit(vertex,ring[(i+1)%4]),span,corners[i]['type'],corners[i]['size']),distance,valid)
+                    weights[j]=observed['support']/(1+observed['cost']) if observed else 0.
+            if distance is None:weights=[1.]*len(ids)
+            if not any(weights):continue
+            size=weighted_median([corners[i]['size']*factor(i) for i in ids],weights);accepted=True
+            if ring is not None and distance is not None and valid is not None:
+                min_side=max(1.,float(np.min(np.ptp(ring,axis=0))));span=max(8.,min(72.,.22*min_side))
+                for i in ids:
+                    vertex=np.asarray(ring[i],float);before=_unit(vertex,ring[(i-1)%4]);after=_unit(vertex,ring[(i+1)%4])
+                    old=_boundary_metric(_corner_points(vertex,before,after,span,corners[i]['type'],corners[i]['size']),distance,valid)
+                    new=_boundary_metric(_corner_points(vertex,before,after,span,corners[i]['type'],size/factor(i)),distance,valid)
+                    if old is None or new is None or new['support']<.6 or new['p95']>6 or new['cost']>old['cost']+.35:accepted=False;break
+            if accepted:proposals.append((ids,size))
+        if len(proposals)!=len(groups):continue
+        for ids,size in proposals:
+            for i in ids:result[i].update(size=round(size/factor(i),6),symmetryMode=kind,boundaryChecked=distance is not None)
+        break
+    return result
+
+
 def quad_properties(element, best, distance, valid):
     """Encode the measured quad once: preset parallelogram + measured slant, or mixed corner path."""
     best = np.asarray(best, float)
@@ -308,8 +385,9 @@ def quad_properties(element, best, distance, valid):
     ring = np.array([[x, y], [x + width, y], [x + width, y + height], [x, y + height]]) \
         if axis_aligned else best
     declared = declared_corners(element, width, height)
-    corners = measure_quad_corners(ring, distance, valid, min_side, declared)
-    payload = corner_payload(corners, min_side)
+    corners = merge_corner_symmetry(measure_quad_corners(ring, distance, valid, min_side, declared),
+                                    (element.get('shapeGeometry') or {}).get('cornerSymmetry','auto'),ring,distance,valid)
+    payload = corner_payload(corners, min_side,ring)
     all_sharp = all(corner['type'] == 'sharp' for corner in corners)
     normalized = ((ring - [x, y]) / [max(1.0, width), max(1.0, height)]).tolist()
     properties = {'x': round(float(x), 3), 'y': round(float(y), 3),
@@ -421,11 +499,32 @@ def quad_side_candidates(e, reference, distance, valid, edge, box, baseline):
         prototype_metric = score(seed, distance, valid)
         if prototype_metric:
             candidates.append((prototype_metric, seed))
+        rectangular=str(e.get('shape') or e.get('type') or '').lower() in ('rect','roundrect')
+        rectangle_metric=None
+        if rectangular:
+            vertical_left=search_vertical_side(distance,valid,seed[0,0],top,bottom,w)
+            vertical_right=search_vertical_side(distance,valid,seed[1,0],top,bottom,w)
+            if vertical_left and vertical_right:
+                rectangle=np.array([[vertical_left[0],top],[vertical_right[0],top],
+                                    [vertical_right[1],bottom],[vertical_left[1],bottom]])
+                rectangle_metric=score(rectangle,distance,valid)
+                if rectangle_metric:candidates.append((rectangle_metric,rectangle))
         left = search_side(distance, valid, seed[0, 0], top, bottom, w,
                            seed[3, 0] - seed[0, 0])
         right = search_side(distance, valid, seed[1, 0], top, bottom, w,
                             seed[2, 0] - seed[1, 0])
         if not left or not right or bottom - top < h * .8:
+            continue
+        if rectangular:
+            alternate=np.array([[left[0],top],[right[0],top],[right[1],bottom],[left[1],bottom]])
+            evidence=score(alternate,distance,valid)
+            # An actually slanted reference may overturn a wrong preset, but
+            # near-noise side drift never earns a new shape family.
+            fitted_rectangle=rectangle_metric or baseline
+            if evidence and evidence['support']>=.9 and evidence['p95']<=2.5 and fitted_rectangle['p95']>8:
+                candidates.append((evidence,alternate))
+            # Solve parallel vertical sides as a family; independent slope noise
+            # must not turn a rounded rectangle into a trapezoid.
             continue
         candidate = np.array([[left[0], top], [right[0], top], [right[1], bottom],
                               [left[1], bottom]])
@@ -443,10 +542,36 @@ def quad_side_candidates(e, reference, distance, valid, edge, box, baseline):
     return chosen[1], chosen[0]
 
 
+def locate_thin_fill(element,reference,box):
+    x,y,w,h=box
+    if min(w,h)>14 or max(w,h)/max(1,min(w,h))<3:return None
+    colors=[element.get('fill')]+[s.get('color') for s in (element.get('gradient') or {}).get('stops',[])]
+    palette=[]
+    for color in colors:
+        try:palette.append([int(str(color).lstrip('#')[i:i+2],16) for i in (4,2,0)])
+        except (ValueError,TypeError):pass
+    if not palette:return None
+    pad=min(32,max(12,max(w,h)*.5));left,top=max(0,int(x-pad)),max(0,int(y-pad));right,bottom=min(WIDTH,int(x+w+pad)),min(HEIGHT,int(y+h+pad))
+    patch=reference[top:bottom,left:right]
+    hsv=cv2.cvtColor(patch,cv2.COLOR_BGR2HSV).astype(float)
+    hints=cv2.cvtColor(np.array([palette],np.uint8),cv2.COLOR_BGR2HSV)[0].astype(float)
+    hints=hints[hints[:,1]>65]
+    if not len(hints):return None
+    d=np.minimum.reduce([np.minimum(abs(hsv[:,:,0]-v[0]),180-abs(hsv[:,:,0]-v[0])) for v in hints])
+    mask=((d<12)&(hsv[:,:,1]>70)&(hsv[:,:,2]>90)).astype(np.uint8)
+    count,labels,stats,centers=cv2.connectedComponentsWithStats(mask);candidates=[]
+    for i in range(1,count):
+        a,b,c,d,pixels=stats[i];cx,cy=centers[i]+[left,top]
+        if not (.4*w<=c<=2.5*w and .4*h<=d<=2*h and pixels>=max(8,w*h*.2)):continue
+        if (w<h)!=(c<d):continue
+        candidates.append((math.hypot(cx-x-w/2,cy-y-h/2),np.array([a+left,b+top,c,d],float)))
+    return min(candidates,key=lambda item:item[0])[1] if candidates else None
+
+
 def locate_coloured_dot(element, reference, box):
     """Recover a small filled dot from its declared hue before following nearby edges."""
     x, y, width, height = box
-    if max(width, height) > (80 if family(element)=='hexagon' else 36):
+    if max(width, height) > (80 if family(element)=='hexagon' or element.get('_badge') else 36):
         return None
     colors = [element.get('fill')] + [stop.get('color') for stop in (element.get('gradient') or {}).get('stops', [])]
     hues = []
@@ -461,7 +586,7 @@ def locate_coloured_dot(element, reference, box):
             pass
     if not hues:
         return None
-    pad_x, pad_y = min(160, max(24, width*12)), min(80,max(24,height*5))
+    pad_x, pad_y = min(24, max(6, width*.75)), min(24,max(6,height*.75))
     left, right = max(0, int(x-pad_x)), min(WIDTH, int(x+width+pad_x))
     top, bottom = max(0, int(y-pad_y)), min(HEIGHT, int(y+height+pad_y))
     hsv = cv2.cvtColor(reference[top:bottom, left:right], cv2.COLOR_BGR2HSV).astype(float)
@@ -474,19 +599,78 @@ def locate_coloured_dot(element, reference, box):
         cx, cy = centers[i] + [left, top]
         if not (.1*width*height <= pixels <= 3*width*height and .5 <= cw/max(1,ch) <= 2):
             continue
-        if abs(cy-(y+height/2)) > pad_y:
+        if family(element)=='ellipse' and element.get('_circle'):
+            if max(cw,ch)/max(1,min(cw,ch))>1.18:continue
+            diameter=(cw+ch)/2
+            if not .7*((width+height)/2)<=diameter<=1.35*((width+height)/2):continue
+            cw=ch=diameter
+        if abs(cx-(x+width/2)) > pad_x or abs(cy-(y+height/2)) > pad_y:
             continue
-        cost = abs(cx-(x+width/2))*.1 + abs(cy-(y+height/2))*2 + abs(cw-ch)
+        cost = math.hypot(cx-(x+width/2),cy-(y+height/2)) + abs(cw-ch)
         candidates.append((cost, [cx-cw/2, cy-ch/2, float(cw), float(ch)]))
     return np.asarray(min(candidates, key=lambda item: item[0])[1]) if candidates else None
 
 
+def fit_capsule(e,ref,distance,valid):
+    """A capsule has full semicircular ends, not four tiny local bevels."""
+    x,y,w,h=[float(e[k]) for k in ('x','y','w','h')];boxes=[np.array([x,y,w,h])]
+    try:
+        color=str(e.get('fill','')).lstrip('#');bgr=np.array([[[int(color[i:i+2],16) for i in (4,2,0)]]],np.uint8)
+        hint=cv2.cvtColor(bgr,cv2.COLOR_BGR2HSV)[0,0].astype(float)
+        pad=min(28,max(10,min(w,h)*.5));left,top=max(0,int(x-pad)),max(0,int(y-pad));right,bottom=min(WIDTH,int(x+w+pad)),min(HEIGHT,int(y+h+pad))
+        hsv=cv2.cvtColor(ref[top:bottom,left:right],cv2.COLOR_BGR2HSV).astype(float)
+        hue=np.minimum(abs(hsv[:,:,0]-hint[0]),180-abs(hsv[:,:,0]-hint[0]))
+        mask=((hue<16)&(hsv[:,:,1]>max(30,hint[1]*.45))&(hsv[:,:,2]>70)).astype(np.uint8)
+        count,labels,stats,centers=cv2.connectedComponentsWithStats(mask)
+        for i in range(1,count):
+            a,b,c,d,area=map(int,stats[i])
+            if .7*w<c<1.4*w and .65*h<d<1.4*h and area>w*h*.35:boxes.append(np.array([left+a,top+b,c,d],float))
+    except (ValueError,TypeError):pass
+    candidates=[]
+    for box in boxes:
+        a,b,c,d=box
+        for fraction in (.4,.45,.5):
+            radius=min(c,d)*fraction;points=[]
+            for cx,cy,start in [(a+radius,b+radius,180),(a+c-radius,b+radius,270),(a+c-radius,b+d-radius,0),(a+radius,b+d-radius,90)]:
+                angles=np.deg2rad(np.linspace(start,start+90,18));points.extend(np.column_stack([cx+radius*np.cos(angles),cy+radius*np.sin(angles)]))
+            metric=score(np.array(points),distance,valid)
+            if metric and metric['support']>=.7 and metric['p95']<=4:
+                candidates.append((metric['cost']+.01*np.sum(abs(box-[x,y,w,h])),box,fraction,metric))
+    if not candidates:return {'key':e['key'],'status':'retained','family':'capsule','properties':{},'reason':'capsule-boundary-unresolved'}
+    _,box,fraction,metric=min(candidates,key=lambda item:item[0])
+    return {'key':e['key'],'status':'accepted','family':'capsule','properties':dict(zip(('x','y','w','h'),[round(float(v),3) for v in box]))|
+        {'type':'shape','shape':'roundRect','shapeGeometry':{'version':2,'cornerRadius':fraction,'corners':[{'type':'round','radius':fraction} for _ in range(4)]},'customGeometry':None,'adjustments':None,'flipH':False,'flipV':False},'metrics':metric}
+
+
 def fit(e, ref, distance, edge, valid):
     started = time.perf_counter()
+    g=e.get('shapeGeometry') or {};corners=g.get('corners') or []
+    capsule=str(e.get('shape','')).lower() in ('pill','roundrect') and not e.get('customGeometry') and (
+        float(g.get('cornerRadius',0))>=.35 or len(corners)==4 and all(c.get('type')=='round' and float(c.get('radius',0))>=.35 for c in corners))
+    if capsule:return fit_capsule(e,ref,distance,valid)
     kind = family(e)
     if not kind:
         return {'key': e['key'], 'status': 'unsupported'}
+    panel=e.get('_structuralPanel')
+    if panel and e.get('shape') in ('freeform','parallelogram','trapezoid'):
+        points=np.asarray(panel['points'],float);samples_visible=[]
+        for i in (0,1,3):
+            a,b=points[i],points[(i+1)%4]
+            samples_visible.extend(np.linspace(a,b,70)[7:-7])
+        sampled=np.asarray(samples_visible);xx=np.rint(sampled[:,0]).astype(int);yy=np.rint(sampled[:,1]).astype(int)
+        keep=valid[yy,xx];values=distance[yy[keep],xx[keep]]
+        if len(values)>=50 and np.mean(values<=2.5)>=.75 and np.percentile(values,90)<=3:
+            lo,hi=points.min(0),points.max(0);w,h=hi-lo
+            return {'key':e['key'],'status':'accepted','family':'quad','properties':{'x':round(float(lo[0]),3),'y':round(float(lo[1]),3),'w':round(float(w),3),'h':round(float(h),3),
+                'type':'shape','shape':'freeform','customGeometry':{'points':((points-lo)/[w,h]).tolist(),'closed':True},'shapeGeometry':None,'adjustments':None,'flipH':False,'flipV':False},
+                'metrics':{'p95':float(np.percentile(values,90)),'support':float(np.mean(values<=2.5)),'coverage':float(keep.mean())},'structuralEvidence':panel,
+                'elapsedMs':round((time.perf_counter()-started)*1000,1)}
     box = np.array([float(e[k]) for k in ('x', 'y', 'w', 'h')])
+    if kind=='ellipse' and e.get('_circle'):
+        diameter=float((box[2]+box[3])/2)
+        box[:2]+=(box[2:]-diameter)/2;box[2:]=diameter
+    thin=locate_thin_fill(e,ref,box) if kind=='quad' else None
+    if thin is not None:box=thin
     if min(box[2:]) < 4:
         return {'key': e['key'], 'status': 'retained', 'reason': 'small-object'}
     original = prototype(e, box, kind)
@@ -558,9 +742,9 @@ def fit(e, ref, distance, edge, valid):
             and min((best.max(axis=0) - best.min(axis=0)).tolist()) >= 4
         properties, corners = quad_properties(e, best, distance, valid)
         measured_corner = any(corner['type'] != 'sharp' for corner in corners)
-        if baseline_ok and measured_corner:
+        if baseline_ok and (measured_corner or thin is not None or metric['support']>=.8 and metric['p95']<=3):
             return {'key': e['key'], 'status': 'accepted', 'family': kind,
-                    'properties': properties, 'locatedDot': located_dot,
+                    'properties': properties, 'locatedDot': located_dot,'cornerEvidence':corners,
                     'metrics': metric, 'before': baseline,
                     'elapsedMs': round((time.perf_counter()-started)*1000, 1)}
         return {'key': e['key'], 'status': 'retained', 'family': kind, 'properties': {},
@@ -595,6 +779,7 @@ def fit(e, ref, distance, edge, valid):
                           w=round(float(w), 3), h=round(float(h), 3))
     return {'key': e['key'], 'status': 'accepted' if accepted else 'retained',
             'family': kind, 'properties': properties if accepted else {},
+            **({'cornerEvidence':_corners} if kind=='quad' else {}),
             'locatedDot': located_dot, 'metrics': metric, 'before': baseline,
             'elapsedMs': round((time.perf_counter()-started)*1000, 1)}
 
@@ -932,7 +1117,11 @@ def merge_measured_slant_groups(results, distance, valid, target_keys, originals
             if len(cluster)>=2:groups.append(cluster)
     for group_index, group in enumerate(groups):
         angles = sorted(float(item[1]['angle']) for item in group)
-        representative = angles[len(angles) // 2]
+        sources=[(row,d) for row,d in group if row.get('status')=='accepted' or not (originals.get(row['key'],{}).get('parameterEvidence') or {}).get('slant',{}).get('inherited')]
+        weights=[max(0.,float((row.get('metrics') or _row_boundary_metric(row) or {}).get('support',0)))*(1-min(.8,float((row.get('metrics') or {}).get('p95',0))/10)) for row,_ in sources]
+        reliable=[(item,w) for item,w in zip(sources,weights) if w>=.55]
+        if not reliable:continue
+        representative = weighted_median([item[1]['angle'] for item,w in reliable],[w for item,w in reliable])
         representative = round(representative, 1)
         if group[0][1]['family'] == 'line':
             representative = max(0.0, min(90.0, representative))
@@ -978,6 +1167,7 @@ def merge_measured_slant_groups(results, distance, valid, target_keys, originals
             row['properties'] = merged
             row['status']='accepted'
             row['slantEvidence'] = evidence
+            row.setdefault('parameterEvidence',{})['slant']=provenance([item[0]['key'] for item,w in reliable],max(w for item,w in reliable))
     return results
 
 
@@ -1001,7 +1191,7 @@ def main():
     results = []
     line_keys={e['key'] for e in spec.get('elements',[]) if e.get('type')=='line' and e.get('key') in keys}
     if line_keys:
-        proposals, _ = fit_native_lines(cv2.cvtColor(ref,cv2.COLOR_BGR2RGB),spec['elements'],None,line_keys)
+        proposals, line_diagnostics = fit_native_lines(cv2.cvtColor(ref,cv2.COLOR_BGR2RGB),spec['elements'],None,line_keys)
         for proposal in proposals:
             properties={key:value for key,value in (proposal.get('properties') or {}).items()
                         if key in ('x','y','w','h','flipH','flipV')}
@@ -1014,7 +1204,8 @@ def main():
         proposed={row['key'] for row in results}
         # A line already agreeing with the reference still supplies boundary
         # evidence to a shared slope; the joint validator decides whether to keep it.
-        results.extend({'key':key,'status':'retained','family':'line','properties':{}}
+        reasons={d['key']:d.get('reason') for d in line_diagnostics}
+        results.extend({'key':key,'status':'retained','family':'line','properties':{},'reason':reasons.get(key,'line-not-observable')}
                        for key in sorted(line_keys-proposed))
     for e in spec.get('elements', []):
         if e.get('key') in keys and e.get('type')!='line':
@@ -1030,7 +1221,11 @@ def main():
                 local_valid=valid
                 if formula_carrier:
                     local_valid=valid.copy();local_valid[max(0,int(e['y']-50)):min(HEIGHT,int(e['y']+e['h']+50)),max(0,int(e['x']-5)):min(WIDTH,int(e['x']+e['w']+5))]=True
-                results.append(fit({**e,'_formulaCarrier':formula_carrier}, ref, distance, strength, local_valid))
+                panel=match_panel(e,(spec.get('structural') or {}).get('panels',[]))
+                badge=e.get('type')=='ellipse' and any(other.get('role')=='visual-number'
+                    and e['x']<=other['x']+other['w']/2<=e['x']+e['w'] and e['y']<=other['y']+other['h']/2<=e['y']+e['h'] for other in spec.get('elements',[]))
+                circle=e.get('shape')=='circle' or e['key'] in {k for group in spec.get('circleGroups',[]) for k in group['keys']} or max(e['w'],e['h'])/max(1,min(e['w'],e['h']))<=1.18
+                results.append(fit({**e,'_formulaCarrier':formula_carrier,'_structuralPanel':panel,'_badge':badge,'_circle':circle}, ref, distance, strength, local_valid))
             except Exception as error:
                 results.append({'key': e['key'], 'status': 'retained', 'error': str(error)[:250]})
     # Table icon rows are an explicit repeated-shape group. Share size only after each member's
@@ -1058,7 +1253,9 @@ def main():
         for row in members:
             row['properties'].update(zip(('x','y','w','h'),located[row['key']].tolist()))
         widths, heights = [row['properties']['w'] for row in members], [row['properties']['h'] for row in members]
-        width, height = float(np.median(widths)), float(np.median(heights))
+        weights=[max(0.,float((row.get('metrics') or {}).get('support',0)))*(1-min(.8,float((row.get('metrics') or {}).get('p95',0))/10)) for row in members]
+        width,height=weighted_median(widths,weights),weighted_median(heights,weights)
+        if width is None or height is None:continue
         if max(widths)-min(widths)>width*.25 or max(heights)-min(heights)>height*.25:
             continue
         for row in members:
@@ -1070,6 +1267,78 @@ def main():
                 p.update(customGeometry={'points':[[.5,0],[1,.25],[1,.75],[.5,1],[0,.75],[0,.25]],'closed':True} if vertical else None,
                          shapeGeometry=None,adjustments=None,flipH=False,flipV=False)
                 row['sharedGeometry'] = True
+                row.setdefault('parameterEvidence',{})['diameter']=provenance([m['key'] for m in members],max(weights))
+    # Repeated circles share a measured diameter at their own centres. Small
+    # raster boxes such as 9x10 and 10x9 are not intentional ellipses.
+    by_key={row['key']:row for row in results}
+    for group in spec.get('circleGroups',[]):
+        members=[by_key[k] for k in group['keys'] if k in by_key and by_key[k].get('status')=='accepted' and by_key[k].get('family')=='ellipse'
+                 and not any(p in originals[k].get('keepParameters',[]) for p in ('width','height','diameter'))]
+        anchors=[originals[k] for k in group['keys'] if k in originals and k not in keys
+                 and (originals[k].get('geometryEvidence') or {}).get('accepted')
+                 and not (originals[k].get('parameterEvidence') or {}).get('diameter',{}).get('inherited')]
+        anchor_sizes=[(e['w']+e['h'])/2 for e in anchors]
+        anchored=len(anchor_sizes)>=1 and max(anchor_sizes)-min(anchor_sizes)<=max(1.,float(np.median(anchor_sizes))*.1)
+        if not anchored and len(members)<2:continue
+        diameter=weighted_median(anchor_sizes if anchored else [(r['properties']['w']+r['properties']['h'])/2 for r in members],
+            [float((e.get('geometryEvidence') or {}).get('support',.8)) for e in anchors] if anchored else [float((r.get('metrics') or {}).get('support',0)) for r in members])
+        if diameter is None:continue
+        for row in members:
+            p=row['properties'];trial=[p['x']+(p['w']-diameter)/2,p['y']+(p['h']-diameter)/2,diameter,diameter]
+            observed=score(prototype(originals[row['key']],trial,'ellipse'),distance,valid)
+            if observed and observed['support']>=.6 and observed['p95']<=6:
+                p.update(zip(('x','y','w','h'),[round(float(v),3) for v in trial]));row['sharedGeometry']=True;row['sharedDiameter']=group['id']
+            elif anchored:
+                # A local repair cannot replace a verified shared diameter with
+                # a different nearby dot. Retain the prior centre and diameter.
+                original=originals[row['key']]
+                row.update(status='retained',properties={'x':round(original['x']+(original['w']-diameter)/2,3),
+                           'y':round(original['y']+(original['h']-diameter)/2,3),'w':round(diameter,3),'h':round(diameter,3)},sharedDiameter=group['id'])
+        # One independent representative retains the raw measured diameter;
+        # peers are inherited and cannot multiply its vote in a later refit.
+        sources=[e['key'] for e in anchors] if anchored else [r['key'] for r in members]
+        representative=max(members,key=lambda r:(r.get('metrics') or {}).get('support',0)) if members else None
+        for row in members:
+            if row.get('sharedDiameter'):
+                row.setdefault('parameterEvidence',{})['diameter']=(
+                    {'confidence':.85,'independent':True,'source':'reference-boundary','observationId':group['id']+':diameter'}
+                    if row is representative and not anchored else provenance(sources,.85))
+        for key in group['keys']:
+            row=by_key.get(key);original=originals.get(key,{})
+            if not row or row in members or any(p in original.get('keepParameters',[]) for p in ('width','height','diameter')):continue
+            if abs((original.get('w',0)+original.get('h',0))/2-diameter)>max(1,diameter*.1):continue
+            # Boundary-poor peers can share only the already-supported group
+            # diameter. Keep their own centres and unresolved-position evidence.
+            row['properties']={'x':round(original['x']+(original['w']-diameter)/2,3),
+                               'y':round(original['y']+(original['h']-diameter)/2,3),
+                               'w':round(diameter,3),'h':round(diameter,3)}
+            row['sharedDiameter']=group['id']
+            row.setdefault('parameterEvidence',{})['diameter']=provenance([e['key'] for e in anchors] if anchored else [r['key'] for r in members],.8)
+    # Explicit shape equivalence owns the whole corner signature; paint/slant groups do not.
+    corner_groups={}
+    for key,original in originals.items():
+        labels=original.get('parameterGroups') or {}
+        label=labels.get('shape') or labels.get('geometry') or labels.get('corners')
+        if label and key in by_key:corner_groups.setdefault(label,[]).append(by_key[key])
+    for label,rows in corner_groups.items():
+        sources=[r for r in rows if r.get('status')=='accepted' and len(r.get('cornerEvidence',[]))==4
+                 and float((r.get('metrics') or {}).get('support',0))*(1-min(.6,float((r.get('metrics') or {}).get('p95',0))/12))>=.55]
+        if not sources:continue
+        source=max(sources,key=lambda r:float((r.get('metrics') or {}).get('support',0))/(1+float((r.get('metrics') or {}).get('p95',0))))
+        corners=((source.get('properties') or {}).get('shapeGeometry') or {}).get('corners')
+        if not corners:continue
+        for row in rows:
+            original=originals[row['key']]
+            if 'corners' in original.get('keepParameters',[]):continue
+            props=row.setdefault('properties',{})
+            shape_shared=bool((original.get('parameterGroups') or {}).get('shape') or (original.get('parameterGroups') or {}).get('geometry'))
+            if shape_shared:
+                props['shape']=source['properties']['shape']
+                props['customGeometry']=source['properties'].get('customGeometry')
+            else:props.setdefault('shape',original.get('shape'))
+            props['shapeGeometry']={**(props.get('shapeGeometry') or {}),'version':2,'corners':corners}
+            row['sharedCorners']=label
+            row.setdefault('parameterEvidence',{})['corners']=provenance([source['key']],.85)
     # Bounded S3 measured-slant joint fit: only near slopes of the same family/direction, never
     # positions/widths/heights/fonts; S3 result owns the merged slope so S6 must not rewrite it.
     merge_measured_slant_groups(results, distance, valid, keys, originals)

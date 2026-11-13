@@ -1,4 +1,4 @@
-﻿param([Parameter(Mandatory=$true)][string]$DeckPath,[Parameter(Mandatory=$true)][string]$OutputDir,[string]$MotionSpec='',[string]$PageIndices='')
+﻿param([Parameter(Mandatory=$true)][string]$DeckPath,[Parameter(Mandatory=$true)][string]$OutputDir,[string]$MotionSpec='',[string]$PageIndices='',[switch]$PreviewOnly,[switch]$FinalizeOnly)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 function File-SHA256([string]$FilePath) {
@@ -33,6 +33,16 @@ try {
         $deck.Save()
         [IO.File]::WriteAllText((Join-Path $renderDir 'animation-manifest.json'), ($motionReport | ConvertTo-Json -Depth 12), [Text.UTF8Encoding]::new($false))
     }
+    if ($FinalizeOnly) {
+        if (-not $PageIndices) { Invoke-OfficeCall { $deck.SaveAs((Join-Path $renderDir 'deck.pdf'),32) } }
+        $manifest = Get-Content -LiteralPath (Join-Path $renderDir 'render-manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $manifest.pptx_sha256 = File-SHA256 $deckFile
+        $manifest.at = [DateTime]::UtcNow.ToString('o')
+        $json = $manifest | ConvertTo-Json -Depth 8
+        [IO.File]::WriteAllText((Join-Path $renderDir 'render-manifest.json'),$json,[Text.UTF8Encoding]::new($false))
+        Write-Output $json
+        return
+    }
     if ([Math]::Abs($deck.PageSetup.SlideWidth / $deck.PageSetup.SlideHeight - 16.0 / 9.0) -gt 0.00001) { throw 'PPTX must be 16:9' }
     $pages = @()
     for ($index = 1; $index -le $deck.Slides.Count; $index++) {
@@ -63,6 +73,8 @@ try {
                         h = [double]$shape.Height * $scale
                         boundWidth = [double]$range.BoundWidth * $scale
                         boundHeight = [double]$range.BoundHeight * $scale
+                        boundLeft = [double]$range.BoundLeft * $scale
+                        boundTop = [double]$range.BoundTop * $scale
                         fontSize = [double]$range.Font.Size / 0.6
                         maxLineCharacters = $maxLineCharacters
                         lineCount = $lineCount
@@ -79,7 +91,7 @@ try {
         Invoke-OfficeCall { $deck.Slides.Item($index).Export($image, 'PNG', 1920, 1080) }
         $pages += @{index=$index-1;file=$file;sha256=(File-SHA256 $image);texts=$texts;measurementErrors=$measurementErrors}
     }
-    if (-not $PageIndices) { Invoke-OfficeCall { $deck.SaveAs((Join-Path $renderDir 'deck.pdf'),32) } }
+    if (-not $PageIndices -and -not $PreviewOnly) { Invoke-OfficeCall { $deck.SaveAs((Join-Path $renderDir 'deck.pdf'),32) } }
     $manifest = @{renderer='Microsoft PowerPoint';version=$app.Version;pages=$pages;at=[DateTime]::UtcNow.ToString('o');pptx_sha256=(File-SHA256 $deckFile)}
     $json = $manifest | ConvertTo-Json -Depth 8
     [IO.File]::WriteAllText((Join-Path $renderDir 'render-manifest.json'),$json,[Text.UTF8Encoding]::new($false))

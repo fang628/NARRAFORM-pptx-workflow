@@ -18,6 +18,7 @@ import numpy as np
 # module for its pure policy helpers must not read argv/spec files.
 spec = None
 image = None
+surface_image = None
 page_width = 1600.0
 ratio = 1.0
 
@@ -157,8 +158,34 @@ def analyse_text(element):
     if len(ring_pixels) < 20:
         ring_pixels = expanded_lab.reshape(-1, 3)
     background = np.median(ring_pixels, axis=0)
+    # A bounded badge/label lives on its carrier, not on the page surrounding
+    # that carrier. Sample the local surface when its declared colour is present.
+    carrier_mask=None
+    for carrier in sorted(spec.get('elements',[]) if spec else [],key=lambda c:float(c.get('w',0))*float(c.get('h',0))):
+        if carrier.get('type') not in ('shape','rect','ellipse') or carrier.get('key')==element.get('key'):continue
+        ox,oy,ow,oh=[float(carrier.get(k,0) or 0) for k in ('x','y','w','h')]
+        if not (ox-3<=x and oy-3<=y and x+w<=ox+ow+3 and y+h<=oy+oh+3):continue
+        fill=carrier.get('fill')
+        try:
+            ink=to_lab([int(fill[i:i+2],16) for i in (0,2,4)])
+            candidates=lab.reshape(-1,3);candidates=candidates[np.linalg.norm(candidates-ink,axis=1)<45]
+            if len(candidates)>=40:
+                background=np.median(candidates,axis=0)
+                if carrier.get('type')=='ellipse':
+                    yy,xx=np.mgrid[0:patch.shape[0],0:patch.shape[1]]
+                    carrier_mask=((xx/ratio+x-ox)/ow-.5)**2+((yy/ratio+y-oy)/oh-.5)**2<.44**2
+                break
+        except (TypeError,ValueError):pass
     distance = np.linalg.norm(lab - background, axis=2)
+    if surface_image is not None:
+        surface=surface_image[max(0,y0):y1,max(0,x0):x1]
+        if surface.shape==patch.shape:
+            surface_lab=cv2.cvtColor(surface,cv2.COLOR_BGR2LAB).astype(np.float32)
+            # Protect the actual fitted gradient/background at each location,
+            # not a page-wide median that can mistake a blue carrier for ink.
+            distance=np.minimum(distance,np.linalg.norm(lab-surface_lab,axis=2))
     mask = distance > 22.0
+    if carrier_mask is not None:mask &= carrier_mask
     if mask.sum() < 40:
         return None
     background_lab = background
@@ -518,10 +545,12 @@ def snap_extreme(value):
 
 
 def main():
-    global spec, image, page_width, ratio, output
+    global spec, image, surface_image, page_width, ratio, output
     spec = json.load(open(sys.argv[1], encoding='utf-8'))
     output = sys.argv[2]
     image = cv2.imread(spec['reference'])
+    surface_image=cv2.imread(spec['surface']) if spec.get('surface') else None
+    if surface_image is not None and image is not None:surface_image=cv2.resize(surface_image,(image.shape[1],image.shape[0]))
     if image is None:
         raise SystemExit('无法读取参考图：' + str(spec.get('reference')))
     page_width = float(spec.get('pageWidth') or 1600)

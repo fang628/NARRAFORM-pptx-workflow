@@ -256,13 +256,16 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
     if int(limit.get('sharedInstances',1))>=2 and len(pixels)>=1000:
         max_knots=min(5,max(max_knots,int(limit.get('maxStops',max_knots))))
     def evaluate(kind,angle=0,center=(.5,.5),knots=None):
-        if element.get('_verticalGradientOnly') and (kind!='linear' or abs(angle-90)>.001):return None
         if over_budget():return None
         state['evaluated']+=1
         t=np.asarray(paint_coordinate(kind,xx,yy,element,angle,center),float)
         if np.ptp(t)<.24:return None
         knots=np.array([0.,1.] if knots is None else knots)
         if len(knots)>max_knots:return None
+        # Stop freedom follows physical support, rather than the residual at a
+        # few polluted pixels. Narrow real highlights need their own samples.
+        physical=max(1.,min_dimension)
+        if len(knots)>2 and np.min(np.diff(knots))*physical<5:return None
         matrix=_spline(t,knots)
         if np.linalg.matrix_rank(matrix[train])<len(knots):return None
         effective=effective_alpha(t) if composited else np.ones(len(t))
@@ -279,7 +282,11 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
         predicted=effective[:,None]*raw+offset
         res=np.mean(abs(predicted-observed),axis=1)
         error=float(np.mean(res[test]));robust=float(np.mean(np.sort(res[test])[:max(1,int(test.sum()*.85))]));r2=1-float(np.mean((predicted[test]-observed[test])**2))/max(1,variance)
-        item=dict(kind=kind,angle=angle,center=center,colors=colors,knots=knots,error=error,robust=robust,r2=r2,score=robust*.65+error*.35+.5*(len(knots)-2)+(0 if kind=='linear' else .25),predicted=predicted,t=t)
+        slopes=np.diff(colors,axis=0)/np.diff(knots)[:,None]/physical
+        bending=float(np.mean(np.linalg.norm(np.diff(slopes,axis=0),axis=1))) if len(slopes)>1 else 0.
+        reversals=max(0.,float(np.sum(np.linalg.norm(np.diff(colors,axis=0),axis=1))-np.linalg.norm(colors[-1]-colors[0])))
+        smoothness=.25*bending+.012*reversals
+        item=dict(kind=kind,angle=angle,center=center,colors=colors,knots=knots,error=error,robust=robust,r2=r2,score=robust*.65+error*.35+.5*(len(knots)-2)+smoothness+(0 if kind=='linear' else .25),predicted=predicted,t=t)
         candidates.append(item);return item
     def coarse(kind,angle=0,center=(.5,.5)):
         options=[[0.,1.],[0.,.3,1.],[0.,.5,1.],[0.,.7,1.],[0.,.25,.5,.75,1.]]
@@ -303,9 +310,6 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
     current_kind=current.get('type') if isinstance(current,dict) and current.get('type') in GRADIENT_KINDS else None
 
     def coarse_kind(paint_kind,near_current):
-        if element.get('_verticalGradientOnly'):
-            if paint_kind=='linear':coarse('linear',90)
-            return
         if paint_kind=='linear':
             if near_current and isinstance(current,dict) and current.get('type')=='linear':
                 base=float(current.get('angle',0) or 0)
@@ -325,7 +329,6 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
             for y in (.05,.3,.5,.7,.95):coarse(paint_kind,center=(x,y))
 
     def refine(kinds,fine=False):
-        if element.get('_verticalGradientOnly'):return
         # Retain several direction/focus hypotheses: an early coarse winner can be
         # a reversed or displaced approximate solution with compensating colours.
         for first in [seed for kind in kinds for seed in geometry_seeds(kind,2 if fine else 3)]:
@@ -457,7 +460,7 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
     # A model that explains less variance than a constant while still leaving a large absolute
     # residual is not a reliable fill: keep the audited parameters instead of overwriting them
     # with a fitted average (real translucent panels had r2<0.2 with afterError 7-8).
-    if not base_only and after>6 and best['r2']<0.25:
+    if after>6 and best['r2']<0.25:
         return report('unstable-spatial-fit',beforeError=round(before,3),afterError=round(after,3),r2=round(best['r2'],4),robustError=round(best['robust'],3),coverage=round(coverage,3))
     if transparent:
         # Preserve the original stop-alpha profile at the fitted stop positions;

@@ -13,7 +13,7 @@ def sample(image,points):
     return cv2.remap(image.astype(np.float32),points[:,:,0].astype(np.float32),points[:,:,1].astype(np.float32),cv2.INTER_LINEAR,borderMode=cv2.BORDER_REPLICATE)
 
 
-def fit_native_lines(ref,elements,excluded=None,target_keys=None):
+def _fit_native_lines(ref,elements,excluded=None,target_keys=None):
     proposals=[];diagnostics=[]
     for e in elements:
         if e.get('type')!='line' or e.get('managed') or e.get('lineEffect')=='lit' or e.get('glow') or e.get('shadow') or target_keys is not None and e['key'] not in target_keys:continue
@@ -67,4 +67,55 @@ def fit_native_lines(ref,elements,excluded=None,target_keys=None):
         if gradient and gradient['gradient']['type']=='linear':props['gradient']=gradient['gradient']
         elif len(pixels)>20 and np.mean(np.std(pixels,axis=0))<5:props.update(color=''.join(f'{int(round(c)):02X}' for c in np.median(pixels,axis=0)),gradient=None)
         proposals.append({'key':e['key'],'properties':props,'method':'multi-section-Huber-centreline','support':round(float(support),3),'medianResidual':round(float(np.median(residual)),3),'dashed':bool(dashed),'paint':paint_detail})
+    return proposals,diagnostics
+
+
+def relocate_arrow(ref,e,excluded=None):
+    """Recover an isolated coloured arrow before retrying a misplaced seed."""
+    if not any(e.get(k) not in (None,'none') for k in ('beginArrowType','endArrowType')):return None
+    a,b=endpoints(e);direction=b-a;length=np.linalg.norm(direction)
+    if length<20:return None
+    direction/=length
+    try:color=np.array([int(str(e.get('color','')).lstrip('#')[i:i+2],16) for i in (0,2,4)],float)
+    except (ValueError,TypeError):return None
+    pad=min(100,max(35,length*1.2));left=max(0,int(min(a[0],b[0])-pad));right=min(ref.shape[1],int(max(a[0],b[0])+pad));top=max(0,int(min(a[1],b[1])-pad));bottom=min(ref.shape[0],int(max(a[1],b[1])+pad))
+    patch=ref[top:bottom,left:right].astype(float)
+    mask=(np.linalg.norm(patch-color,axis=2)<70).astype(np.uint8)
+    if excluded is not None:mask[excluded[top:bottom,left:right]]=0
+    count,labels,stats,centers=cv2.connectedComponentsWithStats(mask)
+    choices=[]
+    for i in range(1,count):
+        x,y,w,h,area=map(int,stats[i])
+        if x<=1 or y<=1 or x+w>=mask.shape[1]-1 or y+h>=mask.shape[0]-1:continue
+        if area<20 or max(w,h)<length*.45 or max(w,h)>length*1.8 or area>w*h*.65:continue
+        yy,xx=np.nonzero(labels==i);points=np.column_stack([xx+left,yy+top]).astype(float)
+        vx,vy,cx,cy=cv2.fitLine(points.astype(np.float32),cv2.DIST_HUBER,0,.005,.005).ravel();d=np.array([vx,vy],float)
+        if np.dot(d,direction)<0:d=-d
+        if np.dot(d,direction)<.94:continue
+        normal=np.array([-d[1],d[0]]);projection=points@d
+        lo,hi=float(projection.min()),float(projection.max());span=hi-lo
+        begin_only=e.get('beginArrowType') not in (None,'none') and e.get('endArrowType') in (None,'none')
+        shaft=points[(projection>lo+span*(.35 if begin_only else .15))&(projection<lo+span*(.85 if begin_only else .65))]
+        if len(shaft)<12:continue
+        offset=float(np.median(shaft@normal));residual=np.abs(shaft@normal-offset)
+        if np.median(residual)>max(1.5,float(e.get('strokeWidth',2))):continue
+        pa=d*lo+normal*offset;pb=d*hi+normal*offset
+        distance=float(np.linalg.norm((pa+pb)/2-(a+b)/2))
+        if distance>pad:continue
+        choices.append((distance+abs(span-length)*.15,pa,pb,float(np.mean(residual<3))))
+    if not choices:return None
+    _,pa,pb,support=min(choices,key=lambda item:item[0]);lo=np.minimum(pa,pb);hi=np.maximum(pa,pb)
+    return {'key':e['key'],'properties':{'x':round(float(lo[0]),3),'y':round(float(lo[1]),3),'w':round(float(hi[0]-lo[0]),3),'h':round(float(hi[1]-lo[1]),3),'flipH':bool(pa[0]>pb[0]),'flipV':bool(pa[1]>pb[1])},
+        'method':'isolated-arrow-component-centreline','support':support,'medianResidual':0.5}
+
+
+def fit_native_lines(ref,elements,excluded=None,target_keys=None):
+    proposals,diagnostics=_fit_native_lines(ref,elements,excluded,target_keys)
+    accepted={p['key'] for p in proposals}
+    for e in elements:
+        if e.get('type')!='line' or e['key'] in accepted or target_keys is not None and e['key'] not in target_keys:continue
+        if e.get('managed') or e.get('glow') or e.get('shadow') or e.get('lineEffect')=='lit':continue
+        recovered=relocate_arrow(ref,e,excluded)
+        if recovered:
+            proposals.append(recovered);diagnostics=[d for d in diagnostics if d['key']!=e['key']]
     return proposals,diagnostics

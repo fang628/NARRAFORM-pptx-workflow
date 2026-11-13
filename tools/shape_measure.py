@@ -72,6 +72,10 @@ def box_polygon(e):
 
 def seed_polygon_of(e):
     geometry = e.get('customGeometry') or {}
+    if geometry.get('commands'):
+        from shape_reference import seed_polygon
+        polygon=seed_polygon(e)
+        if polygon is not None:return np.asarray(polygon,float)
     points = geometry.get('points') if isinstance(geometry, dict) else None
     if isinstance(points, list) and len(points) >= 3:
         x, y, w, h = box_of(e)
@@ -1439,11 +1443,10 @@ def improve_fit(e, item, index, elements, families, lines, edge, dist, front, re
     boxes (that is what moved panel outlines onto neighbouring text). Only the weak edge map
     is retried on the identical ROI, and every accepted variant must pass containment."""
     metrics = item['chosen']['metrics']
-    if (metrics['boundaryP95'] <= 12.0 and metrics['edgeSupport'] >= 0.72
-            and not e.get('_mergeFamily')):
+    if metrics['boundaryP95'] <= 12.0 and metrics['edgeSupport'] >= 0.72:
         return item
     model = str(item.get('model') or '')
-    panel_model = model in PANEL_MODELS and not e.get("_mergeFamily")
+    panel_model = model in PANEL_MODELS
     w, h = float(e['w']), float(e['h'])
     candidates = []
     layouts = []
@@ -4740,6 +4743,11 @@ def fit_element(e, index, elements, families, lines, edge, dist, front):
                             and refined_metrics['chamfer'] < coarse_metrics['chamfer'])):
                     quad = refined_quad
         quad_rank = [round(s, 4) for s, _ in scored[:5]]
+        if str(e.get('shape') or '').lower() in ('rect','roundrect') and not e.get('customGeometry'):
+            # Keep the rectangle family during fallback search as well. Sides
+            # share their axes; corner measurements cannot introduce taper.
+            lo=quad.min(axis=0);hi=quad.max(axis=0)
+            quad=np.array([[lo[0],lo[1]],[hi[0],lo[1]],[hi[0],hi[1]],[lo[0],hi[1]]])
         corners = [detect_corner(quad, i, lines, edge, dist, front, box) for i in range(4)]
         top_vec = quad[1] - quad[0]
         bottom_vec = quad[3] - quad[2]
@@ -5621,203 +5629,6 @@ def detect_heading_carriers(ref, families, lines, elements, heading_node_ids, ed
     return carriers
 
 
-# ---------------------------------------------------------------- constrained merge
-def constrain_quad(quad):
-    """Project a fitted quad onto a true parallelogram: horizontal top/bottom and one
-    common slant for both sides, so neighbours can be aligned edge-to-edge."""
-    quad = np.asarray(quad, float)
-    top_y = float((quad[0][1] + quad[1][1]) / 2.0)
-    bottom_y = float((quad[2][1] + quad[3][1]) / 2.0)
-    shift = float(((quad[3][0] - quad[0][0]) + (quad[2][0] - quad[1][0])) / 2.0)
-    top_left = float((quad[0][0] + (quad[3][0] - shift)) / 2.0)
-    top_right = float((quad[1][0] + (quad[2][0] - shift)) / 2.0)
-    return np.array([[top_left, top_y], [top_right, top_y], [top_right + shift, bottom_y], [top_left + shift, bottom_y]], float)
-
-
-def panel_quad(base, index, width, step, shift, top_y, bottom_y):
-    tl_x = base + index * step
-    return np.array([[tl_x, top_y], [tl_x + width, top_y],
-                     [tl_x + width + shift, bottom_y], [tl_x + shift, bottom_y]], float)
-
-
-def merge_parallelogram_group(keys, element_items):
-    """Unify the family's height and slant (so neighbouring sides are parallel and the
-    top/bottom rules line up), then re-optimize each panel's own width/position against
-    its edge evidence instead of forcing one shared width that fights the reference."""
-    items = [(key, element_items[key]) for key in keys if key in element_items]
-    if len(items) < 2:
-        return None
-    constrained = []
-    for key, item in items:
-        quad_source = item['chosen'].get('anchoredQuad') or item['chosen'].get('quad')
-        if quad_source is None or len(quad_source) != 4:
-            points = np.asarray(item['chosen']['points'], float)
-            if len(points) < 4:
-                continue
-            quad_source = points[:4]
-        raw_points = np.asarray(quad_source, float)
-        box_hint = item.get('_box')
-        if box_hint is None:
-            box_hint = [raw_points[:, 0].min(), raw_points[:, 1].min(),
-                        max(1.0, raw_points[:, 0].max() - raw_points[:, 0].min()),
-                        max(1.0, raw_points[:, 1].max() - raw_points[:, 1].min())]
-        if not quad_is_sane(raw_points, box_hint):
-            continue
-        quad = constrain_quad(raw_points)
-        constrained.append({
-            'key': key, 'item': item,
-            'top': float((quad[0][1] + quad[1][1]) / 2.0),
-            'bottom': float((quad[2][1] + quad[3][1]) / 2.0),
-            'shift': float(((quad[3][0] - quad[0][0]) + (quad[2][0] - quad[1][0])) / 2.0),
-            'width': float(quad[1][0] - quad[0][0]),
-            'left': float(quad[0][0]),
-        })
-    if len(constrained) < 2:
-        return None
-    constrained.sort(key=lambda entry: entry['left'])
-    top_y = float(np.median([entry['top'] for entry in constrained]))
-    bottom_y = float(np.median([entry['bottom'] for entry in constrained]))
-    shift = float(np.median([entry['shift'] for entry in constrained]))
-    merged = {}
-    for entry in constrained:
-        item = entry['item']
-        best = None
-        for width_delta in np.arange(-6, 6.01, 2.0):
-            for left_delta in np.arange(-8, 8.01, 1.0):
-                width = entry['width'] + width_delta
-                left = entry['left'] + left_delta
-                quad = np.array([[left, top_y], [left + width, top_y],
-                                 [left + width + shift, bottom_y], [left + shift, bottom_y]], float)
-                metrics = boundary_metrics(quad, item['_dist'], item['_front'], spacing=2.0)
-                score = metrics['edgeSupport'] - 0.001 * max(0.0, metrics['boundaryP95'] - 1.5)
-                if best is None or score > best[0]:
-                    best = (score, width, left, quad, metrics)
-        _score, width, left, quad, metrics = best
-        merged[entry['key']] = {
-            'quad': quad, 'metrics': metrics,
-            'x': round(float(left), 2), 'y': round(top_y, 2), 'w': round(float(width), 2),
-            'h': round(bottom_y - top_y, 2), 'shift': round(shift, 2),
-            # Native parallelogram bbox width = top width + |shift| (the element bbox spans
-            # both edges). shift is bottom-right minus top-right, so a negative shift means
-            # the top edge sits to the right => slantSign +1.
-            'headDepth': round(abs(shift) / max(1e-6, width + abs(shift)), 4),
-            'slantSign': 1 if shift < 0 else -1,
-        }
-    ordered_keys = [entry['key'] for entry in constrained]
-    lefts = [merged[key]['x'] for key in ordered_keys]
-    widths = [merged[key]['w'] for key in ordered_keys]
-    gaps = [lefts[i + 1] - (lefts[i] + widths[i]) for i in range(len(lefts) - 1)]
-    if gaps:
-        target_gap = max(float(np.median(gaps)), 8.0)
-        positions = [lefts[0]]
-        for i in range(len(ordered_keys) - 1):
-            positions.append(positions[-1] + widths[i] + target_gap)
-        for i in range(1, len(ordered_keys)):
-            shift_x = positions[i] - lefts[i]
-            if abs(shift_x) < 1e-9:
-                continue
-            quad = np.asarray(merged[ordered_keys[i]]['quad'], float)
-            quad[:, 0] += shift_x
-            merged[ordered_keys[i]]['quad'] = quad
-            if 'metrics' in merged[ordered_keys[i]]:
-                del merged[ordered_keys[i]]['metrics']
-        for key in ordered_keys:
-            merged[key]['x'] = round(float(merged[key]['quad'][0][0]), 3)
-    lefts = [merged[key]['x'] for key in ordered_keys]
-    rights = [merged[key]['x'] + merged[key]['w'] for key in ordered_keys]
-    gaps = [round(lefts[i + 1] - rights[i], 2) for i in range(len(lefts) - 1)]
-    return {'keys': ordered_keys, 'top': round(top_y, 2), 'bottom': round(bottom_y, 2),
-            'shift': round(shift, 2), 'gap': gaps, 'items': merged}
-
-
-def apply_family_merge(result, groups_spec, lines=None):
-    reports = []
-    by_key = {item['key']: item for item in result['elements']}
-    for group in groups_spec or []:
-        keys = [key for key in group.get('keys', []) if key in by_key]
-        if len(keys) < 2:
-            continue
-        merged = merge_parallelogram_group(keys, by_key)
-        if merged is None:
-            continue
-        for key, info in merged['items'].items():
-            item = by_key[key]
-            item['chosen']['points'] = info['quad'].round(3).tolist()
-            item['chosen']['kind'] = 'parallelogram-merged'
-            item['chosen']['metrics'] = info.get('metrics') or boundary_metrics(info['quad'], item['_dist'], item['_front'])
-            item['chosen']['native'] = {'type': 'shape', 'shape': 'parallelogram',
-                                        'shapeGeometry': {'version': 2, 'headDepth': info['headDepth'], 'slantSign': info['slantSign']}}
-            item['chosen']['merged'] = True
-            item['chosen']['mergeInfo'] = {key: (float(value) if isinstance(value, (int, float, np.floating)) else value)
-                                           for key, value in info.items() if key != 'quad'}
-        report = {'family': group.get('family', 'family'), 'type': 'parallelogram-panels'}
-        for field in ('keys', 'top', 'bottom', 'shift', 'width', 'step', 'gap'):
-            if field in merged:
-                report[field] = merged[field]
-        report['items'] = {key: {k: v for k, v in info.items() if k in ('x', 'y', 'w', 'h', 'shift', 'headDepth')} for key, info in merged['items'].items()}
-        reports.append(report)
-    carriers = [carrier for carrier in (result.get('missing') or []) if carrier.get('subkind') == 'heading-carrier']
-    if len(carriers) >= 2:
-        # Detect bevels again on the constrained (true-parallelogram) band outline so the
-        # measured cut belongs to the same outline that will be written to the deck.
-        evidence = []
-        constrained_by_key = {}
-        for carrier in carriers:
-            shape = carrier['shape']
-            quad_seed = shape['chosen'].get('quad')
-            if not quad_seed:
-                continue
-            quad = constrain_quad(np.asarray(quad_seed, float))
-            constrained_by_key[carrier['headingKey']] = quad
-            box = box_of({'x': quad[:, 0].min(), 'y': quad[:, 1].min(),
-                          'w': quad[:, 0].max() - quad[:, 0].min(), 'h': quad[:, 1].max() - quad[:, 1].min()})
-            for index in range(4):
-                corner = detect_corner(quad, index, lines, shape.get('_edge'), shape['_dist'], shape['_front'], box)
-                if corner.get('type') == 'cut' and corner.get('cut'):
-                    evidence.append((float(corner.get('confidence') or 0), index, corner['cut'], carrier['headingKey']))
-        evidence.sort(key=lambda entry: -entry[0])
-        if evidence:
-            confidence, index, _cut, _key = evidence[0]
-            cuts = [entry[2] for entry in evidence if entry[1] == index]
-            median_cut = [float(np.median([cut[0] for cut in cuts])), float(np.median([cut[1] for cut in cuts]))]
-            applied = 0
-            for carrier in carriers:
-                shape = carrier['shape']
-                quad = constrained_by_key.get(carrier['headingKey'])
-                if quad is None:
-                    continue
-                corners = [{'type': 'sharp'} for _ in range(4)]
-                corners[index] = {'type': 'cut', 'confidence': round(min(0.95, confidence), 3),
-                                  'cut': median_cut, 'support': 0.9, 'merged': True}
-                points = corner_polygon(quad, corners)
-                metrics = boundary_metrics(points, shape['_dist'], shape['_front'])
-                shape['chosen']['points'] = points.round(3).tolist()
-                shape['chosen']['kind'] = 'cutPanel'
-                shape['chosen']['corners'] = corners
-                shape['chosen']['metrics'] = metrics
-                lo = points.min(axis=0)
-                hi = points.max(axis=0)
-                size = np.maximum(1e-6, hi - lo)
-                normalized = [[float((p[0] - lo[0]) / size[0]), float((p[1] - lo[1]) / size[1])] for p in points]
-                shape['chosen']['native'] = {'type': 'shape', 'shape': 'freeform',
-                                             'bounds': {'x': round(float(lo[0]), 2), 'y': round(float(lo[1]), 2),
-                                                        'w': round(float(size[0]), 2), 'h': round(float(size[1]), 2)},
-                                             'customGeometry': {'points': [[round(px, 4), round(py, 4)] for px, py in normalized], 'closed': True}}
-                shape['chosen']['mergeInfo'] = {'corner': index, 'cut': median_cut, 'familyConsensus': True,
-                                                'sourceKey': _key, 'sourceConfidence': round(confidence, 3)}
-                applied += 1
-            reports.append({'family': 'heading-carriers', 'type': 'bevel-consensus', 'corner': index,
-                            'cut': median_cut, 'source': _key, 'confidence': round(confidence, 3), 'applied': applied})
-    for item in result['elements']:
-        for key in ('_dist', '_front', '_box', '_edge'):
-            item.pop(key, None)
-    for carrier in result.get('missing') or []:
-        shape = carrier.get('shape') or {}
-        for key in ('_dist', '_front', '_box', '_edge'):
-            shape.pop(key, None)
-    return reports
-
-
 # ---------------------------------------------------------------- main
 def run(spec):
     global _REF, PANEL_OPT, _SEG_DIST, _SEG_EDGE, _GRAD_MAG, _GRAD_DX, _GRAD_DY, _FG_MASK, _FG_EDGE, _FG_GRAD, _SEG_DIST_ENH, _SEG_EDGE_ENH, _GRAD_MAG_ENH, _GRAD_DX_ENH, _GRAD_DY_ENH, _FG_MASK_ENH, _FG_EDGE_ENH, _FG_GRAD_ENH
@@ -6003,11 +5814,6 @@ def run(spec):
                 continue
             owned_lines.append(line)
         element_families = build_families(owned_lines)
-        merge_keys = set()
-        for group in spec.get('mergeFamilies') or []:
-            merge_keys.update(group.get('keys') or [])
-        if e.get('key') in merge_keys:
-            e['_mergeFamily'] = True
         e['_fromAudit'] = True
         try:
             item = fit_element(e, index, elements, element_families, owned_lines, edge, dist, front)
@@ -6073,7 +5879,11 @@ def run(spec):
                     item['chosen']['kind'], points, item['chosen'].get('corners') or [],
                     clipped_box)
             item['chosen'].setdefault('extra', {})['siblingGap'] = True
-    merge_report = apply_family_merge({'elements': results, 'missing': missing}, spec.get('mergeFamilies') or [], lines_all)
+    # Shared slant/corners belong to the confidence-aware S3 fitter. Never
+    # re-align siblings or copy a heading cut from this legacy fallback.
+    for item in results+[c.get('shape') or {} for c in missing]:
+        for key in ('_dist','_front','_box','_edge'):item.pop(key,None)
+    merge_report = []
     elapsed = round((time.perf_counter() - started) * 1000, 1)
     return {
         'status': 'available',

@@ -41,6 +41,10 @@ sys.path.insert(0, __file__.rsplit('\\', 1)[0] if '\\' in __file__ else __file__
 from shape_reference import image, seed_polygon, hex_color
 from shape_paint import fit_shape_paint
 from native_effects import detect_native_effects,without_soft_exterior
+from native_line_style import measure_line_style
+from circle_paint import joint_circle_paint
+from fill_end_alpha import fit_fill_end_alpha
+from frame_highlight import fit_frame_highlight
 
 SCENE = (1600, 900)
 PAINT_TYPES = ('shape', 'rect', 'ellipse','line')
@@ -171,7 +175,7 @@ def main():
     ref = image(spec['reference'], SCENE)
     page_height, page_width = ref.shape[:2]
     page_background = image(spec['background'], SCENE) if spec.get('background') else None
-    elements = [{**element,'_verticalGradientOnly':True} for element in (spec.get('elements') or []) if isinstance(element, dict)]
+    elements = [element for element in (spec.get('elements') or []) if isinstance(element, dict)]
     target_keys = spec.get('targetKeys')
     target_set = set(target_keys) if target_keys is not None else None
 
@@ -236,11 +240,19 @@ def main():
                             'front': front_alpha is not None,
                             'frontBoxes': len(front_boxes)}}
         row = {'key': key}
-        polygon = seed_polygon(element)
+        geometry=element.get('geometryEvidence') or {}
+        if element.get('type')!='line' and geometry.get('accepted') is False and (geometry.get('support',1)<.55 or geometry.get('boundaryP95',geometry.get('p95',0))>6):
+            return {'key':key,'status':'geometry-pending','properties':{'parameterEvidence':{
+                'fill':{'confidence':0,'independent':True,'reason':'unresolved-location'}}},'diagnostics':detail}
         if element.get('type')=='line':
             lower=_load_rgb(underlays.get(key),(page_height,page_width)) if underlays.get(key) else None
-            props,evidence=detect_native_effects(ref,element,lower,front_alpha,list(exclude_global)+list(front_boxes),own_alpha)
-            return {'key':key,'status':'fitted' if props else 'kept','properties':{**props,'nativeEffectEvidence':evidence},'diagnostics':{'effects':evidence}}
+            hidden=np.zeros((page_height,page_width),bool) if front_alpha is None else front_alpha>8
+            for a,b,c,d in list(exclude_global)+list(front_boxes):hidden[max(0,b):min(page_height,d),max(0,a):min(page_width,c)]=True
+            props,evidence=measure_line_style(ref,element,lower,hidden)
+            if props:
+                props['parameterEvidence']={p:{'confidence':.85,'independent':True,'source':'line-reference-profile'} for p in ('strokeWidth','strokeColor') if ('strokeWidth' if p=='strokeWidth' else 'color') in props}
+            return {'key':key,'status':'fitted' if props else 'kept','properties':props,'diagnostics':{'line':evidence}}
+        polygon = seed_polygon(element)
         if not polygon:
             row.update({'status': 'unsupported', 'reason': 'no-seed-polygon', 'properties': {},
                         'paintKeys': [], 'confidence': None, 'diagnostics': detail,
@@ -248,7 +260,42 @@ def main():
                         'reasons': ['no-seed-polygon']})
             return row
         contour = np.rint(np.asarray(polygon, float)).astype(np.int32).reshape(-1, 1, 2)
-        if own_alpha is not None and not element.get('glow') and not element.get('shadow') and float(element.get('opacity',1))*float(element.get('fillOpacity',1))>=.98:
+        width,height=float(element.get('w',0)),float(element.get('h',0))
+        if min(width,height)<=14 and max(width,height)>=3*max(1,min(width,height)) and geometry.get('accepted'):
+            x,y=float(element['x']),float(element['y']);inset=min(1.5,min(width,height)*.2)
+            x0,x1=max(0,round(x+inset)),min(page_width,round(x+width-inset))
+            y0,y1=max(0,round(y+inset)),min(page_height,round(y+height-inset))
+            patch=ref[y0:y1,x0:x1];visible=np.ones(patch.shape[:2],bool)
+            if front_alpha is not None:visible &= front_alpha[y0:y1,x0:x1]<8
+            pixels=patch[visible]
+            if len(pixels)>=8:
+                median=np.median(pixels,axis=0);deviation=np.linalg.norm(pixels-median,axis=1)
+                reliable=deviation<18
+                if reliable.mean()>=.8:
+                    color=''.join(f'{int(round(c)):02X}' for c in np.median(pixels[reliable],axis=0))
+                    return {'key':key,'status':'fitted','properties':{'fill':color,'gradient':None,
+                        'parameterEvidence':{'fill':{'confidence':round(float(reliable.mean())*.9,4),'independent':True,'source':'thin-fill-interior'}}},'diagnostics':detail}
+                if float(element.get('opacity',1))*float(element.get('fillOpacity',1))>=.98 and len(pixels)>=16:
+                    axis=0 if height>=width else 1
+                    profile=np.median(patch,axis=1 if axis==0 else 0)
+                    t=(np.arange(len(profile))+.5+inset)/(height if axis==0 else width)
+                    candidates=[]
+                    for knots in ([0.,1.],[0.,.5,1.]):
+                        basis=np.column_stack([np.interp(t,knots,np.eye(len(knots))[i]) for i in range(len(knots))])
+                        colors=np.linalg.lstsq(basis,profile,rcond=None)[0]
+                        residual=np.mean(np.abs(basis@colors-profile),axis=1)
+                        keep=residual<=max(5,float(np.median(residual))*2)
+                        if keep.sum()<len(knots)+2:continue
+                        colors=np.clip(np.linalg.lstsq(basis[keep],profile[keep],rcond=None)[0],0,255)
+                        error=float(np.mean(np.abs(basis@colors-profile)))
+                        candidates.append((error+1.5*(len(knots)-2),error,knots,colors))
+                    if candidates:
+                        _,error,knots,colors=min(candidates,key=lambda c:c[0])
+                        if error<8:
+                            stops=[{'position':position,'color':''.join(f'{int(round(c)):02X}' for c in color),'opacity':1} for position,color in zip(knots,colors)]
+                            return {'key':key,'status':'fitted','properties':{'fill':stops[0]['color'],'gradient':{'type':'linear','angle':90 if axis==0 else 0,'stops':stops},
+                                'parameterEvidence':{'fill':{'confidence':round(.95-error/25,4),'independent':True,'source':'thin-fill-long-axis'}}},'diagnostics':detail}
+        if own_alpha is not None and not element.get('shadow') and float(element.get('opacity',1))*float(element.get('fillOpacity',1))>=.98:
             rendered_contours=cv2.findContours((own_alpha>=128).astype(np.uint8),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)[0]
             if rendered_contours:contour=max(rendered_contours,key=cv2.contourArea)
 
@@ -336,9 +383,8 @@ def main():
         properties.update(effects)
         properties['nativeEffectEvidence']=effect_evidence
         detail['effects']=effect_evidence
-        effective_glow=effects.get('glow',element.get('glow'))
         effective_shadow=effects.get('shadow',element.get('shadow'))
-        if effective_shadow and not effective_glow:
+        if effective_shadow:
             properties.update(strokeWidth=0,strokeGradient=None,colorOpacity=0)
         # Independent ridge evidence (normal-profile median colour) must agree with the fitted
         # stroke gradient. A fit that drifts to the dark fill/background while the actual rim is
@@ -357,6 +403,13 @@ def main():
                     properties.pop('strokeGradient', None)
                     detail.setdefault('stroke', {})['consistencyRejected'] = 'fitted-stroke-far-from-ridge-colour'
 
+        alpha_patch,alpha_evidence=fit_fill_end_alpha(ref,{**element,**properties},underlay if underlay_source=='underlay' else None,front_alpha,list(exclude_global)+list(front_boxes))
+        properties.update(alpha_patch)
+        if alpha_evidence['status']!='not-applicable':
+            properties['fillEndAlphaEvidence']=alpha_evidence;detail['fillEndAlpha']=alpha_evidence
+        highlight_patch,highlight_evidence=fit_frame_highlight(ref,{**element,**properties},underlay,front_alpha)
+        properties.update(highlight_patch)
+        if highlight_evidence['status']!='not-applicable':detail['frameHighlight']=highlight_evidence
         sampling = detail.get('sampling') if isinstance(detail.get('sampling'), dict) else {}
         fill_detail = detail.get('fill') if isinstance(detail.get('fill'), dict) else {}
         stroke_detail = detail.get('stroke') if isinstance(detail.get('stroke'), dict) else {}
@@ -395,7 +448,21 @@ def main():
         if isinstance(detail.get('stroke'), dict) and detail['stroke'].get('consistencyRejected'):
             reasons.append('stroke:inconsistent-with-ridge')
 
-        measured_paint = any(properties.get(name) is not None for name in ('fill', 'gradient', 'strokeGradient', 'color','glow','shadow'))
+        evidence={}
+        for parameter,observation in [('fill',fill_detail),('stroke',stroke_detail)]:
+            has_paint=any(name in properties for name in (('fill','gradient') if parameter=='fill' else ('color','strokeGradient')))
+            if has_paint:
+                error=float(observation.get('afterError',observation.get('error',0)) or 0)
+                score=float(observation.get('confidence',.85) or .85)*max(.1,1-error/24)
+                evidence[parameter]={'confidence':round(score,4),'independent':True,'source':'reference-pixels'}
+                if parameter=='stroke':
+                    evidence['strokeColor']=evidence[parameter].copy();evidence['strokeWidth']=evidence[parameter].copy()
+        if evidence:properties['parameterEvidence']=evidence
+        for parameter,field in [('fill','gradient'),('stroke','strokeGradient')]:
+            alpha_detail=(alpha_evidence.get('parameters') or {}).get(parameter) or {}
+            if alpha_detail.get('status')=='accepted':
+                properties.setdefault('parameterEvidence',{})[parameter]={'confidence':alpha_detail['confidence'],'independent':True,'source':'fill-end-alpha-reference'}
+        measured_paint = any(properties.get(name) is not None for name in ('fill', 'gradient', 'strokeGradient', 'color','shadow'))
         if detail.get('underlayMissing') and not measured_paint:
             status = 'uncertain-kept'
         elif measured_paint:
@@ -450,6 +517,9 @@ def main():
             seen.add(key)
             ordered.append(measured[key])
 
+    joint_circle_paint(spec,ref,ordered,mask_files)
+    from parameter_confidence import inherit_measured_parameters
+    inherit_measured_parameters(elements,ordered)
     fitted = sum(1 for row in ordered if row.get('status') == 'fitted')
     payload = {'status': 'available', 'results': ordered,
                'stats': {'targets': len(ordered), 'fitted': fitted,

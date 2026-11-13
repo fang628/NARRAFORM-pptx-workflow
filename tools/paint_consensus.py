@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 from paint_models import fit_native_paint, composite_paint, perceptual_error
 from shape_reference import seed_polygon
+from parameter_confidence import confidence,provenance,weighted_median,parameter_blocked
 
 cv2.setNumThreads(1)
 SIZE = (1600, 900)
@@ -52,7 +53,7 @@ def sample_members(elements, reference, masks, underlays):
                 if alpha is not None:
                     valid &= alpha > 16
                 yy, xx = np.nonzero(valid)
-                if len(xx) >= 80:
+                if len(xx) >= (16 if min(element['w'],element['h'])<16 else 80):
                     stride = max(1, len(xx)//2500)
                     xx, yy = xx[::stride], yy[::stride]
                     background = load(underlays.get(key))
@@ -109,6 +110,27 @@ def paint_error(element, evidence, paint, stroke=False):
     return float(np.mean(residual)), perceptual_error(predicted, evidence['pixels'])
 
 
+def observe_parameters(elements,samples):
+    for element in elements:
+        geometry=element.get('geometryEvidence') or {}
+        if geometry.get('accepted') is False:continue
+        sample=samples.get(element['key'])
+        if sample is None:continue
+        for parameter,field,solid,stroke in [('fill','gradient','fill',False),('strokeColor','strokeGradient','color',True)]:
+            fields=[parameter] if parameter!='fill' else ['fill','gradientStops','gradientAngle','gradientCenter']
+            fields=[p for p in fields if not blocked_parameter(element,p) and (p in ('fill','strokeColor') or element.get('gradient') and ((element.get('parameterGroups') or {}).get(p) or (element.get('parameterGroups') or {}).get('fill') or element.get('tableRole')=='icon'))]
+            if not fields:continue
+            evidence=sample.get('stroke') if stroke else sample
+            if evidence is None or len(evidence['pixels'])<40:continue
+            error=paint_error(element,evidence,element.get(field) or element.get(solid),stroke)
+            if error is None or error[0]>10 or error[1]>12:continue
+            # This is a new pixel observation of this specific instance. It
+            # may replace inherited provenance, but never fabricates a vote.
+            entry={'confidence':round(max(.55,.95-error[0]/25),4),'independent':True,
+                   'source':'visible-reference-residual','observationId':element['key']+':'+parameter}
+            for p in fields:element.setdefault('parameterEvidence',{})[p]=entry.copy()
+
+
 def descriptor(element, evidence):
     # Robust colour field in normalized coordinates; preserves designed hue/contrast differences.
     u = (evidence['xx']-element['x'])/element['w']
@@ -118,17 +140,7 @@ def descriptor(element, evidence):
 
 
 def blocked_parameter(element, parameter):
-    children={'fill':('gradientAngle','gradientCenter','gradientStops'),
-              'stroke':('strokeWidth','strokeColor')}
-    if any(name==parameter or parameter in children.get(name,()) or name in children.get(parameter,())
-           for name in element.get('keepParameters',[])):
-        return True
-    if any(row.get('parameter')==parameter or row.get('parameter') in children.get(parameter,())
-           for row in element.get('recognitionRejections',[])):
-        return True
-    groups=element.get('parameterGroups') or {}
-    return any(groups.get(name) and groups[name]!=groups.get(parameter)
-               for name in children.get(parameter,()))
+    return parameter_blocked(element,parameter)
 
 
 def merge_whole(elements, samples, records):
@@ -136,16 +148,22 @@ def merge_whole(elements, samples, records):
                   and not e.get('_stagedSkip') and not blocked_parameter(e,'fill')
                   and (e.get('tableRole') == 'icon' or e.get('parameterGroups', {}).get('fill'))]
     groups = []
-    for element in candidates:
+    for element in sorted(candidates,key=lambda e:-confidence(e,'fill')):
         scope = ('explicit', element.get('parameterGroups', {}).get('fill')) if element.get('parameterGroups', {}).get('fill') else (
             'table-icon', element.get('tableId'), element.get('shape') or element['type'], element.get('visualState') or 'normal')
         observed = descriptor(element, samples[element['key']])
         target = None
+        if confidence(element,'fill')<.55:
+            matches=[group for group in groups if group['scope']==scope and any(confidence(e,'fill')>=.55 for e in group['members'])]
+            if len(matches)==1:matches[0]['members'].append(element)
+            else:groups.append({'scope':scope,'members':[element],'descriptor':observed})
+            continue
         for group in groups:
             if group['scope'] != scope:
                 continue
             shared = sorted(set(observed) & set(group['descriptor']))
-            if len(shared) < 12:
+            minimum=4 if min(element['w'],element['h'])<16 else 12
+            if len(shared) < minimum:
                 continue
             differences = np.linalg.norm(lab([observed[i] for i in shared])-lab([group['descriptor'][i] for i in shared]), axis=1)
             if np.median(differences) <= 12 and np.percentile(differences, 85) <= 25:
@@ -160,44 +178,52 @@ def merge_whole(elements, samples, records):
         if len(members) < 2:
             continue
         # Fit a shared field in physical coordinates with the group's median aspect ratio.
-        width = float(np.median([e['w'] for e in members]))
-        height = float(np.median([e['h'] for e in members]))
+        reliable=[e for e in members if confidence(e,'fill')>=.55]
+        if not reliable:continue
+        weights=[confidence(e,'fill') for e in reliable]
+        width = weighted_median([e['w'] for e in reliable],weights)
+        height = weighted_median([e['h'] for e in reliable],weights)
         pixels, xs, ys = [], [], []
-        for element in members:
+        for element in reliable:
             evidence = samples[element['key']]
-            pixels.extend(evidence['pixels'])
-            xs.extend((evidence['xx']-element['x'])/element['w']*width)
-            ys.extend((evidence['yy']-element['y'])/element['h']*height)
+            count=min(len(evidence['pixels']),max(40,round(1000*confidence(element,'fill'))))
+            indices=np.linspace(0,len(evidence['pixels'])-1,count).astype(int)
+            pixels.extend(evidence['pixels'][indices])
+            xs.extend((evidence['xx'][indices]-element['x'])/element['w']*width)
+            ys.extend((evidence['yy'][indices]-element['y'])/element['h']*height)
         pixels, xs, ys = np.asarray(pixels), np.asarray(xs), np.asarray(ys)
-        template = {'x': 0, 'y': 0, 'w': width, 'h': height,'_verticalGradientOnly':any(e.get('_verticalGradientOnly') for e in members)}
+        template = {'x': 0, 'y': 0, 'w': width, 'h': height}
         # Translucent groups need independent underlays/alpha evidence; node-only sharing handles them.
         if any(e.get('opacity',1)*e.get('fillOpacity',1)<.98 or any(s.get('opacity',1)<.98 for s in (e.get('gradient') or {}).get('stops',[])) for e in members):
             continue
-        paints = [e.get('gradient') or e.get('fill') for e in members]
+        paints = [e.get('gradient') or e.get('fill') for e in reliable]
         fit = fit_native_paint(pixels, xs, ys, template, paints[0], budget={'maxCandidates':1800,'seconds':5,
-            'sharedInstances':len(members),'maxStops':5})
+            'sharedInstances':len(members),'maxStops':5}) if min(width,height)>=16 else None
         if fit:
             paints.append(fit['gradient'])
         scored = []
         for paint in paints:
-            errors = [paint_error(e, samples[e['key']], paint) for e in members]
+            errors = [paint_error(e, samples[e['key']], paint) for e in reliable]
             if all(error is not None for error in errors):
-                scored.append((np.mean([error[0] for error in errors]), paint, errors))
+                scored.append((np.average([error[0] for error in errors],weights=weights), paint, errors))
         if not scored:
             continue
         _, selected, errors = min(scored, key=lambda item:item[0])
-        before = [paint_error(e, samples[e['key']], e.get('gradient') or e.get('fill')) for e in members]
+        before = [paint_error(e, samples[e['key']], e.get('gradient') or e.get('fill')) for e in reliable]
         if any(old is None or new[0] > old[0]+3 or new[1] > old[1]+4 for old,new in zip(before,errors)):
             records.append({'kind':'whole-paint-rejected','keys':[e['key'] for e in members],'reason':'member-error-regression'})
             continue
         group_id = 'measured-fill-'+str(number+1)
         for element in members:
+            previous_paint=element.get('gradient') or element.get('fill')
             if isinstance(selected, dict):
                 element['gradient'] = selected
                 element['fill'] = selected['stops'][0]['color']
             else:
                 element['fill'] = selected
                 element.pop('gradient', None)
+            if previous_paint!=selected:
+                element.setdefault('parameterEvidence',{})['fill']=provenance([e['key'] for e in reliable],max(weights))
             element['paintConsensus'] = {'wholeFill':group_id,'members':[e['key'] for e in members],
                                          'source':'normalized-visible-colour-field'}
         records.append({'kind':'whole-paint','group':group_id,'keys':[e['key'] for e in members],
@@ -231,7 +257,10 @@ def merge_nodes(elements, samples, records):
     for number, group in enumerate(groups):
         if len({node['element']['key'] for node in group})<2:
             continue
-        representative=min(group,key=lambda a:sum(np.linalg.norm(a['lab']-b['lab']) for b in group))
+        parameter='strokeColor' if group[0]['stroke'] else 'gradientStops' if group[0]['index'] is not None else 'fill'
+        reliable=[node for node in group if confidence(node['element'],parameter)>=.55]
+        if not reliable:continue
+        representative=min(reliable,key=lambda a:sum(confidence(b['element'],parameter)*np.linalg.norm(a['lab']-b['lab']) for b in reliable))
         color=hex_color(representative['rgb'])
         affected={node['element']['key']:node['element'] for node in group}
         previous={key:json.loads(json.dumps(element)) for key,element in affected.items()}
@@ -242,6 +271,8 @@ def merge_nodes(elements, samples, records):
             else:
                 element[node['field']]=json.loads(json.dumps(element[node['field']]))
                 element[node['field']]['stops'][node['index']]['color']=color
+            if not any(node is source for source in reliable):
+                element.setdefault('parameterEvidence',{})[parameter]=provenance([n['element']['key'] for n in reliable],confidence(representative['element'],parameter))
         valid=True
         for key,element in affected.items():
             old=previous[key]
@@ -272,6 +303,7 @@ def main():
     masks={entry['key']:entry['file'] for entry in spec.get('masks',[]) if entry.get('file')}
     samples=read_samples(spec['samplesFile']) if spec.get('samplesFile') else sample_members(elements,reference,masks,spec.get('underlays') or {})
     records=[]
+    observe_parameters(elements,samples)
     merge_whole(elements,samples,records)
     merge_nodes(elements,samples,records)
     Path(sys.argv[2]).write_text(json.dumps({'elements':elements,'records':records},ensure_ascii=False,indent=1),encoding='utf8')

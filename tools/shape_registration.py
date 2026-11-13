@@ -77,6 +77,10 @@ def discover_frames(preview, background, min_area_ratio, protected=()):
             continue
         if w < 18 or h < 12:
             continue
+        # A clipped background ornament has no closed contour to reconstruct.
+        # Its difference bbox must not be promoted into a new opaque panel.
+        if x<=1 or y<=1 or x+w>=WIDTH-1 or y+h>=HEIGHT-1:
+            continue
         component_mask = labels[y:y + h, x:x + w] == component
         # Sparse contours and disconnected glyphs are evidence candidates, not solid carriers.
         if area / max(1, w * h) < 0.55:
@@ -505,7 +509,7 @@ def main():
                 'fullPageDiff': 0.0}
     if preview is not None and background is not None:
         frames = discover_frames(preview, background, min_area_ratio,
-                                 [e for e in seeds if e.get('type') in ('text', 'formula')])
+                                 [e for e in seeds if e.get('type') in ('text', 'formula')]+list(spec.get('protected') or []))
         diff = np.abs(preview.astype(np.int16) - background.astype(np.int16)).max(axis=2)
         coverage['diffFrames'] = len(frames)
         coverage['fullPageDiff'] = round(float((diff > 14).mean()), 4)
@@ -513,6 +517,21 @@ def main():
         for frame in frames:
             if any(overlap_ratio(frame, element) >= 0.55 for element in covered_by):
                 continue
+            # A thin residual touching an existing same-colour body is its
+            # missed extent, not evidence for a second opaque block.
+            attached=False
+            for element in shape_seeds:
+                if min(frame['w'],frame['h'])>24:continue
+                try:
+                    a=np.array([int(frame['fill'][i:i+2],16) for i in (0,2,4)])
+                    b=np.array([int(element.get('fill','')[i:i+2],16) for i in (0,2,4)])
+                    gap_x=max(frame['x']-element['x']-element['w'],element['x']-frame['x']-frame['w'],0)
+                    gap_y=max(frame['y']-element['y']-element['h'],element['y']-frame['y']-frame['h'],0)
+                    overlap_x=max(0,min(frame['x']+frame['w'],element['x']+element['w'])-max(frame['x'],element['x']))
+                    overlap_y=max(0,min(frame['y']+frame['h'],element['y']+element['h'])-max(frame['y'],element['y']))
+                    if np.linalg.norm(a-b)<45 and max(gap_x,gap_y)<=5 and (overlap_x>=frame['w']*.8 or overlap_y>=frame['h']*.8):attached=True;break
+                except (ValueError,TypeError):pass
+            if attached:continue
             coverage['uncovered'] += 1
             number = len(auto_frames) + 1
             used = {e.get('key') for e in seeds + auto_frames}
@@ -521,7 +540,7 @@ def main():
             auto_frames.append({
                 'key': 'auto-frame-' + str(number),
                 'type': 'shape',
-                'shape': frame['kind'] if frame['kind'] in ('hexagon',) else 'roundRect',
+                'shape': frame['kind'],
                 'x': frame['x'], 'y': frame['y'], 'w': frame['w'], 'h': frame['h'],
                 'fill': frame['fill'], 'strokeWidth': 0,
                 'classHint': frame['kind'], 'autoRegistered': True,
@@ -531,7 +550,7 @@ def main():
         # Missing narrow bright geometric cores (e.g. the slanted illuminated strip between p11
         # panels). Evidence only: continuous/strong ridge, absent from the wordless background,
         # not text/image, not a near-parallel existing edge, not a soft halo or ornament arc.
-        strips = discover_light_strips(preview, background, list(seeds) + auto_frames)
+        strips = discover_light_strips(preview, background, list(seeds) + auto_frames + list(spec.get('protected') or []))
         used_keys = {element.get('key') for element in list(seeds) + auto_frames}
         for strip in strips:
             number = len(auto_lines) + 1
@@ -559,7 +578,15 @@ def main():
 
     # New carriers belong behind the already audited text and foreground objects; the completed
     # light cores are foreground effect cores, so they are appended last (never behind the frames).
-    registry = auto_frames + list(seeds) + auto_lines
+    from arc_light_completion import discover_arc_lights
+    arcs=discover_arc_lights(preview,background,list(seeds)+list(spec.get('protected') or [])) if preview is not None and background is not None else []
+    used={e.get('key') for e in auto_frames+list(seeds)+auto_lines}
+    for i,arc in enumerate(arcs):
+        key='auto-arc-'+str(i+1)
+        while key in used:key+='x'
+        arc['key']=key;used.add(key)
+    coverage['autoArcs']=len(arcs)
+    registry = arcs + auto_frames + list(seeds) + auto_lines
     targets = [element['key'] for element in registry if element.get('type') in SHAPE_TYPES]
     by_class = {}
     for element in registry:

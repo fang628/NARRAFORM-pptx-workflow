@@ -65,6 +65,7 @@ import time
 
 import cv2
 import numpy as np
+from parameter_confidence import weighted_median
 from PIL import Image
 from paint_models import fit_native_paint
 
@@ -154,19 +155,75 @@ def straight_vertical_lines(image):
     if min(image.shape[:2]) < 16:
         return []
     gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    edges = cv2.Canny(gray, 30, 90)
+    edges = cv2.Canny(gray, 15, 45)
+    for channel in cv2.split(image):edges=np.maximum(edges,cv2.Canny(channel,15,45))
     kernel_height = max(12, int(round(image.shape[0] * 0.45)))
     opened = cv2.morphologyEx(edges, cv2.MORPH_OPEN, np.ones((kernel_height, 1), np.uint8))
     column_strength = (opened > 0).sum(axis=0)
     xs = np.flatnonzero(column_strength >= max(6, int(kernel_height * 0.7)))
+    rgb=image.astype(float)
+    if image.shape[1]>8:
+        ridge=np.linalg.norm(rgb[:,3:-3]-(rgb[:,:-6]+rgb[:,6:])/2,axis=2)
+        supported=np.flatnonzero(np.mean(ridge>18,axis=0)>.5)+3
+        xs=np.unique(np.concatenate([xs,supported]))
     clusters = []
     for value in xs:
         value = int(value)
-        if clusters and value - clusters[-1][-1] <= 2:
+        if clusters and value - clusters[-1][-1] <= 4:
             clusters[-1].append(value)
         else:
             clusters.append([value])
     return [float(np.mean(cluster)) for cluster in clusters]
+
+
+def measure_alignment(image,cells,rows,boundaries,vertical,options):
+    observations=[]
+    if len(vertical)<2:return observations
+    ordered=sorted(rows,key=lambda r:r['y']);slots={int(r['rowIndex']):i for i,r in enumerate(ordered)}
+    for cell in cells:
+        row=int(cell.get('row',-1));column=int(cell.get('column',-1));i=slots.get(row)
+        if i is None or not 0<=column<len(vertical)-1:continue
+        left,right=vertical[column:column+2];top,bottom=boundaries[i:i+2]
+        x0,x1=max(0,round(left+5)),min(image.shape[1],round(right-5));y0,y1=max(0,round(top+4)),min(image.shape[0],round(bottom-4))
+        patch=image[y0:y1,x0:x1]
+        if min(patch.shape[:2],default=0)<6:continue
+        bg=np.median(patch.reshape(-1,3),axis=0)
+        ink=(np.linalg.norm(patch.astype(float)-bg,axis=2)>45).astype(np.uint8)
+        count,labels,stats,centers=cv2.connectedComponentsWithStats(ink);parts=[]
+        for k in range(1,count):
+            x,y,w,h,area=stats[k]
+            if area>=4 and 3<=h<=patch.shape[0]*.95 and w<patch.shape[1]*.9:parts.append((x,y,w,h,area))
+        if len(parts)<2:continue
+        ink_left=int(x0+min(p[0] for p in parts));ink_right=int(x0+max(p[0]+p[2] for p in parts))
+        ink_top=int(y0+min(p[1] for p in parts));ink_bottom=int(y0+max(p[1]+p[3] for p in parts))
+        if ink_right-ink_left>(right-left)*.9:continue
+        observations.append({'key':cell.get('key'),'row':row,'column':column,'kind':ordered[i].get('kind','data'),
+            'inkLeft':ink_left,'inkRight':ink_right,'inkTop':ink_top,'inkBottom':ink_bottom,'left':left,'right':right,'top':top,'bottom':bottom,
+            'confidence':round(min(.95,.6+len(parts)*.015),3),'independent':True})
+    for kind in ('header','data'):
+        for column in sorted({o['column'] for o in observations}):
+            peers=[o for o in observations if o['kind']==kind and o['column']==column]
+            if not peers:continue
+            weights=[o['confidence'] for o in peers]
+            offsets={'left':[o['inkLeft']-o['left'] for o in peers],
+                'center':[(o['inkLeft']+o['inkRight']-o['left']-o['right'])/2 for o in peers],
+                'right':[o['right']-o['inkRight'] for o in peers]}
+            medians={a:weighted_median(v,weights) for a,v in offsets.items()}
+            errors={a:float(np.average(np.abs(np.asarray(v)-medians[a]),weights=weights)) for a,v in offsets.items()}
+            # A centred header can be identified from one row; a left/right
+            # column needs several text lengths agreeing on the same anchor.
+            errors['center']+=abs(medians['center'])*.35
+            if len(peers)==1:
+                mode='center' if abs(medians['center'])<=max(6,(peers[0]['right']-peers[0]['left'])*.035) else 'left' if medians['left']<medians['right'] else 'right'
+            else:mode=min(errors,key=errors.get)
+            width=peers[0]['right']-peers[0]['left']
+            if mode!='center' and medians[mode]>width*.2:
+                if abs(medians['center'])<=max(8,width*.04):mode='center'
+                else:continue
+            for o in peers:
+                o.update(align=mode,centerOffset=round(medians['center'],2) if mode=='center' else 0,inset=round(max(4,medians[mode]),1) if mode!='center' else 4,
+                         sourceKeys=[p['key'] for p in peers],confidence=round(min(weights),3))
+    return observations
 
 
 def colour_profile(image, mask, left, right, top, bottom):
@@ -364,13 +421,24 @@ def cluster_rows(rows, tolerance, table_id):
     representative: groups describe measured rows only.
     """
     groups = []
-    for row in rows:
+    reliable = [r for r in rows if r['kind'] != 'header' and r.get('fill') and r.get('reliable', True) and float(r.get('confidence',.6))>=.55 and not r.get('gradient')]
+    alternating = False
+    if len(reliable) >= 4:
+        bands = [[r for r in reliable if r['rowIndex'] % 2 == parity] for parity in (0, 1)]
+        if all(len(band) >= 2 for band in bands):
+            values = [np.asarray([to_lab(np.array([int(r['fill'][i:i+2], 16) for i in (0,2,4)])) for r in band]) for band in bands]
+            centers = [np.median(v, axis=0) for v in values]
+            noise = max(float(np.median([lab_distance(v, center) for v in group])) for group, center in zip(values, centers))
+            alternating = lab_distance(*centers) > max(2.0, noise * 3)
+    for row in sorted(rows,key=lambda r:-float(r.get('confidence',.6))):
         if row["kind"] == "header" or not row.get("fill") or not row.get("reliable", True):
             continue
         lab = to_lab(np.array([int(row["fill"][index:index + 2], 16) for index in (0, 2, 4)]))
         gradient = row.get("gradient")
         target = None
         for group in groups:
+            if alternating and not gradient and row['rowIndex'] % 2 != group['members'][0]['rowIndex'] % 2:
+                continue
             if (gradient is None) != (group["gradient"] is None):
                 continue
             if gradient and group["gradient"]:
@@ -391,21 +459,24 @@ def cluster_rows(rows, tolerance, table_id):
             groups.append({"members": [row], "centroid": lab, "gradient": gradient})
         else:
             target["members"].append(row)
-            target["centroid"] = np.median(np.asarray(
+            sources=[member for member in target['members'] if float(member.get('confidence',.6))>=.55]
+            values=np.asarray(
                 [to_lab(np.array([int(member["fill"][index:index + 2], 16)
-                                  for index in (0, 2, 4)])) for member in target["members"]],
-                np.float32), axis=0)
+                                  for index in (0, 2, 4)])) for member in sources],np.float32)
+            if sources:target['centroid']=np.array([weighted_median(values[:,i],[float(member.get('confidence',.6)) for member in sources]) for i in range(3)])
     result = []
     for number, group in enumerate(groups):
         members = group["members"]
         best_member = members[0]
         best_total = None
-        for member in members:
+        sources=[member for member in members if float(member.get('confidence',.6))>=.55]
+        if not sources:continue
+        for member in sources:
             member_lab = to_lab(np.array([int(member["fill"][index:index + 2], 16)
                                           for index in (0, 2, 4)]))
-            total = sum(lab_distance(member_lab, to_lab(np.array(
+            total = sum(float(other.get('confidence',.6))*lab_distance(member_lab, to_lab(np.array(
                 [int(other["fill"][index:index + 2], 16) for index in (0, 2, 4)])))
-                for other in members)
+                for other in sources)
             if best_total is None or total < best_total:
                 best_total = total
                 best_member = member
@@ -421,7 +492,7 @@ def cluster_rows(rows, tolerance, table_id):
         for member in members:
             member["colorGroup"] = result[-1]["id"]
     header_rows = [row for row in rows if row["kind"] == "header"
-                   and row.get("fill") and row.get("reliable", True)]
+                   and row.get("fill") and row.get("reliable", True) and float(row.get('confidence',.6))>=.55]
     if header_rows:
         representative = max(header_rows, key=lambda row: float(row.get("confidence") or 0.0))
         result.append({"id": "%s:header" % table_id, "fill": representative["fill"],
@@ -438,6 +509,38 @@ def cluster_rows(rows, tolerance, table_id):
     return result
 
 
+def measured_outer(table,reference):
+    """Measure four actual rim ridges near the declared frame, before row locks."""
+    outer=table.get('outer') or {}
+    if not all(k in outer for k in ('x','y','w','h')):return None
+    x,y,w,h=[float(outer[k]) for k in ('x','y','w','h')]
+    if w<60 or h<40:return None
+    gray=cv2.cvtColor(reference,cv2.COLOR_RGB2GRAY).astype(float)
+    found=[];supports=[]
+    for axis,edge in [('y',y),('y',y+h),('x',x),('x',x+w)]:
+        extent=h if axis=='y' else w
+        radius=min(32,max(8,extent*.12))
+        choices=[]
+        for at in range(max(2,round(edge-radius)),min(gray.shape[0 if axis=='y' else 1]-2,round(edge+radius)+1)):
+            positions=np.linspace(x+w*.12,x+w*.88,180).astype(int) if axis=='y' else np.linspace(y+h*.12,y+h*.88,120).astype(int)
+            positions=np.clip(positions,1,gray.shape[1 if axis=='y' else 0]-2)
+            center=gray[at,positions] if axis=='y' else gray[positions,at]
+            a=gray[at-2,positions] if axis=='y' else gray[positions,at-2]
+            b=gray[at+2,positions] if axis=='y' else gray[positions,at+2]
+            ridge=center-np.maximum(a,b)
+            support=float((ridge>3).mean());strength=float(np.median(ridge))
+            if support>=.6 and strength>3:choices.append((strength/(1+abs(at-edge)*.025),at,support))
+        if not choices:return None
+        _,at,support=max(choices);found.append(at);supports.append(support)
+    top,bottom,left,right=found
+    if right-left<w*.7 or bottom-top<h*.65:return None
+    for cell in table.get('cells') or []:
+        cx=cell.get('x',0)+cell.get('w',0)/2;cy=cell.get('y',0)+cell.get('h',0)/2
+        if not left<=cx<=right or not top<=cy<=bottom:return None
+    return {'x':left,'y':top,'w':right-left,'h':bottom-top,'right':right,'bottom':bottom,
+            'confidence':round(min(supports),3),'source':'measured-frame-ridges'}
+
+
 def measure_table(table, reference, mask, options, scene):
     started = time.perf_counter()
     table_id = str(table.get("tableId") or "")
@@ -451,7 +554,8 @@ def measure_table(table, reference, mask, options, scene):
                          "source": "cell-constraints"},
                 "rows": [], "colorGroups": [], "diagnostics": {"elapsedMs": 0.0}}
     cells = [cell for cell in table.get("cells") or [] if isinstance(cell, dict)]
-    outer = table.get("outer") or {}
+    frame=measured_outer(table,reference)
+    outer = frame or table.get("outer") or {}
     if not pixel_box(outer, scene) and cells:
         xs = [float(cell.get("x", 0)) for cell in cells]
         ys = [float(cell.get("y", 0)) for cell in cells]
@@ -515,6 +619,13 @@ def measure_table(table, reference, mask, options, scene):
     # slot top before the frame edge). Clamp the grid to the measured outer box so no sample strip
     # ever reaches the enclosing panel/background above the table.
     boundaries = [min(bottom, max(top, value)) for value in boundaries]
+    if frame:
+        boundaries[0]=float(top+2)
+        boundaries[-1]=float(bottom-2)
+    horizontal=straight_vertical_lines(np.transpose(local_image,(1,0,2)))
+    internal_y=[top+value for value in horizontal if 5<value<bottom-top-5]
+    if len(internal_y)==len(rows)-1:
+        boundaries=[float(top+2),*internal_y,float(bottom-2)];confidence=max(confidence,.9)
     for index in range(1, len(boundaries)):
         boundaries[index] = max(boundaries[index], boundaries[index - 1] + 1.0)
     columns = sorted([column for column in table.get("columns") or []
@@ -547,6 +658,10 @@ def measure_table(table, reference, mask, options, scene):
         # Long vertical structures found in the raw image are stronger evidence than a colour profile
         # through text zones; use them when they are close to the expected cell boundary.
         line_centres = straight_vertical_lines(local_image)
+        internal=[left+c for c in line_centres if 8<c<right-left-8]
+        if len(internal)==len(columns)-1:
+            vertical_boundaries=[float(left),*internal,float(right)];vertical_confidence=.9
+            vertical_windows=[0]*len(vertical_candidates)
         if line_centres:
             overridden = 0
             for index in range(1, len(vertical_candidates) - 1):
@@ -645,6 +760,7 @@ def measure_table(table, reference, mask, options, scene):
     return {
         "tableId": table_id,
         "status": status,
+        "outer":frame,
         "issues": issues,
         "grid": {"boundaries": [round(value, 1) for value in boundaries],
                  "verticalBoundaries": [round(value, 1) for value in vertical_boundaries],
@@ -652,6 +768,7 @@ def measure_table(table, reference, mask, options, scene):
                  "source": "cells+colour-steps" if confidence >= 0.5 else "cell-constraints"},
         "rows": measured_rows,
         "colorGroups": color_groups,
+        "alignment":measure_alignment(reference,cells,rows,boundaries,vertical_boundaries,options),
         "diagnostics": {"elapsedMs": round((time.perf_counter() - started) * 1000.0, 1)},
     }
 

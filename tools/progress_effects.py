@@ -55,7 +55,7 @@ def exterior_fit(image, x0, x1, y, h, scale):
     """
     radius = max(12, round(30*scale))
     guard = max(2, round(3*scale))
-    evidence = {k: {'status': 'unobservable', 'reason': 'clipped-overscan'} for k in ('Glow', 'Shadow')}
+    evidence = {'Shadow': {'status': 'unobservable', 'reason': 'clipped-overscan'}}
     if y-radius < 0 or y+h+radius >= image.shape[0]:
         return {}, evidence
     distances = np.arange(guard, radius+1, dtype=float)
@@ -86,24 +86,21 @@ def exterior_fit(image, x0, x1, y, h, scale):
     luma = residual@np.array([.2126, .7152, .0722])
     evidence = {k: {'status': 'absent', 'noise': round(max(noise), 2)} for k in evidence}
     effects = {}
-    # A single bright ridge is not a glow. Both sides need at least 3 soft rows.
+    # Only dark exterior tails can become a native shadow.
     light = np.maximum(luma, 0)
     dark = np.maximum(-luma, 0)
     if light.max() >= 4 and dark.max() >= 4:
         return {}, {k: {'status': 'unobservable', 'reason': 'mixed-effects-or-background'} for k in evidence}
-    sign = 1 if light.max() >= dark.max() else -1
-    signal = light if sign == 1 else dark
+    if light.max() >= dark.max():return {}, evidence
+    signal = dark
     if signal.max() < 4:
         return {}, evidence
-    kind = 'Glow' if sign == 1 else 'Shadow'
-    if sign == 1 and min((s > 3).sum() for s in signal) < max(3, round(2*scale)):
-        evidence[kind] = {'status': 'unobservable', 'reason': 'one-sided-highlight-or-hard-edge'}
-        return {}, evidence
-    if sign == -1 and max((s > 3).sum() for s in signal) < max(3, round(2*scale)):
+    kind = 'Shadow'
+    if max((s > 3).sum() for s in signal) < max(3, round(2*scale)):
         evidence[kind] = {'status': 'unobservable', 'reason': 'hard-edge'}
         return {}, evidence
     best = None
-    offsets = [0] if sign == 1 else np.arange(-8, 8.1, 1)*scale
+    offsets = np.arange(-8, 8.1, 1)*scale
     for sigma in np.arange(1, 6.1, .5)*scale:
         for offset in offsets:
             tails = np.array([[.5*math.erfc((d+offset)/(math.sqrt(2)*sigma)) for d in distances],
@@ -122,20 +119,13 @@ def exterior_fit(image, x0, x1, y, h, scale):
         return {}, evidence
     coefficient = np.sum(residual*tails[:, :, None], axis=(0, 1))/np.sum(tails*tails)
     bg = np.mean(baseline, axis=(0, 1))
-    if sign == 1:
-        opacity = float(np.max(np.maximum(coefficient, 0)/np.maximum(255-bg, 1)))
-        color = hexa(bg+coefficient/max(opacity, .01))
-        params = {'color': color, 'opacity': round(min(1, opacity), 3), 'radius': round(min(12, sigma*2/scale), 2)}
-    else:
-        # A flattened dark tail identifies contrast; use a neutral shadow only
-        # when RGB attenuation agrees with the measured local background.
-        ratios = -coefficient/np.maximum(bg, 1)
-        usable = bg > 20
-        if not usable.any() or np.std(ratios[usable]) > .12:
-            evidence[kind] = {'status': 'unobservable', 'reason': 'colored-or-low-contrast-shadow'}
-            return {}, evidence
-        params = {'type': 'outer', 'color': '000000', 'opacity': round(min(1, float(np.median(ratios[usable]))), 3),
-                  'blur': round(min(12, sigma*2/scale), 2), 'offset': round(abs(offset)/scale, 2), 'angle': 90 if offset >= 0 else 270}
+    ratios = -coefficient/np.maximum(bg, 1)
+    usable = bg > 20
+    if not usable.any() or np.std(ratios[usable]) > .12:
+        evidence[kind] = {'status': 'unobservable', 'reason': 'colored-or-low-contrast-shadow'}
+        return {}, evidence
+    params = {'type': 'outer', 'color': '000000', 'opacity': round(min(1, float(np.median(ratios[usable]))), 3),
+              'blur': round(min(12, sigma*2/scale), 2), 'offset': round(abs(offset)/scale, 2), 'angle': 90 if offset >= 0 else 270}
     effects[kind] = params
     evidence[kind] = {'status': 'present', 'rmse': round(error, 2), 'estimated': True,
                       'scope': 'horizontal-edge-profile', 'parameterAmbiguity': 'color-opacity-from-flattened-image'}
@@ -155,12 +145,12 @@ def observed_effects(image, box, count, active):
             continue
         gradient, ge = gradient_fit(pixels[y:y+h, x0:x1])
         outer, ee = exterior_fit(pixels, x0, x1, y, h, image.width/1600)
-        values = {'Gradient': gradient, 'Glow': outer.get('Glow'), 'Shadow': outer.get('Shadow')}
+        values = {'Gradient': gradient, 'Shadow': outer.get('Shadow')}
         checks = {'Gradient': ge, **ee}
         measured.setdefault(state, []).append((values, checks))
     for state in ('track', 'completed', 'active'):
         rows = measured.get(state, [])
-        for kind in ('Gradient', 'Glow', 'Shadow'):
+        for kind in ('Gradient', 'Shadow'):
             key = state+kind
             if not rows:
                 evidence[key] = {'status': 'unobservable', 'reason': 'state-not-visible'}
@@ -169,10 +159,11 @@ def observed_effects(image, box, count, active):
             if len(set(statuses)) != 1:
                 evidence[key] = {'status': 'unobservable', 'reason': 'segments-disagree', 'segments': statuses}
                 continue
-            evidence[key] = rows[0][1][kind]
+            selected=min(rows,key=lambda row:row[1][kind].get('rmse',99))
+            evidence[key] = selected[1][kind]
             if statuses[0] == 'present':
                 # Do not share one state's effect with another state.
-                effects[key] = rows[0][0][kind]
+                effects[key] = selected[0][kind]
             elif statuses[0] == 'absent' and kind != 'Gradient':
                 effects[key] = None
     return effects, evidence
