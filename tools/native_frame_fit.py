@@ -14,7 +14,6 @@ import numpy as np
 from PIL import Image
 from object_masks import object_alpha, mask_entries
 from shape_paint import fit_shape_paint
-from native_line_fit import fit_native_lines
 from paint_models import spatial_samples, predict_paint, validate_shared_paint
 from light_profiles import light_profiles
 
@@ -527,7 +526,7 @@ def fit_native_frames(spec):
         if not existing:paint_proposals.append(proposal);paints[key]=proposal
         for d in paint_diagnostics:
             if d['key']==key:d['sharedFill']=shared;d['acceptedFields']=list(proposal['measurements'])
-    line_proposals,line_diagnostics=([],[]) if spec.get('paintOnly') else fit_native_lines(ref,elements,excluded,spec.get('targetKeys'))
+    line_proposals,line_diagnostics=[],[]
     return {'status':'available','version':VERSION,'proposals':results,'paintProposals':paint_proposals,'paintDiagnostics':paint_diagnostics,'lineProposals':line_proposals,'lineDiagnostics':line_diagnostics,'lightEvidence':light_profiles(ref,background,elements),'frameEvidence':evidence,'unresolved':unresolved,'diagnostics':diagnostics,'elapsedMs':round((time.perf_counter()-started)*1000,1)}
 
 

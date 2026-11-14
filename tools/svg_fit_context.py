@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 from PIL import Image
 from object_masks import object_alpha, mask_entries, crop_alpha
+from svg_symbol_geometry import symbol_mask,symbol_error,whole_geometry
 
 cv2.setNumThreads(1)
 CACHE = OrderedDict()
@@ -38,7 +39,7 @@ def holes(mask, valid):
 
 
 def context(spec,size):
-    stable={k:v for k,v in spec.items() if k not in ('candidates','stage')}
+    stable={k:v for k,v in spec.items() if k not in ('candidates','stage','operation','palette','detailView','elementBox','detailBox')}
     for k in ('reference','background','contextBackground'):
         if stable.get(k):stable[k]=[stable[k],Path(stable[k]).stat().st_mtime_ns]
     key=hashlib.sha256(json.dumps([stable,size],sort_keys=True).encode()).hexdigest()
@@ -62,7 +63,8 @@ def context(spec,size):
     internal &= cv2.dilate(foreground.astype(np.uint8),np.ones((3,3),np.uint8))>0
     internal_distance=cv2.distanceTransform((~internal).astype(np.uint8),cv2.DIST_L2,3)
     result={'ref':ref,'bg':bg,'valid':valid,'foreground':foreground,'boundary':boundary,'distance':distance,
-            'internal':internal,'internalDistance':internal_distance,'holes':holes(foreground,valid)}
+            'internal':internal,'internalDistance':internal_distance,'holes':holes(foreground,valid),
+            'symbol':symbol_mask(ref,valid,spec,size)}
     CACHE[key]=result
     while len(CACHE)>8:CACHE.popitem(last=False)
     return result,False
@@ -72,6 +74,8 @@ def run(spec):
     with Image.open(spec['candidates'][0]['file']) as first:size=first.size
     ctx,cached=context(spec,size);ref,bg,valid,foreground=(ctx[k] for k in ('ref','bg','valid','foreground'))
     if foreground.sum()<12 or valid.mean()<.15:return {'status':'unavailable','scores':[],'cached':cached}
+    if spec.get('operation')=='propose':
+        return proposals(spec,ctx,size)
     scores=[]
     for candidate in spec['candidates']:
         with Image.open(candidate['file']) as source:rgba=np.asarray(source.convert('RGBA').resize(size),np.float32)
@@ -99,6 +103,29 @@ def run(spec):
         worst=float(np.percentile(tile,80)) if tile else error
         hole_error=min(2,abs(holes(mask,valid)-ctx['holes']))
         score=1-(error*.55+(1-iou)*.22+min(20,chamfer)*.012+detail*.12+worst*.12+hole_error*.025)
+        symbol=symbol_error(ctx['symbol'],symbol_mask(rgba[:,:,:3],valid&(alpha[:,:,0]>.5),spec,size))
+        if symbol is not None:score=score*.55+(1-symbol['error'])*.45
         scores.append({'id':candidate['id'],'score':round(score,6),'iou':round(iou,5),'edgeDistance':round(chamfer,4),
-                       'colorError':round(error,5),'internalEdgeError':round(detail,5),'holeDifference':hole_error,'componentError':round(worst,5)})
+                       'colorError':round(error,5),'internalEdgeError':round(detail,5),'holeDifference':hole_error,'componentError':round(worst,5),
+                       'symbolError':symbol['error'] if symbol else None,'symbolGeometry':symbol})
     return {'status':'available','scores':scores,'samples':int(valid.sum()),'cached':cached}
+
+
+def proposals(spec,ctx,size):
+    """Analytic palette and a bounded flat-symbol contour; no photographic tracing."""
+    ref,bg,valid=(ctx[k] for k in ('ref','bg','valid'))
+    with Image.open(spec['candidates'][0]['file']) as im:rgba=np.asarray(im.convert('RGBA').resize(size),np.float32)
+    alpha=rgba[:,:,3]/255;source=rgba[:,:,:3]
+    colors=[]
+    # Interior source pixels avoid antialiasing and underlying background. Shared
+    # palette nodes are updated together, rather than each layer drifting alone.
+    for value in spec.get('palette',[]):
+        old=np.array([int(value[i:i+2],16) for i in (1,3,5)],float)
+        mask=(np.linalg.norm(source-old,axis=2)<12)&(alpha>.9)&valid
+        mask=cv2.erode(mask.astype(np.uint8),np.ones((2,2),np.uint8))>0
+        if mask.sum()<10:continue
+        pixels=ref[mask];new=np.median(pixels,axis=0)
+        spread=float(np.median(np.linalg.norm(pixels-new,axis=1)))
+        if spread>14 or np.linalg.norm(new-old)>85 or np.linalg.norm(new-old)<3:continue
+        colors.append({'from':value,'to':'#'+''.join(f'{int(round(v)):02X}' for v in new),'samples':int(mask.sum())})
+    return {'status':'available','palette':colors,'geometry':whole_geometry(spec,ctx,size)}

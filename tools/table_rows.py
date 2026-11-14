@@ -582,6 +582,12 @@ def measure_table(table, reference, mask, options, scene):
         table_mask[:, -margin:] = 0
     text_zones = []
     for box in table.get("exclude") or []:
+        if box.get('kind')=='line' and box.get('element'):
+            from line_geometry import line_alpha
+            alpha=line_alpha(box['element'],scene)
+            stroke=cv2.dilate((alpha>16).astype(np.uint8),np.ones((3,3),np.uint8))
+            table_mask[stroke[top:bottom,left:right]>0]=0
+            continue
         pixel = pixel_box(box, scene)
         if not pixel:
             continue

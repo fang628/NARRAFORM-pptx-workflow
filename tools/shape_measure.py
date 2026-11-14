@@ -23,7 +23,6 @@ import numpy as np
 from PIL import Image
 
 from native_frame_fit import long_edges
-from native_line_fit import fit_native_lines
 
 cv2.setNumThreads(1)
 VERSION = 1
@@ -5695,60 +5694,6 @@ def run(spec):
                 alpha = cv2.resize(alpha, (WIDTH, HEIGHT), interpolation=cv2.INTER_NEAREST)
             masks[key] = alpha
     target_keys = spec.get('targetKeys')
-    line_keys = {e.get('key') for e in elements
-                 if e.get('type') == 'line' and not e.get('managed')
-                 and (target_keys is None or e.get('key') in target_keys)}
-    line_results = []
-    if line_keys:
-        try:
-            line_proposals, _line_diagnostics = fit_native_lines(ref, elements, None, line_keys)
-        except Exception:
-            line_proposals = []
-        for proposal in line_proposals or []:
-            element = next((item for item in elements if item.get('key') == proposal.get('key')), None)
-            props = proposal.get('properties') or {}
-            if element is None or not props:
-                continue
-            x = float(props.get('x', element.get('x', 0))); y = float(props.get('y', element.get('y', 0)))
-            w = float(props.get('w', element.get('w', 0))); h = float(props.get('h', element.get('h', 0)))
-            flip_h = bool(props.get('flipH')); flip_v = bool(props.get('flipV'))
-            ax = x + w if flip_h else x; ay = y + h if flip_v else y
-            bx = x if flip_h else x + w; by = y if flip_v else y + h
-            residual = float(proposal.get('medianResidual') or 0.0)
-            support = float(proposal.get('support') or 0.0)
-            metrics = {'edgeSupport': support, 'boundaryP95': residual, 'chamfer': residual,
-                       'visibleCoverage': 1.0, 'samples': 0, 'supportLength': 0}
-            points = [[ax, ay], [bx, by]]
-            line_results.append({
-                'key': element['key'],
-                'roi': {'x': round(x, 2), 'y': round(y, 2), 'w': round(w, 2), 'h': round(h, 2)},
-                'seed': {'points': points, 'metrics': metrics},
-                'families': {},
-                'candidates': [{'kind': 'line', 'score': 1.0, 'metrics': metrics,
-                                'points': points, 'extra': {'from': 'native-line-fit'}}],
-                'chosen': {'kind': 'line', 'points': points, 'metrics': metrics, 'score': 1.0,
-                           'native': {'type': 'line',
-                                      'bounds': {'x': round(x, 2), 'y': round(y, 2),
-                                                 'w': round(w, 2), 'h': round(h, 2)},
-                                      'flipH': flip_h, 'flipV': flip_v,
-                                      'strokeWidth': props.get('strokeWidth'),
-                                      'color': props.get('color'),
-                                      'gradient': props.get('gradient')},
-                           'extra': {'from': 'native-line-fit'}},
-                'occludedFraction': 0.0,
-                'optimizer': None,
-                'model': 'LINE',
-                'roiShift': [0.0, 0.0, 0.0, 0.0],
-                'relocation': None,
-                'edgeMap': 'canny',
-                'profileShift': [0.0, 0.0, 0.0, 0.0],
-                'roiScore': 1.0,
-                'routing': {'class': 'line'},
-                'nativeDecision': {'stage': 'post-fit', 'shape': 'line',
-                                   'deviation': residual, 'tolerance': 2.0},
-                'appearance': {'hasGradient': bool(props.get('gradient'))},
-                'strategy': 'line-centreline',
-            })
     explicit_exclude = spec.get('exclude') or []
     lines_all = long_edges(ref)
     asset_elements = [element for element in elements if element_is_asset(element)]
@@ -5835,7 +5780,6 @@ def run(spec):
             item['_edge'] = edge
             item['_box'] = box_of(e)
             results.append(item)
-    results.extend(line_results)
     missing = []
     heading_ids = spec.get('headingNodeIds')
     if heading_ids:

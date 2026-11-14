@@ -284,7 +284,7 @@ def analyse_text(element):
 
     # Italic/bold heuristics only make sense for body/table text; calligraphic titles keep the
     # project-level title style and must not be judged as bold/italic from stroke thickness.
-    style = style_features() if not title else None
+    style = style_features() if not title and spec.get('measureTypography',True) else None
 
     def contrast_ok(colour_lab):
         delta_l = abs(float(colour_lab[0]) - float(background_lab[0]))
@@ -556,7 +556,9 @@ def main():
     page_width = float(spec.get('pageWidth') or 1600)
     ratio = image.shape[1] / page_width
     results = []
+    targets=set(spec['targetKeys']) if spec.get('targetKeys') is not None else None
     for element in spec.get('elements') or []:
+        if targets is not None and element.get('key') not in targets:continue
         if element.get('type') != 'text':
             continue
         try:

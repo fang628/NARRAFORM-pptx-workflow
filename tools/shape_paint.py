@@ -92,7 +92,7 @@ def outline_profile(ref,contour,mask,valid):
     """
     points=contour[:,0,:].astype(float)
     if len(points)<8:return None,None
-    widths=[];colors=[];peak_offsets=[];clear_edges=0;tested_edges=0
+    widths=[];colors=[];peak_offsets=[];clear_edges=0;tested_edges=0;eligible_edges=0
     ridge_mask=np.zeros(mask.shape,np.uint8)
     limit=mask.shape
     for i in np.linspace(0,len(points)-1,min(900,len(points)),dtype=int):
@@ -112,6 +112,7 @@ def outline_profile(ref,contour,mask,valid):
         outside=values[sample_offsets<=-4];inside=values[sample_offsets>=10]
         if np.mean(np.std(outside,axis=0))>13 or np.mean(np.std(inside,axis=0))>13:continue
         a=np.median(outside,axis=0);b=np.median(inside,axis=0);direction=b-a
+        eligible_edges+=1
         t=np.clip((values-a)@direction/max(1,np.dot(direction,direction)),0,1)
         # A true outline is a color ridge beyond a simple antialiased fill edge.
         ridge=np.linalg.norm(values-(a+t[:,None]*direction),axis=1)
@@ -134,7 +135,12 @@ def outline_profile(ref,contour,mask,valid):
     width=float(np.median(widths));agreement=float((abs(np.array(widths)-width)<=1).mean())
     if agreement<.8:return None,None
     color=np.median(colors,axis=0)
-    profile={'width':width,'color':_hex(color),'confidence':agreement,'samples':len(widths),
+    coverage=len(widths)/max(1,eligible_edges)
+    offset_mad=float(np.median(abs(np.asarray(peak_offsets)-np.median(peak_offsets))))
+    confidence=agreement*min(1.,coverage/.45)*max(0.,1-offset_mad/4)
+    confidence*=max(0.,1-max(0.,abs(float(np.median(peak_offsets)))-2)/4)
+    profile={'width':width,'color':_hex(color),'confidence':confidence,'samples':len(widths),
+             'coverage':round(coverage,4),'offsetSpread':round(offset_mad,3),
              'offset':round(float(np.median(peak_offsets)),2),'method':'boundary-normal-colour-profile'}
     return profile,ridge_mask
 
@@ -260,9 +266,10 @@ def fit_shape_paint(ref, contour, element, excluded, excluded_alpha=None, diagno
             band=ridge.astype(bool)&evidence
             sampling['strokeMethod']='colour-ridge'
         else:
-            allowed=max(1.2,min(6.0,stroke_width if stroke_width>0 else width)*.7)
-            band=evidence&(np.abs(signed)<=allowed)
-            sampling['strokeMethod']='signed-distance-band'
+            # An audited width locates a search, not evidence that these pixels
+            # contain a stroke. A fixed band can be entirely fill/background.
+            band=np.zeros(evidence.shape,bool)
+            sampling['strokeMethod']='unresolved-ridge'
         # Prefer the inner half of the stroke: it is painted over this object's own fill, so a
         # single known background (the fill composite) de-mixes it. Only use the mixed outer
         # half when the detected ridge is too thin to provide enough interior samples.
@@ -273,6 +280,7 @@ def fit_shape_paint(ref, contour, element, excluded, excluded_alpha=None, diagno
         else:
             mixed_background=True
         sampling['strokePixels']=int(band.sum())
+        sampling['ridgeConfidence']=float((outline or {}).get('confidence',0))
         if sampling['strokePixels']>=MIN_STROKE_SAMPLES:
             detail={} if diagnostics is not None else None
             pixels=ref[band]
@@ -293,10 +301,24 @@ def fit_shape_paint(ref, contour, element, excluded, excluded_alpha=None, diagno
                 under=background_pixels
             stroke_element={**element,'fillOpacity':element.get('colorOpacity',1)}
             current_stroke=element.get('strokeGradient') or element.get('color')
+            stroke_alpha=float(element.get('colorOpacity',1))*float(element.get('opacity',1))
+            if under is not None and .15<=stroke_alpha<.98:
+                recovered=(pixels-(1-stroke_alpha)*under)/stroke_alpha
+                median=np.median(recovered,axis=0)
+                residual=np.mean(abs(recovered-median),axis=1)
+                if (residual<8).mean()>=.85 and np.all(median>=-4) and np.all(median<=259):
+                    predicted=np.clip(median,0,255)*stroke_alpha+under*(1-stroke_alpha)
+                    after=float(np.mean(abs(predicted-pixels)))
+                    if after<=4:
+                        result['strokeSolid']={'color':_hex(median),'confidence':float((residual<8).mean()),
+                            'afterError':after,'samples':len(pixels),'accepted':True,'method':'ridge-alpha-unmixed-solid'}
+                        _fill_evidence_detail(detail,result['strokeSolid'],'ridge-alpha-unmixed-solid')
             spatial_range=_spatial_range(pixels)
             sampling['strokeRange']=round(spatial_range,3)
             solid=solid_paint(pixels,xx[band],yy[band],stroke_element,current_stroke) if stroke_opaque else None
-            if solid is not None and spatial_range<=SOLID_RANGE:
+            if 'strokeSolid' in result:
+                pass
+            elif solid is not None and spatial_range<=SOLID_RANGE:
                 result['strokeSolid']={**solid,'method':'solid-fast-path'}
                 _fill_evidence_detail(detail,result['strokeSolid'],'solid-fast-path')
             else:

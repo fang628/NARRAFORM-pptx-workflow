@@ -41,7 +41,6 @@ sys.path.insert(0, __file__.rsplit('\\', 1)[0] if '\\' in __file__ else __file__
 from shape_reference import image, seed_polygon, hex_color
 from shape_paint import fit_shape_paint
 from native_effects import detect_native_effects,without_soft_exterior
-from native_line_style import measure_line_style
 from circle_paint import joint_circle_paint
 from fill_end_alpha import fit_fill_end_alpha
 from frame_highlight import fit_frame_highlight
@@ -243,15 +242,10 @@ def main():
         geometry=element.get('geometryEvidence') or {}
         if element.get('type')!='line' and geometry.get('accepted') is False and (geometry.get('support',1)<.55 or geometry.get('boundaryP95',geometry.get('p95',0))>6):
             return {'key':key,'status':'geometry-pending','properties':{'parameterEvidence':{
-                'fill':{'confidence':0,'independent':True,'reason':'unresolved-location'}}},'diagnostics':detail}
+                p:{'confidence':0,'independent':True,'reason':'unresolved-location'} for p in ('fill','stroke','strokeColor','strokeWidth')}},'diagnostics':detail}
         if element.get('type')=='line':
-            lower=_load_rgb(underlays.get(key),(page_height,page_width)) if underlays.get(key) else None
-            hidden=np.zeros((page_height,page_width),bool) if front_alpha is None else front_alpha>8
-            for a,b,c,d in list(exclude_global)+list(front_boxes):hidden[max(0,b):min(page_height,d),max(0,a):min(page_width,c)]=True
-            props,evidence=measure_line_style(ref,element,lower,hidden)
-            if props:
-                props['parameterEvidence']={p:{'confidence':.85,'independent':True,'source':'line-reference-profile'} for p in ('strokeWidth','strokeColor') if ('strokeWidth' if p=='strokeWidth' else 'color') in props}
-            return {'key':key,'status':'fitted' if props else 'kept','properties':props,'diagnostics':{'line':evidence}}
+            # Open paths are measured once in S5 against post-fill underlays.
+            return {'key':key,'status':'kept','properties':{},'diagnostics':{'path':'owned-by-joint-path-S5'}}
         polygon = seed_polygon(element)
         if not polygon:
             row.update({'status': 'unsupported', 'reason': 'no-seed-polygon', 'properties': {},
@@ -356,7 +350,7 @@ def main():
         stroke_kind = str(element.get('strokeKind') or '')
         if isinstance(stroke, dict) and stroke.get('gradient'):
             properties['strokeGradient'] = stroke['gradient']
-        if isinstance(outline, dict) and float(outline.get('confidence') or 0) >= 0.9:
+        if isinstance(outline, dict) and float(outline.get('confidence') or 0) >= 0.55:
             if outline.get('presence') == 'absent':
                 # Only clear a stroke the audit itself does not claim. A real audited stroke
                 # that the normal profile cannot see (soft glow, very low contrast) keeps its
@@ -370,7 +364,7 @@ def main():
                     properties['strokeWidth'] = round(float(audit_width), 3)
                 elif measured_width and .4 <= float(measured_width) <= 6 and stroke_kind in ('', 'stroke', 'unknown'):
                     properties['strokeWidth'] = round(float(measured_width), 3)
-                if not element.get('strokeGradient') and outline.get('color'):
+                if not element.get('strokeGradient') and outline.get('color') and not stroke_translucent:
                     color = paint_color(outline['color'])
                     if color:
                         properties['color'] = color
@@ -452,11 +446,30 @@ def main():
         for parameter,observation in [('fill',fill_detail),('stroke',stroke_detail)]:
             has_paint=any(name in properties for name in (('fill','gradient') if parameter=='fill' else ('color','strokeGradient')))
             if has_paint:
-                error=float(observation.get('afterError',observation.get('error',0)) or 0)
-                score=float(observation.get('confidence',.85) or .85)*max(.1,1-error/24)
+                actual=observation if observation.get('confidence') is not None else (outline or {}) if parameter=='stroke' else {}
+                error=float(actual.get('afterError',actual.get('error',0)) or 0)
+                score=float(actual.get('confidence',0) or 0)*max(0.,1-error/24)
+                if parameter=='stroke':
+                    score=min(score,float((outline or {}).get('confidence',0)))
                 evidence[parameter]={'confidence':round(score,4),'independent':True,'source':'reference-pixels'}
                 if parameter=='stroke':
                     evidence['strokeColor']=evidence[parameter].copy();evidence['strokeWidth']=evidence[parameter].copy()
+                    # Keeping the audited line width is not an independent width measurement.
+                    if audit_width>=.3:evidence['strokeWidth']={'confidence':0,'independent':True,'source':'audit-width-retained'}
+        if float((outline or {}).get('confidence',0))<.55 or not sampling.get('outlineDetected'):
+            for field in ('color','strokeGradient','colorOpacity'):
+                if not effective_shadow:properties.pop(field,None)
+            for parameter in ('stroke','strokeColor','strokeWidth'):
+                evidence[parameter]={'confidence':0,'independent':True,'source':'unresolved-stroke-ridge'}
+        base_unresolved=stroke_translucent and (
+            effect_evidence.get('reason')=='lower-composite-mismatch'
+            or fill_detail.get('status')=='rejected' and float(fill_detail.get('afterError',0) or 0)>8)
+        if base_unresolved:
+            for field in ('color','strokeGradient','colorOpacity'):
+                if not effective_shadow:properties.pop(field,None)
+            for parameter in ('stroke','strokeColor','strokeWidth'):
+                evidence[parameter]={'confidence':0,'independent':True,'source':'stroke-underlay-unresolved'}
+            detail['stroke']['reason']='unresolved-fill-or-lower-composite-for-alpha'
         if evidence:properties['parameterEvidence']=evidence
         for parameter,field in [('fill','gradient'),('stroke','strokeGradient')]:
             alpha_detail=(alpha_evidence.get('parameters') or {}).get(parameter) or {}

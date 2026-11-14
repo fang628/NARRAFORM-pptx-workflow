@@ -19,9 +19,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 from shape_reference import seed_polygon
-from native_line_fit import fit_native_lines
 from parameter_confidence import weighted_median,provenance
 from structural_edges import match_panel
+from object_masks import object_alpha,mask_entries
 
 cv2.setNumThreads(1)
 WIDTH, HEIGHT = 1600, 900
@@ -252,7 +252,9 @@ def measure_corner(vertex, before_dir, after_dir, distance, valid, min_side, dec
             chosen = {'type': declared_type, 'size': max(declared_size, 1.0),
                       'cost': prior['cost'], 'p95': prior['p95']}
     if not chosen:
-        return {'type': 'sharp', 'size': 0.0, 'confidence': 0.0}
+        margin=best['cost']-base['cost'] if best else 0.
+        confidence=min(.95,base['support'])*min(1.,max(0.,margin)/.2) if base['p95']<=3 else 0.
+        return {'type': 'sharp', 'size': 0.0, 'confidence': round(confidence,3)}
     # Round/cut ambiguity: keep the declared family, otherwise prefer the smoother round model.
     if chosen['type'] == 'cut' and 'round' in candidates and declared_type != 'cut':
         if candidates['round']['cost'] <= chosen['cost'] + .2:
@@ -260,8 +262,11 @@ def measure_corner(vertex, before_dir, after_dir, distance, valid, min_side, dec
     if chosen['type'] == 'round' and 'cut' in candidates and declared_type == 'cut':
         if candidates['cut']['cost'] <= chosen['cost'] + .2:
             chosen = dict(candidates['cut'])
+    rivals=[base['cost']]+[c['cost'] for k,c in candidates.items() if k!=chosen['type']]
+    margin=min(rivals)-chosen['cost']
+    confidence=min(.95,float(base['support']))*min(1.,max(0.,margin)/.25) if chosen['p95']<=6 else 0.
     return {'type': chosen['type'], 'size': chosen['size'],
-            'confidence': round(float(improvement), 3)}
+            'confidence': round(confidence, 3)}
 
 
 def corner_payload(corners, min_side, ring=None):
@@ -308,6 +313,109 @@ def mixed_corner_commands(ring, corners, x, y, width, height):
             commands.append({'op': 'L', 'points': [norm(exits[index])]})
     commands.append({'op': 'Z', 'points': []})
     return commands
+
+
+def shared_corner_properties(source, original, properties, shape_shared):
+    """Commit corner metadata and its rendered path together, or keep the peer intact."""
+    corners=(source.get('shapeGeometry') or {}).get('corners')
+    if shape_shared:
+        return {**properties, 'shape':source['shape'], 'customGeometry':source.get('customGeometry'),
+                'shapeGeometry':source.get('shapeGeometry')}
+    if not corners:return None
+    props={**properties,'shape':properties.get('shape',original.get('shape')),
+           'shapeGeometry':{**(properties.get('shapeGeometry') or {}),'version':2,'corners':corners}}
+    peer={**original,**props}
+    if peer.get('customGeometry'):
+        ring=seed_polygon(peer)
+        if not ring or len(ring)!=4:return None
+        ring=np.asarray(ring,float);short=max(1,min(peer['w'],peer['h']))
+        sizes=[]
+        for i,c in enumerate(corners):
+            angle=math.acos(float(np.clip(np.dot(_unit(ring[i],ring[i-1]),_unit(ring[i],ring[(i+1)%4])),-1,1)))
+            size=float(c.get('radius',0))*short/max(.01,math.tan(angle/2)) if c['type']=='round' else float(c.get('distance',0))*short
+            sizes.append({'type':c['type'],'size':min(size,np.linalg.norm(ring[i-1]-ring[i])*.45,np.linalg.norm(ring[(i+1)%4]-ring[i])*.45)})
+        props['customGeometry']={'version':2,'commands':mixed_corner_commands(ring,sizes,peer['x'],peer['y'],peer['w'],peer['h'])}
+    return props
+
+
+def merge_group_corners(rows, originals, label):
+    """Only independent corner observations vote; straight-edge support is not a vote."""
+    rows=[r for r in rows if family(originals[r['key']])=='quad']
+    if len(rows)<2:return
+    sources=[r for r in rows if r.get('status')=='accepted' and len(r.get('cornerEvidence',[]))==4]
+    complete_custom=[r for r in sources if (r.get('properties') or {}).get('customGeometry')
+                     and min(float(c.get('confidence',0)) for c in r['cornerEvidence'])>=.55]
+    if complete_custom:
+        source=max(complete_custom,key=lambda r:min(float(c.get('confidence',0)) for c in r['cornerEvidence']))
+        signature=[c['type'] for c in source['cornerEvidence']]
+        if any([c['type'] for c in r['cornerEvidence']]!=signature for r in complete_custom):return
+        for row in rows:
+            original=originals[row['key']];groups=original.get('parameterGroups') or {}
+            if 'corners' in original.get('keepParameters',[]) or not (groups.get('shape') or groups.get('geometry')):continue
+            row['properties']=shared_corner_properties(source['properties'],original,row.get('properties') or {},True)
+            row['sharedCorners']=label;row.setdefault('parameterEvidence',{})['corners']=provenance([source['key']],.85)
+        return
+    resolved=[];source_keys=set();default_indices=[];pending_indices=[]
+    for index in range(4):
+        votes=[]
+        for row in sources:
+            e=row['cornerEvidence'][index];confidence=float(np.clip(e.get('confidence',0),0,1))
+            if confidence<.55:continue
+            props=row.get('properties') or {};payload=(props.get('shapeGeometry') or {}).get('corners')
+            if not payload or len(payload)!=4:continue
+            votes.append((payload[index],confidence,row['key']))
+        if not votes:
+            # With no observation, share the initial group prior once. Never
+            # promote a generated fallback into a reference measurement.
+            defaults=[]
+            for row in rows:
+                original=originals[row['key']]
+                if 'corners' in original.get('keepParameters',[]):continue
+                if original.get('customGeometry') and not (original.get('shapeGeometry') or {}).get('corners'):continue
+                prior=declared_corners(original,float(original.get('w',100)),float(original.get('h',100)))[index]
+                defaults.append(prior)
+            if defaults and len({c['type'] for c in defaults})==1:
+                kind=defaults[0]['type'];field='radius' if kind=='round' else 'distance'
+                value=weighted_median([float(c.get('value') or 0) for c in defaults],[1.]*len(defaults))
+                resolved.append({'type':kind,**({field:value} if kind!='sharp' else {})});default_indices.append(index)
+            else:resolved.append(None);pending_indices.append(index)
+            continue
+        if len({c['type'] for c,_,_ in votes})!=1:
+            resolved.append(None);pending_indices.append(index);continue
+        kind=votes[0][0]['type'];field='radius' if kind=='round' else 'distance'
+        values=[float(c.get(field,0)) for c,_,_ in votes]
+        if max(values)-min(values)>.04:
+            resolved.append(None);pending_indices.append(index);continue
+        resolved.append({'type':kind,**({field:weighted_median(values,[w for _,w,_ in votes])} if kind!='sharp' else {})})
+        source_keys.update(key for _,_,key in votes)
+    # A custom path needs a complete reliable signature; never substitute an
+    # unmeasured curved perimeter merely because its straight sides fit well.
+    source=max([r for r in sources if not (r.get('properties') or {}).get('customGeometry')],key=lambda r:min(float(c.get('confidence',0)) for c in r['cornerEvidence']),default=None)
+    if source is None:
+        source=next((r for r in rows if not (originals[r['key']].get('customGeometry'))),None)
+    if not any(c is not None for c in resolved):return
+    source_props={**originals[source['key']],**(source.get('properties') or {}),'shapeGeometry':{'version':2,'corners':resolved}} if source else None
+    if not source_props:return
+    source_props.setdefault('shape','rect' if source_props.get('type')=='rect' else 'roundRect')
+    for row in rows:
+        original=originals[row['key']]
+        if 'corners' in original.get('keepParameters',[]):continue
+        shape_shared=bool((original.get('parameterGroups') or {}).get('shape') or (original.get('parameterGroups') or {}).get('geometry'))
+        props=row.get('properties') or {}
+        if any(c is None for c in resolved):
+            if props.get('customGeometry') or original.get('customGeometry'):continue
+            geometry=props.get('shapeGeometry') or original.get('shapeGeometry') or {}
+            prior=geometry.get('corners') or [{'type':'round','radius':geometry.get('cornerRadius',.166667)} if (props.get('shape') or original.get('shape'))=='roundRect' else {'type':'sharp'} for _ in range(4)]
+            corners=[c if c is not None else prior[i] for i,c in enumerate(resolved)]
+            props=shared_corner_properties({'shape':props.get('shape',original.get('shape')),'shapeGeometry':{**geometry,'corners':corners}},original,props,False)
+        else:props=shared_corner_properties(source_props,original,props,shape_shared)
+        if props is None:continue
+        row['properties']=props;row['sharedCorners']=label
+        row.setdefault('parameterEvidence',{})['corners']={**provenance(sorted(source_keys),.85 if source_keys else 0),
+            'indices':[i for i,c in enumerate(resolved) if c is not None and i not in default_indices],
+            'defaultIndices':default_indices,'pendingIndices':pending_indices,
+            'method':'reference-and-shared-prior' if source_keys else 'shared-group-prior',
+            'defaultConfidence':0,'complete':all(c is not None for c in resolved)}
 
 
 def measure_quad_corners(ring, distance, valid, min_side, declared):
@@ -651,6 +759,11 @@ def fit(e, ref, distance, edge, valid):
     kind = family(e)
     if not kind:
         return {'key': e['key'], 'status': 'unsupported'}
+    outline=coloured_frame_candidate(e,ref,distance,valid) if kind=='quad' else None
+    if outline:
+        points,metric=outline;properties,corners=quad_properties(e,points,distance,valid)
+        return {'key':e['key'],'status':'accepted','family':'quad','properties':properties,'cornerEvidence':corners,
+                'metrics':metric,'method':'connected-coloured-frame','elapsedMs':round((time.perf_counter()-started)*1000,1)}
     panel=e.get('_structuralPanel')
     if panel and e.get('shape') in ('freeform','parallelogram','trapezoid'):
         points=np.asarray(panel['points'],float);samples_visible=[]
@@ -787,6 +900,51 @@ def fit(e, ref, distance, edge, valid):
 def by_ratio(original, measured, low, high):
     original = max(1e-6, float(original))
     return low <= float(measured) / original <= high
+
+
+def coloured_frame_candidate(e,ref,distance,valid):
+    """A connected thin outline owns its top/bottom; adjacent row edges cannot mix."""
+    if str(e.get('shape','')).lower() not in ('rect','roundrect') or e.get('customGeometry'):return None
+    if not (e.get('parameterGroups') or {}).get('shape') or float(e.get('strokeWidth',0))<=0:return None
+    try:
+        color=str(e.get('color','')).lstrip('#')
+        hue,saturation,value=cv2.cvtColor(np.array([[[int(color[i:i+2],16) for i in (4,2,0)]]],np.uint8),cv2.COLOR_BGR2HSV)[0,0]
+    except (ValueError,TypeError):return None
+    if saturation<60:return None
+    x,y,w,h=[float(e[k]) for k in ('x','y','w','h')]
+    pad=min(80,max(20,h*.75));left=max(0,int(x-12));top=max(0,int(y-pad));right=min(WIDTH,int(x+w+24));bottom=min(HEIGHT,int(y+h+pad))
+    hsv=cv2.cvtColor(ref[top:bottom,left:right],cv2.COLOR_BGR2HSV).astype(float)
+    delta=np.minimum(abs(hsv[:,:,0]-float(hue)),180-abs(hsv[:,:,0]-float(hue)))
+    ink=((delta<18)&(hsv[:,:,1]>60)&(hsv[:,:,2]>65)).astype(np.uint8)
+    count,labels,stats,_=cv2.connectedComponentsWithStats(ink);candidates=[]
+    for i in range(1,count):
+        a,b,c,d,area=map(int,stats[i])
+        if not (.8*w<=c<=1.2*w and .85*h<=d<=1.3*h and area/max(1,c*d)<.15):continue
+        # Components clipped by the search window are incomplete evidence.
+        if a<=1 or b<=1 or a+c>=ink.shape[1]-1 or b+d>=ink.shape[0]-1:continue
+        ring=np.array([[left+a,top+b],[left+a+c-1,top+b],[left+a+c-1,top+b+d-1],[left+a,top+b+d-1]],float)
+        contours=cv2.findContours((labels==i).astype(np.uint8),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)[0]
+        outline=max(contours,key=cv2.contourArea)[:,0,:].astype(float)+[left,top] if contours else ring
+        # Sample by physical arc length. Giving every tiny raster turn at
+        # least four votes overweights corners and text-cut pixels, rejecting
+        # a frame whose long visible sides are actually well supported.
+        steps=np.linalg.norm(np.roll(outline,-1,axis=0)-outline,axis=1)
+        cumulative=np.r_[0,np.cumsum(steps)];perimeter=float(cumulative[-1])
+        metric=None
+        if perimeter>0:
+            t=np.linspace(0,perimeter,min(600,max(80,round(perimeter/2))),endpoint=False)
+            closed=np.vstack([outline,outline[0]])
+            sampled=np.column_stack([np.interp(t,cumulative,closed[:,axis]) for axis in (0,1)])
+            sx=np.clip(np.rint(sampled[:,0]).astype(int),0,WIDTH-1);sy=np.clip(np.rint(sampled[:,1]).astype(int),0,HEIGHT-1)
+            visible=valid[sy,sx]
+            if visible.sum()>=max(24,len(sampled)*.35):
+                values=distance[sy[visible],sx[visible]]
+                metric={'p95':float(np.percentile(values,90)),'support':float((values<=2.5).mean()),
+                        'coverage':float(visible.mean()),'cost':float(np.minimum(values,15).mean()),'sampling':'uniform-outline-arclength'}
+        if metric and metric['support']>=.7 and metric['p95']<=6:
+            cost=abs(top+b-y)+abs(top+b+d-y-h)+abs(d-h)*.5
+            candidates.append((cost,ring,metric))
+    return min(candidates,key=lambda c:c[0])[1:] if candidates else None
 
 
 SLANT_GROUP_MAX_DELTA = 2.0
@@ -1182,31 +1340,18 @@ def main():
     edge = (strength > 70).astype(np.uint8)*255
     distance = cv2.distanceTransform(255-edge, cv2.DIST_L2, 3)
     valid = np.ones((HEIGHT, WIDTH), bool)
+    masks=mask_entries(spec)
     for e in spec.get('elements', []):
         if e.get('type') not in ('text', 'formula', 'image', 'svg', 'cutout'):
+            continue
+        alpha=object_alpha(e,masks)
+        if alpha is not None:
+            valid &= cv2.dilate((alpha>24).astype(np.uint8),np.ones((3,3),np.uint8))==0
             continue
         x, y, w, h = [float(e.get(k, 0)) for k in ('x', 'y', 'w', 'h')]
         valid[max(0,int(y)-2):min(HEIGHT,int(y+h)+2), max(0,int(x)-2):min(WIDTH,int(x+w)+2)] = False
     keys = set(spec.get('targetKeys') or [])
     results = []
-    line_keys={e['key'] for e in spec.get('elements',[]) if e.get('type')=='line' and e.get('key') in keys}
-    if line_keys:
-        proposals, line_diagnostics = fit_native_lines(cv2.cvtColor(ref,cv2.COLOR_BGR2RGB),spec['elements'],None,line_keys)
-        for proposal in proposals:
-            properties={key:value for key,value in (proposal.get('properties') or {}).items()
-                        if key in ('x','y','w','h','flipH','flipV')}
-            if max(float(properties.get('w', 0)), float(properties.get('h', 0))) < 4:
-                results.append({'key': proposal['key'], 'status': 'retained', 'family': 'line',
-                                'properties': {}, 'reason': 'degenerate-line-proposal'})
-                continue
-            results.append({'key':proposal['key'],'status':'accepted','family':'line','properties':properties,
-                            'metrics':{'p95':proposal.get('medianResidual'),'support':proposal.get('support')}})
-        proposed={row['key'] for row in results}
-        # A line already agreeing with the reference still supplies boundary
-        # evidence to a shared slope; the joint validator decides whether to keep it.
-        reasons={d['key']:d.get('reason') for d in line_diagnostics}
-        results.extend({'key':key,'status':'retained','family':'line','properties':{},'reason':reasons.get(key,'line-not-observable')}
-                       for key in sorted(line_keys-proposed))
     for e in spec.get('elements', []):
         if e.get('key') in keys and e.get('type')!='line':
             try:
@@ -1321,27 +1466,10 @@ def main():
         label=labels.get('shape') or labels.get('geometry') or labels.get('corners')
         if label and key in by_key:corner_groups.setdefault(label,[]).append(by_key[key])
     for label,rows in corner_groups.items():
-        sources=[r for r in rows if r.get('status')=='accepted' and len(r.get('cornerEvidence',[]))==4
-                 and float((r.get('metrics') or {}).get('support',0))*(1-min(.6,float((r.get('metrics') or {}).get('p95',0))/12))>=.55]
-        if not sources:continue
-        source=max(sources,key=lambda r:float((r.get('metrics') or {}).get('support',0))/(1+float((r.get('metrics') or {}).get('p95',0))))
-        corners=((source.get('properties') or {}).get('shapeGeometry') or {}).get('corners')
-        if not corners:continue
-        for row in rows:
-            original=originals[row['key']]
-            if 'corners' in original.get('keepParameters',[]):continue
-            props=row.setdefault('properties',{})
-            shape_shared=bool((original.get('parameterGroups') or {}).get('shape') or (original.get('parameterGroups') or {}).get('geometry'))
-            if shape_shared:
-                props['shape']=source['properties']['shape']
-                props['customGeometry']=source['properties'].get('customGeometry')
-            else:props.setdefault('shape',original.get('shape'))
-            props['shapeGeometry']={**(props.get('shapeGeometry') or {}),'version':2,'corners':corners}
-            row['sharedCorners']=label
-            row.setdefault('parameterEvidence',{})['corners']=provenance([source['key']],.85)
+        merge_group_corners(rows,originals,label)
     # Bounded S3 measured-slant joint fit: only near slopes of the same family/direction, never
     # positions/widths/heights/fonts; S3 result owns the merged slope so S6 must not rewrite it.
-    merge_measured_slant_groups(results, distance, valid, keys, originals)
+    if not spec.get('deferSlantMerge'):merge_measured_slant_groups(results, distance, valid, keys, originals)
     output = {'status': 'available', 'results': results, 'elapsedMs': round((time.perf_counter()-started)*1000, 1)}
     Path(sys.argv[2]).write_text(json.dumps(output, ensure_ascii=False, indent=1), encoding='utf-8')
     print(json.dumps({'status': 'available', 'elapsedMs': output['elapsedMs'], 'objects': len(results)}))

@@ -60,13 +60,17 @@ def sample_members(elements, reference, masks, underlays):
                     output[key] = {'pixels': reference[yy, xx].astype(float), 'xx': xx+.5, 'yy': yy+.5,
                                    'background': background[yy, xx].astype(float) if background is not None else None}
                     if float(element.get('strokeWidth') or 0)>=.7:
-                        distance=cv2.distanceTransform((mask>0).astype(np.uint8),cv2.DIST_L2,3)
-                        ring=(distance>.5)&(distance<=max(1.2,float(element['strokeWidth'])*.45))&(front<16)
-                        sy,sx=np.nonzero(ring);step=max(1,len(sx)//2000);sx,sy=sx[::step],sy[::step]
-                        bg=background[sy,sx].astype(float) if background is not None else None
-                        lower=composite_paint(element.get('gradient') or element.get('fill'),sx+.5,sy+.5,element,bg)
-                        if len(sx)>=80:
-                            output[key]['stroke']={'pixels':reference[sy,sx].astype(float),'xx':sx+.5,'yy':sy+.5,'background':lower}
+                        from shape_paint import outline_profile
+                        contours=cv2.findContours(mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)[0]
+                        profile,ridge=outline_profile(reference,max(contours,key=cv2.contourArea),mask,front<16) if contours else (None,None)
+                        if profile and profile.get('width',0)>0 and profile.get('confidence',0)>=.55 and ridge is not None:
+                            ring=(ridge>0)&(mask>0)&(front<16)
+                            sy,sx=np.nonzero(ring);step=max(1,len(sx)//2000);sx,sy=sx[::step],sy[::step]
+                            bg=background[sy,sx].astype(float) if background is not None else None
+                            lower=composite_paint(element.get('gradient') or element.get('fill'),sx+.5,sy+.5,element,bg)
+                            if len(sx)>=80:
+                                output[key]['stroke']={'pixels':reference[sy,sx].astype(float),'xx':sx+.5,'yy':sy+.5,'background':lower,
+                                    'ridgeConfidence':profile['confidence']}
         if alpha is not None:
             front = np.maximum(front, cv2.dilate(alpha, np.ones((3, 3), np.uint8)))
         elif element.get('type') in ('text', 'formula', 'image', 'cutout', 'svg'):
@@ -95,7 +99,8 @@ def read_samples(file):
             evidence={field:saved[str(index)+'_'+field].copy() if str(index)+'_'+field in saved else None
                       for field in ('pixels','xx','yy','background')}
             stroke={field:saved[str(index)+'_stroke_'+field].copy() if str(index)+'_stroke_'+field in saved else None
-                    for field in ('pixels','xx','yy','background')}
+                    for field in ('pixels','xx','yy','background','ridgeConfidence')}
+            if stroke.get('ridgeConfidence') is not None:stroke['ridgeConfidence']=float(stroke['ridgeConfidence'])
             if stroke['pixels'] is not None:evidence['stroke']=stroke
             output[key]=evidence
     return output
@@ -117,6 +122,7 @@ def observe_parameters(elements,samples):
         sample=samples.get(element['key'])
         if sample is None:continue
         for parameter,field,solid,stroke in [('fill','gradient','fill',False),('strokeColor','strokeGradient','color',True)]:
+            if stroke and (element.get('parameterEvidence') or {}).get('strokeColor',{}).get('source')=='stroke-underlay-unresolved':continue
             fields=[parameter] if parameter!='fill' else ['fill','gradientStops','gradientAngle','gradientCenter']
             fields=[p for p in fields if not blocked_parameter(element,p) and (p in ('fill','strokeColor') or element.get('gradient') and ((element.get('parameterGroups') or {}).get(p) or (element.get('parameterGroups') or {}).get('fill') or element.get('tableRole')=='icon'))]
             if not fields:continue
@@ -126,7 +132,9 @@ def observe_parameters(elements,samples):
             if error is None or error[0]>10 or error[1]>12:continue
             # This is a new pixel observation of this specific instance. It
             # may replace inherited provenance, but never fabricates a vote.
-            entry={'confidence':round(max(.55,.95-error[0]/25),4),'independent':True,
+            score=max(0,.95-error[0]/25)
+            if stroke:score=min(score,evidence.get('ridgeConfidence',0))
+            entry={'confidence':round(score,4),'independent':True,
                    'source':'visible-reference-residual','observationId':element['key']+':'+parameter}
             for p in fields:element.setdefault('parameterEvidence',{})[p]=entry.copy()
 

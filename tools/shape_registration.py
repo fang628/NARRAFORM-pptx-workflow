@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Registration + completion step for the experimental shape path.
+"""Registration + completion for the committed S2 path.
 
 Input spec (JSON): {preview, background?, elements:[...], minAreaRatio?}
 - seeds are the elements already registered by the rebuild pipeline (audit/committed list);
@@ -7,11 +7,11 @@ Input spec (JSON): {preview, background?, elements:[...], minAreaRatio?}
   any non-text seed are registered as automatic frame candidates (补全);
 - every seed is kept: text/image/svg/cutout pass through, shapes become fitting targets.
 - independent narrow bright geometric cores (e.g. a slanted illuminated strip drawn between
-  panels) that the audit missed are registered as native `line` elements, but only with
+  panels) that the audit missed are registered directly as SVG effects, but only with
   continuous/strong ridge evidence that is absent from the wordless background, is not text or a
   registered image, is not a near-parallel copy of an existing shape/line edge, and is not a soft
   halo or ornamental arc. The auto-frame logic is unchanged; the new lines are appended as
-  foreground effect cores so they are not buried by the completion frames.
+  foreground effects so they are not buried by the completion frames.
 
 Output: registry JSON with the complete element list, auto frames, auto lines and coverage stats.
 CLI: python tools/shape_registration.py <spec.json> <out.json>
@@ -133,15 +133,6 @@ def _bgr_hex(pixel):
     return '%02X%02X%02X' % (int(pixel[2]), int(pixel[1]), int(pixel[0]))
 
 
-def _line_endpoints(element):
-    x, y, w, h = (float(element.get(key, 0) or 0) for key in ('x', 'y', 'w', 'h'))
-    start = np.array([x + (w if element.get('flipH') else 0.0),
-                      y + (h if element.get('flipV') else 0.0)], float)
-    end = np.array([x + (0.0 if element.get('flipH') else w),
-                    y + (0.0 if element.get('flipV') else h)], float)
-    return start, end
-
-
 def _polyline(element):
     """Straight-edge polyline of an already registered native element (line handled separately)."""
     x, y, w, h = (float(element.get(key, 0) or 0) for key in ('x', 'y', 'w', 'h'))
@@ -176,9 +167,8 @@ def _existing_edges(elements):
     for element in elements:
         kind = str(element.get('type') or '')
         if kind == 'line':
-            start, end = _line_endpoints(element)
-            if float(np.linalg.norm(end - start)) >= 6.0:
-                edges.append((start, end))
+            from line_geometry import straight_edges
+            edges.extend((start,end) for start,end in straight_edges(element) if np.linalg.norm(end-start)>=6)
             continue
         if kind not in ('shape', 'rect'):
             continue  # ellipse/other curved outlines are not straight-edge evidence
@@ -387,9 +377,7 @@ def _refine_light_strip(preview, luma, diff, core, core_threshold, line, protect
     bright = np.asarray([pixel for pixel, value in zip(core_pixels[::max(1, len(core_pixels) // 200)], core_luma)
                          if value >= float(np.median(core_luma))])
     color = _bgr_hex(np.median(bright if len(bright) else core_pixels, axis=0))
-    # Optional native glow evidence: a narrow halo measured against the local background on both
-    # sides of the core. Wide/soft effects stay with the independent light-effect path; this only
-    # carries the small glow that belongs to the registered native line core.
+    # Measure an independent SVG light bar's halo, never a native line effect.
     halo_widths, halo_contrasts, halo_pixels = [], [], []
     for step in np.linspace(0.18, 0.82, 11):
         point = start_point + (end_point - start_point) * step
@@ -445,7 +433,7 @@ def _refine_light_strip(preview, luma, diff, core, core_threshold, line, protect
 
 
 def discover_light_strips(preview, background, elements):
-    """Return deterministic native-line registrations for missing narrow bright straight cores."""
+    """Register missing independent bright cores as complete SVG effects."""
     if preview is None or background is None:
         return []
     luma = _luma(preview)
@@ -489,6 +477,26 @@ def _same_light_strip(first, second):
     if abs(first['length'] - second['length']) > max(12.0, 0.08 * max(first['length'], second['length'])):
         return False
     return abs(first['contrast'] - second['contrast']) < 60.0
+
+
+def light_strip_element(strip,key):
+    from xml.sax.saxutils import escape
+    width=strip['strokeWidth'];glow=strip.get('glow') or {}
+    pad=max(3,width/2+2,float(glow.get('radius',0))*2)
+    w,h=strip['w']+pad*2,strip['h']+pad*2
+    x1=pad+(strip['w'] if strip['flipH'] else 0);x2=pad+(0 if strip['flipH'] else strip['w'])
+    y1=pad+(strip['h'] if strip['flipV'] else 0);y2=pad+(0 if strip['flipV'] else strip['h'])
+    color=escape(strip['color']);core=f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="#{color}" stroke-width="{width}"/>'
+    halo=''
+    if glow:
+        halo=f'<defs><filter id="halo" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="{glow["radius"]/2}"/></filter></defs><g opacity="{glow["opacity"]}" filter="url(#halo)">{core}</g>'
+    return {'key':key,'type':'svg','x':strip['x']-pad,'y':strip['y']-pad,'w':w,'h':h,
+            'svg':f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}">{halo}{core}</svg>',
+            'role':'effect','visualKind':'light-effect','effectKind':'lit-stroke','autoRegistered':True,
+            'representationOrigin':'svg-light-bar','description':'按参考亮脊和柔光补登记的独立SVG光条',
+            'recognitionEvidence':{'source':'preview-bright-ridge',**{field:strip[field] for field in
+                ('length','coreLength','coverage','thickness','contrast','brightness','haloWidth') if field in strip},'foundationDiff':True},
+            'lighting':{'coreConfirmed':True,'evidence':'continuous visible ridge with measured local halo, absent from foundation'}}
 
 
 def main():
@@ -558,22 +566,7 @@ def main():
                 number += 1
             key = 'auto-line-' + str(number)
             used_keys.add(key)
-            auto_lines.append({
-                'key': key,
-                'type': 'line',
-                'x': strip['x'], 'y': strip['y'], 'w': strip['w'], 'h': strip['h'],
-                'flipH': strip['flipH'], 'flipV': strip['flipV'],
-                'strokeWidth': strip['strokeWidth'], 'color': strip['color'],
-                'dashType': 'solid', 'beginArrowType': 'none', 'endArrowType': 'none',
-                'class': 'light-strip', 'classHint': 'light-strip', 'description': '按预览亮脊补登记的斜向发光线条核心（光晕为可选局部效果）',
-                'autoRegistered': True, 'lowConfidence': False,
-                'recognitionEvidence': {'source': 'preview-bright-ridge',
-                                        'length': strip['length'], 'coreLength': strip['coreLength'],
-                                        'coverage': strip['coverage'], 'thickness': strip['thickness'],
-                                        'contrast': strip['contrast'], 'brightness': strip['brightness'],
-                                        'haloWidth': strip['haloWidth'], 'foundationDiff': True},
-                **({'glow': dict(strip['glow'])} if strip.get('glow') else {}),
-            })
+            auto_lines.append(light_strip_element(strip,key))
         coverage['autoLines'] = len(auto_lines)
 
     # New carriers belong behind the already audited text and foreground objects; the completed

@@ -16,9 +16,12 @@ def object_alpha(element, entries=None, size=(1600, 900), polygon=None):
     entry=(entries or {}).get(element.get('key'))
     if entry and entry.get('file'):
         try:return _read_alpha(entry['file'],tuple(size))
-        except (OSError, ValueError):return None
+        except (OSError, ValueError):pass
     if element.get('type') not in ('rect','ellipse','shape','line'):
         return None
+    if element.get('type')=='line':
+        from line_geometry import line_alpha
+        return line_alpha(element,size)
     if polygon is None:
         if element.get('type') in ('rect','ellipse'):
             x,y,w,h=[float(element.get(k,0)) for k in ('x','y','w','h')]
@@ -29,9 +32,6 @@ def object_alpha(element, entries=None, size=(1600, 900), polygon=None):
             # the application supplies exact masks from its native renderer.
             from shape_reference import seed_polygon
             polygon=seed_polygon(element)
-        else:
-            x,y,w,h=[float(element.get(k,0)) for k in ('x','y','w','h')]
-            polygon=[[x,y],[x+w,y+h]]
     if not polygon:return None
     sx,sy=size[0]/1600,size[1]/900
     points=np.rint(np.array(polygon)*[sx,sy]).astype(np.int32).reshape(-1,1,2)

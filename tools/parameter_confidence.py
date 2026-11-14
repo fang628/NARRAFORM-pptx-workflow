@@ -21,6 +21,9 @@ def confidence(element, parameter, observation=None):
     if evidence.get('inherited') or evidence.get('independent') is False:return 0.
     if 'confidence' in evidence:return float(np.clip(evidence['confidence'],0,1))
     geometry=element.get('geometryEvidence') or {}
+    if parameter=='corners':
+        corners=geometry.get('corners') or []
+        return min(float(np.clip(c.get('confidence',0),0,1)) for c in corners) if geometry.get('accepted') and len(corners)==4 else 0.
     if parameter in ('diameter','slant','corners') and geometry.get('accepted'):
         return float(np.clip(geometry.get('support',geometry.get('visibleCoverage',.8))*(1-min(.6,geometry.get('boundaryP95',0)/12)),0,1))
     return 0.
