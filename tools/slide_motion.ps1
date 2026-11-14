@@ -1,4 +1,18 @@
 # Native slide transitions only. No delayed page animation and no macros.
+function Get-NarraformLeafShapes($Shapes) {
+    for ($shapeIndex = 1; $shapeIndex -le $Shapes.Count; $shapeIndex++) {
+        $item = $Shapes.Item($shapeIndex)
+        if ([int]$item.Type -eq 6) { Get-NarraformLeafShapes $item.GroupItems }
+        else { Write-Output -NoEnumerate $item }
+    }
+}
+function Get-NarraformAllShapes($Shapes) {
+    for ($shapeIndex = 1; $shapeIndex -le $Shapes.Count; $shapeIndex++) {
+        $item = $Shapes.Item($shapeIndex)
+        Write-Output -NoEnumerate $item
+        if ([int]$item.Type -eq 6) { Get-NarraformAllShapes $item.GroupItems }
+    }
+}
 function Get-NarraformShapeKey($Shape) {
     $stored = [string]$Shape.Tags.Item('NARRAFORM_KEY')
     if ($stored) { return $stored }
@@ -17,7 +31,7 @@ function Set-NarraformMotion($Deck, $Plan) {
             $key = Get-NarraformShapeKey $sequence.Item($i).Shape
             if ($key.StartsWith('nf-progress-') -or $key.StartsWith('nf-footer-')) { $sequence.Item($i).Delete() }
         }
-        foreach ($shape in $slide.Shapes) {
+        foreach ($shape in (Get-NarraformAllShapes $slide.Shapes)) {
             $key = Get-NarraformShapeKey $shape
             $shape.Tags.Add('NARRAFORM_KEY', $key)
             if ($Plan.settings.enabled) {

@@ -222,7 +222,7 @@ def check(deck, spec, pages=None, baseline=None):
                     for latex,math in zip(expected_inline,actual_inline):
                         if signature(math)!=signature(ET.fromstring(convert(latex))):errors.append(f'S{i+1}: inline math mismatch '+latex[:60])
             tree=r.find(f'{{{P}}}cSld/{{{P}}}spTree')
-            objects=[s for s in tree if s.tag in {f'{{{P}}}sp',f'{{{P}}}pic',f'{{{P}}}cxnSp',f'{{{P}}}graphicFrame'}]
+            objects=[s for s in tree.iter() if s.tag in {f'{{{P}}}sp',f'{{{P}}}pic',f'{{{P}}}cxnSp',f'{{{P}}}graphicFrame'}]
             if len(objects)!=len(elements):errors.append(f'S{i+1}: object inventory mismatch')
             errors.extend(material_image_errors(z,names,r,xml.get(f'ppt/slides/_rels/slide{i+1}.xml.rels'),tree,spec,i))
             background=(spec.get('backgrounds') or [None]*len(spec['slides']))[i]

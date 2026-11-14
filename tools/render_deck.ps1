@@ -51,7 +51,7 @@ try {
         $scale = 1600.0 / $deck.PageSetup.SlideWidth
         $texts = @()
         $measurementErrors = @()
-        foreach ($shape in $slide.Shapes) {
+        foreach ($shape in (Get-NarraformLeafShapes $slide.Shapes)) {
             try {
                 if ($shape.HasTextFrame -ne 0 -and $shape.TextFrame2.HasText -ne 0) {
                     $range = $shape.TextFrame2.TextRange
