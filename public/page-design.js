@@ -5,8 +5,7 @@ const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt
 export function contentPageCountNotice(p){
   const actual=p.contentPipeline?.contentReady??(p.slides?.length||0),expected=p.brief?.pages;
   if(!expected)return '';
-  const state=p.contentPageCount,draft=!p.contentPipeline&&p.contentDraftAvailable&&state;
-  return `<p class="subtle content-page-count" role="status">实际 ${actual} / 目标 ${h(expected)} 页（含封面、目录等）${draft?` · 初稿 ${h(state.actual)} 页${state.status==='repairing'?'，正在自动调整':'已保留，可继续调整'}`:!p.contentPipeline&&actual&&actual!==expected?' · 页数不一致，重新生成时将按目标调整':''}</p>`;
+  return `<p class="subtle content-page-count" role="status">实际 ${actual} / 目标 ${h(expected)} 页（含封面、目录等）${!p.contentPipeline&&actual&&actual!==expected?' · 页数不一致，重新生成时将按目标调整':''}</p>`;
 }
 // A deliberately small renderer: no raw HTML, external embeds or executable links.
 export function designPreview(markdown,p,index){

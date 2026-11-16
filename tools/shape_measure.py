@@ -669,6 +669,11 @@ def quad_candidates(sides, box, limit=24):
     return quads
 
 
+def with_parallel_side_candidates(quads):
+    from parallel_candidates import parallel_side_hypotheses
+    return [candidate for quad in quads for candidate in [quad, *parallel_side_hypotheses(quad)]]
+
+
 def quad_score(quad, box, dist, front):
     metrics = boundary_metrics(quad, dist, front)
     x, y, w, h = box
@@ -3634,9 +3639,8 @@ def four_edge_quad_candidate(e, box, lines, dist, front, elements=None):
         kind = 'rect-sharp'
         native = {'type': 'shape', 'shape': 'rect', 'bounds': bounds,
                   'shapeGeometry': {'version': 2, 'corners': sharp}}
-    elif abs(top_angle) <= 8.0 and abs(math.degrees(math.atan2(float((points[2] - points[1])[1]),
-                                                                 float((points[2] - points[1])[0])))) <= 8.0:
-        shift = float((points[1][0] - points[0][0] + points[2][0] - points[3][0]) / 2.0)
+    elif top_horizontal and bottom_horizontal and abs(_line_angle(left)[0]-_line_angle(right)[0]) <= 8.0:
+        shift = float((points[0][0] - points[3][0] + points[1][0] - points[2][0]) / 2.0)
         if abs(shift) >= 2.0:
             kind = 'parallelogram-sharp'
             native = {'type': 'shape', 'shape': 'parallelogram', 'bounds': bounds,
@@ -4694,7 +4698,7 @@ def fit_element(e, index, elements, families, lines, edge, dist, front):
     anchored_best = None
     quads = []
     if routed['quadAllowed'] or len(elements) < 0:
-        quads = general_quad_candidates(families, box, limit=20) or quad_candidates(sides, box, limit=24)
+        quads = with_parallel_side_candidates(general_quad_candidates(families, box, limit=20) or quad_candidates(sides, box, limit=24))
     anchored = []
     for candidate in quads[:16]:
         fixed = anchor_quad_to_edges(candidate, families, box)
@@ -4741,6 +4745,7 @@ def fit_element(e, index, elements, families, lines, edge, dist, front):
                         or (refined_metrics['edgeSupport'] >= coarse_metrics['edgeSupport'] + 0.004
                             and refined_metrics['chamfer'] < coarse_metrics['chamfer'])):
                     quad = refined_quad
+        quad=max(with_parallel_side_candidates([quad]),key=lambda candidate:quad_score(candidate,box,dist,front))
         quad_rank = [round(s, 4) for s, _ in scored[:5]]
         if str(e.get('shape') or '').lower() in ('rect','roundrect') and not e.get('customGeometry'):
             # Keep the rectangle family during fallback search as well. Sides
@@ -4931,6 +4936,11 @@ def fit_element(e, index, elements, families, lines, edge, dist, front):
                 quad4_points, quad4_kind, quad4_native = quad4
                 add(quad4_kind, quad4_points, complexity=1,
                     extra={'native': quad4_native, 'from': 'quad-4edge'}, score_bonus=0.05)
+                for shared in with_parallel_side_candidates([quad4_points])[1:]:
+                    sharp=[{'type':'sharp'} for _ in range(4)]
+                    add('parallelogram-sharp',shared,complexity=1,
+                        extra={'native':native_geometry('parallelogram-sharp',shared,sharp,box),
+                               'from':'quad-4edge-side'},score_bonus=0.05)
         if routed['prototypesAllowed']:
             if class_hint in prototype_classes:
                 prototype_names = (class_hint,)

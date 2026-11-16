@@ -19,6 +19,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from shape_reference import seed_polygon
+from parallel_candidates import measured_parallel_candidates
 from parameter_confidence import weighted_median,provenance
 from structural_edges import match_panel
 from object_masks import object_alpha,mask_entries
@@ -509,7 +510,7 @@ def quad_properties(element, best, distance, valid):
                   'type': 'shape', 'adjustments': None, 'flipH': False, 'flipV': False}
     if axis_aligned:
         if all_sharp:
-            properties.update(shape='rect', shapeGeometry=None, customGeometry=None)
+            properties.update(type='rect', shape=None, shapeGeometry=None, customGeometry=None)
         else:
             # Per-corner payload; never collapse a mixed cut/round set to one scalar radius.
             properties.update(shape='roundRect', customGeometry=None,
@@ -552,16 +553,6 @@ def top_bottom_evidence(edge, valid, x, y, w, h):
         else:
             horizontal.append(float(at))
     return horizontal[0], horizontal[1]
-
-
-def measured_parallel_candidates(points):
-    """Each measured side supplies one slope; neither slope is averaged."""
-    points = np.asarray(points, float)
-    top, bottom = points[0, 1], points[3, 1]
-    centers = (points[:2, 0] + points[[3, 2], 0]) / 2
-    for shift in (points[3, 0] - points[0, 0], points[2, 0] - points[1, 0]):
-        yield np.array([[centers[0] - shift / 2, top], [centers[1] - shift / 2, top],
-                        [centers[1] + shift / 2, bottom], [centers[0] + shift / 2, bottom]])
 
 
 def quad_side_candidates(e, reference, distance, valid, edge, box, baseline):
