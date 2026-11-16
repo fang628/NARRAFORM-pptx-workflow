@@ -65,7 +65,7 @@ try {
                         if ($lineCount -gt 1) { $lineSpacing = ([double]$range.Lines(2,1).BoundTop - [double]$range.Lines(1,1).BoundTop) * $scale }
                         try { $characterSpacing = [double]$range.Font.Spacing / 0.6 } catch { }
                     } catch { } # Optional metrics never suppress usable text bounds.
-                    $texts += @{
+                    $metric = @{
                         key = Get-NarraformShapeKey $shape
                         x = [double]$shape.Left * $scale
                         y = [double]$shape.Top * $scale
@@ -81,6 +81,22 @@ try {
                         lineSpacing = $lineSpacing
                         charSpacing = $characterSpacing
                     }
+                    # Measure the same Office text without automatic wrapping,
+                    # then restore every frame property before export.
+                    if ($lineCount -gt 1) {
+                        $frame = $shape.TextFrame2
+                        $wrap = $frame.WordWrap; $auto = $frame.AutoSize
+                        $oldLeft = $shape.Left; $oldTop = $shape.Top; $oldWidth = $shape.Width; $oldHeight = $shape.Height
+                        try {
+                            $frame.AutoSize = 0; $frame.WordWrap = 0
+                            $metric.unwrappedWidth = [double]$frame.TextRange.BoundWidth * $scale
+                            $metric.explicitLineCount = [int]$frame.TextRange.Lines().Count
+                        } catch { } finally {
+                            $frame.WordWrap = $wrap; $frame.AutoSize = $auto
+                            $shape.Left = $oldLeft; $shape.Top = $oldTop; $shape.Width = $oldWidth; $shape.Height = $oldHeight
+                        }
+                    }
+                    $texts += $metric
                 }
             } catch {
                 $measurementErrors += @{key=[string]$shape.Name;error=$_.Exception.Message}

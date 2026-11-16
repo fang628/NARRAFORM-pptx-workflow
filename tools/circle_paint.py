@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 from paint_models import fit_native_paint
 from parameter_confidence import confidence,weighted_median,provenance
+from fill_presence import unsupported_borderless_fill
 
 
 def rgb(value):
@@ -13,6 +14,14 @@ def rgb(value):
 def joint_circle_paint(spec,reference,rows,masks):
     elements={e['key']:e for e in spec['elements']};results={r['key']:r for r in rows}
     alpha_cache={}
+    lower_cache={}
+    def lower_for(key):
+        file=(spec.get('underlays') or {}).get(key) or spec.get('background')
+        if not file:return None
+        if file not in lower_cache:
+            value=cv2.imread(str(file))
+            lower_cache[file]=cv2.cvtColor(cv2.resize(value,(1600,900)),cv2.COLOR_BGR2RGB) if value is not None else None
+        return lower_cache[file]
     for group in spec.get('circleGroups',[]):
         # Stroke evidence has its own grouping. A fill group never implies a
         # common rim, width or effect; explicit keep/rejection stays per-field.
@@ -70,6 +79,10 @@ def joint_circle_paint(spec,reference,rows,masks):
                 inside=(u-.5)**2+(v-.5)**2<.32**2
                 colors=np.array([rgb(s['color']) for s in (e.get('gradient') or {}).get('stops',[])] or [rgb(e.get('fill'))])
                 observed=reference[yy,xx].astype(float)
+                lower=lower_for(e['key'])
+                if lower is not None and unsupported_borderless_fill(e,observed[inside],lower[yy,xx][inside]):
+                    results[e['key']]['properties'].setdefault('parameterEvidence',{})['fill']={'confidence':0,'independent':True,'source':'borderless-fill-matches-lower'}
+                    continue
                 # Reject background drift and numeral ink using the original
                 # declared palette, never an independently fitted wrong fill.
                 d=np.min(np.linalg.norm(observed[:,:,None,:]-colors[None,None,:,:],axis=3),axis=2)

@@ -161,10 +161,12 @@ def analyse_text(element):
     # A bounded badge/label lives on its carrier, not on the page surrounding
     # that carrier. Sample the local surface when its declared colour is present.
     carrier_mask=None
-    for carrier in sorted(spec.get('elements',[]) if spec else [],key=lambda c:float(c.get('w',0))*float(c.get('h',0))):
+    carriers=sorted(spec.get('elements',[]) if spec else [],key=lambda c:(c.get('key')!=element.get('carrierId'),float(c.get('w',0))*float(c.get('h',0))))
+    declared_carrier=next((c for c in carriers if c.get('key')==element.get('carrierId')),None)
+    for carrier in carriers:
         if carrier.get('type') not in ('shape','rect','ellipse') or carrier.get('key')==element.get('key'):continue
         ox,oy,ow,oh=[float(carrier.get(k,0) or 0) for k in ('x','y','w','h')]
-        if not (ox-3<=x and oy-3<=y and x+w<=ox+ow+3 and y+h<=oy+oh+3):continue
+        if carrier is not declared_carrier and not (ox-3<=x and oy-3<=y and x+w<=ox+ow+3 and y+h<=oy+oh+3):continue
         fill=carrier.get('fill')
         try:
             ink=to_lab([int(fill[i:i+2],16) for i in (0,2,4)])
@@ -185,7 +187,31 @@ def analyse_text(element):
             # not a page-wide median that can mistake a blue carrier for ink.
             distance=np.minimum(distance,np.linalg.norm(lab-surface_lab,axis=2))
     mask = distance > 22.0
+    if declared_carrier is not None:
+        palette=[declared_carrier.get('fill')]+[s.get('color') for s in (declared_carrier.get('gradient') or {}).get('stops',[])]
+        for color in palette:
+            try:
+                base=to_lab([int(str(color).lstrip('#')[i:i+2],16) for i in (0,2,4)])
+                mask &= np.linalg.norm(lab-base,axis=2)>35
+            except (TypeError,ValueError):pass
+    glyph_core = None
+    glyph_entry=next((m for m in (spec or {}).get('objectMasks',[]) if m.get('key')==element.get('key') and m.get('file')),None)
+    if glyph_entry:
+        glyph=cv2.imread(glyph_entry['file'],cv2.IMREAD_UNCHANGED)
+        if glyph is not None and glyph.ndim==3 and glyph.shape[2]==4:
+            alpha=cv2.resize(glyph[:,:,3],(image.shape[1],image.shape[0]))
+            glyph_core=alpha[max(0,y0):y1,max(0,x0):x1]>180
+            # A predicted mask may have different wrapping/font metrics. Keep it
+            # as supporting evidence; clipping to it would erase real accents.
     if carrier_mask is not None:mask &= carrier_mask
+    # Remove solid carrier/edge residues before colour clustering, rather than
+    # asking colour distance to distinguish an orange panel from orange ink.
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), 8)
+    size=max(8.,float(element.get('size') or 24)*ratio)
+    for label in range(1,count):
+        _,_,cw,ch,area=stats[label]
+        if ch>size*1.8 or cw>size*2.5 or area>size*size*1.4 or (max(cw,ch)>size*.9 and min(cw,ch)<2):
+            mask[labels==label]=False
     if mask.sum() < 40:
         return None
     background_lab = background
@@ -354,7 +380,11 @@ def analyse_text(element):
                 'confident': True, 'colorConfident': True, 'style': style}
     # parent fill (card background) must never be reported as a text colour
     parent_fill = None
+    if declared_carrier is not None:
+        try:parent_fill=to_lab([int(str(declared_carrier['fill']).lstrip('#')[i:i+2],16) for i in (0,2,4)])
+        except (KeyError,TypeError,ValueError):pass
     for other in spec.get('elements') or []:
+        if parent_fill is not None:break
         if other is element or other.get('type') not in ('shape', 'rect'):
             continue
         ox, oy, ow, oh = [float(other.get(k) or 0) for k in ('x', 'y', 'w', 'h')]
@@ -394,6 +424,7 @@ def analyse_text(element):
     except Exception:
         pass
     runs = []
+    accent_masks = {}
     total = sum(count for _, count in clusters)
     # Evidence gate: a different-coloured run is only used when the evidence is obvious — it must
     # be a large enough share, differ in hue/saturation (not just brightness) and be far away from
@@ -411,7 +442,7 @@ def analyse_text(element):
         share = count / max(1, total)
         if debug:
             reasons = []
-            if share < 0.15: reasons.append('share<15%%')
+            if share < 0.02: reasons.append('share<2%%')
             if float(np.linalg.norm(center - main)) < 45.0: reasons.append('delta<45')
             if float(np.linalg.norm(center[1:] - main[1:])) < 25.0: reasons.append('chroma<25')
             if distance_to_blend(center, main, background) < 30.0: reasons.append('offBlend<30')
@@ -425,7 +456,7 @@ def analyse_text(element):
         off_blend = distance_to_blend(center, main, background)
         total_delta = float(np.linalg.norm(center - main))
         background_delta = float(np.linalg.norm(center - background))
-        if share < 0.15:
+        if share < 0.02:
             continue
         # Obvious two-colour paragraphs only: strong overall Lab delta + real hue shift, not an
         # anti-aliasing / shadow blend, not the parent card fill, not the page background, and the
@@ -444,6 +475,26 @@ def analyse_text(element):
             continue
         if contrast_score(np.asarray(center, np.float32)) < 0.50 * contrast_score(np.asarray(main, np.float32)):
             continue
+        extra=(np.linalg.norm(lab-center,axis=2)<18.) & mask
+        # An accent must dominate actual glyph interiors. A coloured edge or
+        # antialias fringe touching otherwise white letters is not an accent.
+        ink_core=cv2.erode(mask.astype(np.uint8),np.ones((2,2),np.uint8))>0
+        supported=np.zeros_like(mask)
+        for label in range(1,count):
+            component=(labels==label)&mask
+            total_core=int((component&ink_core).sum())
+            accent_core=int((component&ink_core&extra).sum())
+            if total_core>=3 and accent_core>=max(3,.55*total_core):
+                supported |= component&extra
+        # Disconnected strokes of a CJK glyph may be separate components. A
+        # local column with coloured core ink is still evidence for those strokes.
+        for column in range(mask.shape[1]):
+            lo=max(0,column-1);hi=min(mask.shape[1],column+2)
+            total_core=int(ink_core[:,lo:hi].sum());accent_core=int((ink_core[:,lo:hi]&extra[:,lo:hi]).sum())
+            if accent_core>=3 and accent_core>=.70*max(1,total_core):supported[:,column]|=extra[:,column]
+        if int(supported.sum())<max(8,int(extra.sum()*.40)):
+            continue
+        accent_masks[to_hex(center)] = supported
         channel_rows = []
         for row in rows:
             values = lab[row][mask[row]]
@@ -458,13 +509,16 @@ def analyse_text(element):
             continue
         height = max(1, rows[-1] - rows[0])
         runs.append({'color': to_hex(center),
+                     'source': 'reference-glyphs',
                      'startLine': round((min(channel_rows) - rows[0]) / height, 2),
                      'endLine': round((max(channel_rows) - rows[0]) / height, 2),
                      'share': round(share, 3),
                      'evidence': {'share': round(share, 3), 'chroma': round(chroma, 1),
                                   'offBlend': round(off_blend, 1),
                                   'delta': round(total_delta, 1),
-                                  'backgroundDistance': round(background_delta, 1)}})
+                                  'backgroundDistance': round(background_delta, 1),
+                                  'confidence': round(min(.95,.55+.4*int(supported.sum())/max(1,int(extra.sum()))),3),
+                                  'predictedGlyphOverlap': round(float((supported & glyph_core).sum()) / max(1,int(supported.sum())),3) if glyph_core is not None and glyph_core.shape==mask.shape else None}})
     # Intra-line different-colour evidence: for every accepted run colour, locate its horizontal
     # span inside each detected text line. Fractions are relative to that line's text width, so
     # the S7 renderer can map them onto characters without OCR.
@@ -480,13 +534,10 @@ def analyse_text(element):
             start_row = None
     if start_row is not None:
         line_bands.append((start_row, len(row_flags) - 1))
-    centres = [(cluster[0], cluster) for cluster in clusters[:3]]
+    centres = [(cluster[0], cluster) for cluster in clusters]
     if runs and line_bands:
         for run in runs:
             target = None
-            for centre, _cluster in centres:
-                if float(np.linalg.norm(centre - np.array([0, 0, 0]))) >= 0:
-                    pass
             # find the cluster centre whose hex equals the run colour
             for centre, _cluster in centres:
                 if to_hex(centre).lower() == str(run['color']).lower():
@@ -501,8 +552,8 @@ def analyse_text(element):
                 if band_mask.sum() < 20:
                     continue
                 distances = np.linalg.norm(band_lab - target, axis=2)
-                extra = (distances < 24.0) & band_mask
-                if extra.sum() < 0.10 * band_mask.sum():
+                extra = (distances < 24.0) & band_mask & accent_masks[run['color']][row0:row1 + 1]
+                if extra.sum() < max(6,0.02 * band_mask.sum()):
                     continue
                 columns = np.where(extra.any(axis=0))[0]
                 if len(columns) < 2:
@@ -512,15 +563,28 @@ def analyse_text(element):
                     continue
                 x0, x1 = float(text_columns[0]), float(text_columns[-1])
                 width = max(1.0, x1 - x0)
-                spans.append({'lineIndex': line_index,
-                              'startFraction': round((float(columns[0]) - x0) / width, 3),
-                              'endFraction': round((float(columns[-1]) + 1 - x0) / width, 3),
-                              'share': run.get('share'), 'evidence': run.get('evidence')})
+                # Separate distant coloured fragments; do not paint the white
+                # words between the first and last coloured pixel.
+                cuts=[]
+                for index in range(len(columns)-1):
+                    left,right=columns[index],columns[index+1]
+                    if right-left<=1:continue
+                    gap=band_mask[:,left+1:right] & (np.linalg.norm(band_lab[:,left+1:right]-main,axis=2)<18.)
+                    # Bridge empty space within/between accented glyphs, but
+                    # never bridge intervening foreground of the main colour.
+                    if right-left>size*.8 or int(gap.sum())>max(3,(right-left)*2):cuts.append(index+1)
+                groups=np.split(columns,cuts)
+                for group in groups:
+                    if len(group)<2:continue
+                    spans.append({'lineIndex': line_index,
+                                  'startFraction': round((float(group[0]) - x0) / width, 3),
+                                  'endFraction': min(1.,round((float(group[-1]) + 1 - x0) / width, 3)),
+                                  'share': run.get('share'), 'evidence': run.get('evidence')})
             if spans:
                 run['lineSpans'] = spans
     # Body paragraphs keep one emphasis colour; secondary titles (subtitle/heading/table-header)
     # may keep up to two spatially separated solid colours on the same line. Never a gradient.
-    runs = rank_color_runs(runs, color_run_limit(element))
+    runs = rank_color_runs([run for run in runs if run.get('lineSpans')], color_run_limit(element))
     return {'key': element.get('key'), 'kind': 'body',
             'color': to_hex(main), 'role': role_of(element), 'gradient': None,
             'colorRuns': runs, 'confident': True, 'colorConfident': True, 'style': style}

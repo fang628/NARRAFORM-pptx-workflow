@@ -1,4 +1,4 @@
-export const apiTypes=['text','image','rebuild','elementImage'];
+export const apiTypes=['text','image','elementImage'];
 export function apiPersistenceMessage(project){
   if(project.apiPersistenceWarning)return project.apiPersistenceWarning;
   if(project.apiConfigurationScope==='shared')return project.apiPersistence==='windows-dpapi'
@@ -8,8 +8,8 @@ export function apiPersistenceMessage(project){
     ? '填写完整后自动保存。密钥使用 Windows 当前用户加密保存在本机，重启服务自动恢复；清除密钥会同时删除保存的副本。'
     : '填写完整后自动保存。当前服务仅在内存保留密钥，重启后需要重新填写。';
 }
-const labels={text:'主模型',image:'生图模型',elementImage:'元素生图模型',rebuild:'高性能视觉模型'};
-const readiness={text:'apiReady',image:'imageReady',elementImage:'elementImageReady',rebuild:'rebuildConfigured'};
+const labels={text:'主模型',image:'生图模型',elementImage:'元素生图模型'};
+const readiness={text:'apiReady',image:'imageReady',elementImage:'elementImageReady'};
 // Refresh untouched fields when another project/window changes the shared API.
 // Preserve an unfinished manual edit instead of silently discarding it.
 export function reconcileAPIValues(values,previous,provider){
@@ -21,18 +21,23 @@ export function reconcileAPIValues(values,previous,provider){
   }));
 }
 export function apiConfigurationPlan(values,project){
-  const payload={},pending=[];
+  const payload={},pending=[],details=[];
   for(const type of apiTypes){
     const value=values[type],old=project.provider?.[type];
-    if(!value.baseURL&&!value.model&&!value.key){if(type==='text')pending.push(labels[type]);else if(old)payload[type]=null;continue;}
+    if(!value.baseURL&&!value.model&&!value.key){if(type==='text'){pending.push(labels[type]);details.push(labels[type]+'：请填写 API 地址、模型与密钥');}else if(old)payload[type]=null;continue;}
     let validURL=false;try{validURL=['https:','http:'].includes(new URL(value.baseURL).protocol);}catch{}
     const same=old?.baseURL===value.baseURL&&old?.model===value.model;
-    if(!validURL||!value.model||(!value.key&&!(same&&project[readiness[type]]))){pending.push(labels[type]);continue;}
+    const reusable=old?.baseURL===value.baseURL&&project[readiness[type]];
+    const missing=[];
+    if(!validURL)missing.push(value.baseURL?'API 地址格式无效，需以 http:// 或 https:// 开头':'请填写 API 地址');
+    if(!value.model)missing.push('请填写模型名称');
+    if(!value.key&&!reusable)missing.push(old&&old.baseURL!==value.baseURL?'API 地址已改变，请重新输入密钥':'请填写 API 密钥');
+    if(missing.length){pending.push(labels[type]);details.push(labels[type]+'：'+missing.join('；'));continue;}
     if(value.key||!same||!project[readiness[type]])payload[type]=value;
   }
   // The server requires a main channel; incomplete optional channels do not block it.
-  if(!project.apiReady&&!payload.text)return {payload:{},pending:[...new Set(['主模型',...pending])]};
-  return {payload,pending};
+  if(!project.apiReady&&!payload.text)return {payload:{},pending:[...new Set(['主模型',...pending])],details};
+  return {payload,pending,details};
 }
 
 export function createAPIAutosave({read,save,applied,state,blocked},delay=700){
@@ -60,7 +65,7 @@ export function createAPIAutosave({read,save,applied,state,blocked},delay=700){
     }
     const latest=read();if(!latest||latest.project.id!==snapshot.project.id)return;
     const remaining=apiConfigurationPlan(latest.values,latest.project);
-    if(remaining.pending.length){const message=(latest.project.apiReady&&!remaining.pending.includes('主模型')?'其余完整通道已保存；':'')+'请补齐'+remaining.pending.join('、')+'的地址、模型与密钥';show('incomplete',message);if(strict)throw Error(message);}
+    if(remaining.pending.length){const message=(latest.project.apiReady&&!remaining.pending.includes('主模型')?'其余完整通道已保存；':'')+remaining.details.join('；');show('incomplete',message);if(strict)throw Error(message);}
     else show('saved',latest.project.apiPersistence==='windows-dpapi'?'已自动保存 · 本机加密，重启自动恢复':'已自动保存 · 当前服务会话有效');
   }
   return {schedule,flush,reset,settled:()=>inFlight?.catch(()=>{})||Promise.resolve()};

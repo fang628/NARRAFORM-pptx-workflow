@@ -14,7 +14,8 @@
     "jszip": "^3.10.1",
     "mathjax-full": "^3.2.2",
     "mathlive": "^0.111.4",
-    "pptxgenjs": "4.0.1"
+    "pptxgenjs": "4.0.1",
+    "undici": "^6.29.1"
   },
   "engines": {
     "node": ">=20"

@@ -8,6 +8,7 @@ import numpy as np
 from paint_models import fit_native_paint, composite_paint, perceptual_error
 from shape_reference import seed_polygon
 from parameter_confidence import confidence,provenance,weighted_median,parameter_blocked
+from fill_presence import unsupported_borderless_fill
 
 cv2.setNumThreads(1)
 SIZE = (1600, 900)
@@ -117,9 +118,12 @@ def paint_error(element, evidence, paint, stroke=False):
 
 def observe_parameters(elements,samples):
     for element in elements:
+        sample=samples.get(element['key'])
+        if sample is not None and unsupported_borderless_fill(element,sample['pixels'],sample['background']):
+            for p in ('fill','gradientStops','gradientAngle','gradientCenter'):
+                element.setdefault('parameterEvidence',{})[p]={'confidence':0,'independent':True,'source':'borderless-fill-matches-lower'}
         geometry=element.get('geometryEvidence') or {}
         if geometry.get('accepted') is False:continue
-        sample=samples.get(element['key'])
         if sample is None:continue
         for parameter,field,solid,stroke in [('fill','gradient','fill',False),('strokeColor','strokeGradient','color',True)]:
             if stroke and (element.get('parameterEvidence') or {}).get('strokeColor',{}).get('source')=='stroke-underlay-unresolved':continue
@@ -128,6 +132,9 @@ def observe_parameters(elements,samples):
             if not fields:continue
             evidence=sample.get('stroke') if stroke else sample
             if evidence is None or len(evidence['pixels'])<40:continue
+            if not stroke and unsupported_borderless_fill(element,evidence['pixels'],evidence['background']):
+                for p in fields:element.setdefault('parameterEvidence',{})[p]={'confidence':0,'independent':True,'source':'borderless-fill-matches-lower'}
+                continue
             error=paint_error(element,evidence,element.get(field) or element.get(solid),stroke)
             if error is None or error[0]>10 or error[1]>12:continue
             # This is a new pixel observation of this specific instance. It

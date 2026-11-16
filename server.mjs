@@ -47,7 +47,7 @@ import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {isDeepStrictEqual} from 'node:util';
 import {themes,validateSlides,svg} from './lib/scene.mjs';
-import {chat,parseJSON,generatedImage,visualModelConfig} from './lib/provider.mjs';
+import {chat,parseJSON,generatedImage} from './lib/provider.mjs';
 import {observeTask,recordProgress} from './lib/task-progress.mjs';
 import {sourceMaterials,materialStamp,analysisCurrent,evidenceCatalog,editedOutline} from './lib/materials.mjs';
 import {synthesizeMaterials} from './lib/material-synthesis.mjs';
@@ -118,7 +118,7 @@ for(const p of projects.values())if(p.visualMode==='ai'&&p.selectedTheme&&!p.arc
   catch{console.warn('未能复用项目代表页：'+p.id);}
 }
 function project(id) { const p=projects.get(id); if(!p) throw Error('项目不存在'); return p; }
-function clean(p) { const editorView=contentEditorView(p,contentGenerationStamp(p));const c=credentials.get(p.id)||{}, {reuseCheckpoint,rebuildEditHistory,rebuildPageChanges,contentGenerationDraft,contentPipelineDraft,speakerScriptDraft,...publicProject}=p;return {...publicProject,materials:p.materials.map(publicMaterialRecord),...automaticModePublic(p),progressSections:progressSectionsOf(p),contentDraftAvailable:contentGenerationDraft?.stamp===contentGenerationStamp(p)||contentPipelineDraft?.stamp===contentGenerationStamp(p),contentPipeline:contentPipelinePublic(p,contentGenerationStamp(p)),adaptiveSchedulingEnabled:true,optionalProjectConcurrencyEnabled:true,progressEventsEnabled:true,artifactStorageEnabled:true,progressSectionsRegenerationEnabled:true,designConcurrentEditingEnabled:true,enterVisualStageEnabled:true,manualCropEnabled:true,pageContentSaveEnabled:true,documentFormatEnabled:true,tableContentEnabled:true,formulaContentEnabled:true,projectTransferEnabled:true,supplementImagesEnabled:true,apiPersistence:credentialVault.mode,apiPersistenceWarning:credentials.warning,apiConfigurationScope:'shared',provider:Object.fromEntries(['text','image','elementImage','rebuild'].map(type=>[type,c[type]?{baseURL:c[type].baseURL,model:c[type].model}:null])),downstreamReuse:downstreamReuseState(p),contentRestore:contentRestoreState(p),imageTaskQueue:publicImageTasks(p),imageTaskQueueEnabled:true,designTaskQueueEnabled:true,imageTaskReorderEnabled:true,executionConcurrency:concurrencyLimit(p.executionConcurrency),...visualPublic(p,{data,getImage,save}),...styleFavoritesPublic(p,data),...speakerScriptPublic(p),analysisResumeCount:p.analysisDraft?.stamp===materialStamp(p)?p.analysisDraft.readings.filter(r=>r.status==='read'&&readingCoversMaterial(r,p.materials.find(m=>m.id===r.id))).length:0,slides:editorView.slides,pageDesigns:Object.fromEntries(editorView.slides.map((s,i)=>[i,pageDesignState(editorView,i)]).filter(([,d])=>d)),reconstructionCurrent:reconstructionCurrent(p),analysisCurrent:analysisCurrent(p),apiReady:!!c.text?.key,imageReady:!!c.image?.key,elementImageReady:!!(c.elementImage?.key||c.image?.key),ocrReady:!!c.text?.key,rebuildReady:!!visualModelConfig(c),rebuildConfigured:!!c.rebuild?.key,rebuildModel:visualModelConfig(c)?.model||null,rebuildSource:c.rebuild?.key?'rebuild':'text'}; }
+function clean(p) { const editorView=contentEditorView(p,contentGenerationStamp(p));const c=credentials.get(p.id)||{}, {reuseCheckpoint,rebuildEditHistory,rebuildPageChanges,contentGenerationDraft,contentPipelineDraft,speakerScriptDraft,...publicProject}=p;return {...publicProject,materials:p.materials.map(publicMaterialRecord),...automaticModePublic(p),progressSections:progressSectionsOf(p),contentDraftAvailable:contentGenerationDraft?.stamp===contentGenerationStamp(p)||contentPipelineDraft?.stamp===contentGenerationStamp(p),contentPipeline:contentPipelinePublic(p,contentGenerationStamp(p)),adaptiveSchedulingEnabled:true,optionalProjectConcurrencyEnabled:true,progressEventsEnabled:true,artifactStorageEnabled:true,progressSectionsRegenerationEnabled:true,designConcurrentEditingEnabled:true,enterVisualStageEnabled:true,manualCropEnabled:true,pageContentSaveEnabled:true,documentFormatEnabled:true,tableContentEnabled:true,formulaContentEnabled:true,projectTransferEnabled:true,supplementImagesEnabled:true,apiPersistence:credentialVault.mode,apiPersistenceWarning:credentials.warning,apiConfigurationScope:'shared',provider:Object.fromEntries(['text','image','elementImage'].map(type=>[type,c[type]?{baseURL:c[type].baseURL,model:c[type].model}:null])),downstreamReuse:downstreamReuseState(p),contentRestore:contentRestoreState(p),imageTaskQueue:publicImageTasks(p),imageTaskQueueEnabled:true,designTaskQueueEnabled:true,imageTaskReorderEnabled:true,executionConcurrency:concurrencyLimit(p.executionConcurrency),...visualPublic(p,{data,getImage,save}),...styleFavoritesPublic(p,data),...speakerScriptPublic(p),analysisResumeCount:p.analysisDraft?.stamp===materialStamp(p)?p.analysisDraft.readings.filter(r=>r.status==='read'&&readingCoversMaterial(r,p.materials.find(m=>m.id===r.id))).length:0,slides:editorView.slides,pageDesigns:Object.fromEntries(editorView.slides.map((s,i)=>[i,pageDesignState(editorView,i)]).filter(([,d])=>d)),reconstructionCurrent:reconstructionCurrent(p),analysisCurrent:analysisCurrent(p),apiReady:!!c.text?.key,imageReady:!!c.image?.key,elementImageReady:!!(c.elementImage?.key||c.image?.key),ocrReady:!!c.text?.key,rebuildReady:!!c.text?.key,rebuildModel:c.text?.model||null}; }
 function ensure(p,test,message) { if(!test) throw Error(message); }
 function unlocked(p) { ensure(p,projects.get(p.id)===p,'项目不存在');ensure(p,!tasks.has(p.id)&&!uploads.has(p.id),'当前任务或材料发送中，请等待完成或先取消');ensure(p,!credentialWrites.has(p.id),'API 配置正在保存，请稍后重试'); }
 function confirmContent(p){return enterVisualStage(p);}
@@ -286,11 +286,17 @@ async function performAction(p,b,res,fromQueue=false) {
     try{
       await credentials.update(c=>{
         delete c.ocr;
-        for(const type of ['text','image','elementImage','rebuild']) if(b[type]!==undefined){
+        delete c.rebuild;
+        for(const type of ['text','image','elementImage']) if(b[type]!==undefined){
           const v=b[type];if(!v||(!v.baseURL&&!v.model&&!v.key)){delete c[type];continue;}
-          const same=c[type]?.baseURL===String(v.baseURL).trim().replace(/\/$/,'')&&c[type]?.model===String(v.model).trim();
-          const key=v.key||(same?c[type]?.key:null);if(typeof key!=='string'||!key.trim()||key.length>2000||!v.model||!v.baseURL)throw Error('请填写 API 地址、密钥及模型；修改通道后需重新输入密钥');
-          c[type]={baseURL:String(v.baseURL).trim().replace(/\/$/,''),key:key.trim(),model:String(v.model).trim().slice(0,150)};
+          const baseURL=String(v.baseURL??'').trim().replace(/\/$/,''),model=String(v.model??'').trim();
+          let validURL=false;try{validURL=['https:','http:'].includes(new URL(baseURL).protocol);}catch{}
+          if(!validURL)throw Error('请填写有效的 API 地址，需以 http:// 或 https:// 开头');
+          if(!model)throw Error('请填写模型名称');
+          const sameEndpoint=c[type]?.baseURL===baseURL;
+          const key=typeof v.key==='string'&&v.key.trim()?v.key.trim():sameEndpoint?c[type]?.key:null;
+          if(typeof key!=='string'||!key.trim()||key.length>2000)throw Error(sameEndpoint?'请填写 API 密钥':'API 地址已改变或尚未配置，请输入该地址对应的密钥');
+          c[type]={baseURL,key:key.trim(),model:model.slice(0,150)};
         }
         if(!c.text) throw Error('文字 API 配置不能为空');
         return c;
@@ -584,6 +590,7 @@ const server=http.createServer(async(req,res)=>{
       }
 
     }
+    if(req.method==='GET'&&/^\/brand\/(?:narraform-logo|favicon|apple-touch-icon)\.png$/.test(url.pathname))return sendFile(res,path.join(root,'public',url.pathname.slice(1)),'image/png');
     if(req.method==='GET'&&url.pathname==='/formula-content.mjs')return sendFile(res,path.join(root,'public','formula-content.js'),'text/javascript; charset=utf-8');
     if(req.method==='GET'&&/^\/vendor\/mathlive\/(?:mathlive\.min\.mjs|fonts\/[A-Za-z0-9_-]+\.woff2?)$/.test(url.pathname))return sendFile(res,path.join(root,'node_modules','mathlive',url.pathname.slice('/vendor/mathlive/'.length)),url.pathname.endsWith('.mjs')?'text/javascript; charset=utf-8':'font/woff2');
     if(req.method==='GET'&&url.pathname==='/elements-model.js')return sendFile(res,path.join(root,'lib','elements.mjs'),'text/javascript; charset=utf-8');

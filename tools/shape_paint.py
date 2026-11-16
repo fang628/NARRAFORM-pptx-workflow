@@ -30,6 +30,7 @@ def _color(value):
         return None
 
 from paint_models import fit_native_paint, predict_paint, composite_paint
+from fill_presence import unsupported_borderless_fill
 
 MASK_SUPPORT = 8
 HIDDEN_THRESHOLD = 16
@@ -235,6 +236,11 @@ def fit_shape_paint(ref, contour, element, excluded, excluded_alpha=None, diagno
         detail={} if diagnostics is not None else None
         pixels=ref[fill_sample]
         background_pixels=background[oy:oy+h,ox:ox+w][fill_sample] if background is not None else None
+        if unsupported_borderless_fill({**element,'strokeWidth':max(width,float((outline or {}).get('width') or 0))},pixels,background_pixels):
+            if diagnostics is not None:
+                diagnostics['fill']={'status':'skipped','reason':'borderless-fill-matches-lower','confidence':0}
+                diagnostics['sampling']=sampling
+            return result
         spatial_range=_spatial_range(pixels)
         sampling['spatialRange']=round(spatial_range,3)
         solid=solid_paint(pixels,xx[fill_sample],yy[fill_sample],element,current_paint) if fill_opaque else None

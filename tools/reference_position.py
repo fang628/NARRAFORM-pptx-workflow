@@ -6,6 +6,78 @@ import numpy as np
 cv2.setNumThreads(1)
 
 
+def locate_circle_columns(elements, reference, background):
+    """Ordered rows/columns use distinct discs; ambiguous groups never fall back to nearest."""
+    circles=[e for e in elements if e['type']=='ellipse' and max(e['w'],e['h'])<=80
+             and min(e['w'],e['h'])>=6 and max(e['w'],e['h'])/min(e['w'],e['h'])<1.18
+             and not e.get('rotate') and float(e.get('fillOpacity',1))*float(e.get('opacity',1))>.2]
+    def seed(e):
+        return (e.get('objectIdentity') or {}).get('sourceBox') or e
+    groups=[];claimed=set()
+    for axis in (1,0):
+        remaining=[e for e in circles if e['key'] not in claimed]
+        candidates=[]
+        for e in sorted(remaining,key=lambda e:(e['y'],e['x'],e['key'])):
+            def aligned(p):
+                cross='x' if axis else 'y';extent='w' if axis else 'h'
+                along='y' if axis else 'x'
+                return (abs(e[cross]+e[extent]/2-p[cross]-p[extent]/2)<max(e['w'],p['w'])
+                        and max(e['w']/p['w'],p['w']/e['w'])<1.25
+                        and abs(seed(e)[along]-seed(p)[along])>max(e['w'],p['w'])*1.5
+                        and e.get('visualState',e.get('emphasis','normal'))==p.get('visualState',p.get('emphasis','normal')))
+            group=next((g for g in candidates if all(aligned(p) for p in g)),None)
+            if group is None:candidates.append([e])
+            else:group.append(e)
+        for group in candidates:
+            if len(group)>=2:
+                groups.append((axis,group));claimed.update(e['key'] for e in group)
+    output={}
+    for axis,group in groups:
+        along='y' if axis else 'x';cross='x' if axis else 'y'
+        group=sorted(group,key=lambda e:seed(e)[along]);diameter=float(np.median([e['w'] for e in group]))
+        span=seed(group[-1])[along]-seed(group[0])[along]
+        pad=min(180,max(80,span*.4,span/max(1,len(group)-1)*1.7))
+        centre=float(np.median([e[cross]+(e['w'] if axis else e['h'])/2 for e in group]))
+        low=int(min(min(e[along],seed(e)[along]) for e in group)-pad)
+        high=int(max(max(e[along],seed(e)[along]) for e in group)+diameter+pad)
+        left=max(0,int(centre-diameter*2) if axis else low);right=min(1600,int(centre+diameter*2) if axis else high)
+        top=max(0,low if axis else int(centre-diameter*2));bottom=min(900,high if axis else int(centre+diameter*2))
+        members=[e['key'] for e in group]
+        for e in group:output[e['key']]={'key':e['key'],'accepted':False,'reason':'ambiguous-repeated-circle-correspondence',
+            'method':'distinct-reference-circle-components','members':members}
+        crop=reference[top:bottom,left:right]
+        if crop.size==0:continue
+        # The foundation can differ across the page. Local median suppression
+        # isolates both light and dark discs without reading or changing paint.
+        kernel=max(5,int(diameter*3)//2*2+1)
+        lower=cv2.medianBlur(crop,kernel)
+        mask=(np.max(abs(crop.astype(float)-lower.astype(float)),axis=2)>24).astype(np.uint8)
+        count,labels,stats,centres=cv2.connectedComponentsWithStats(mask,8)
+        candidates=[]
+        for i in range(1,count):
+            x,y,w,h,area=stats[i]
+            if not (.72*diameter<=w<=1.30*diameter and .72*diameter<=h<=1.30*diameter
+                    and max(w/h,h/w)<1.20 and .60<=area/(w*h)<=.90):continue
+            contours=cv2.findContours((labels==i).astype(np.uint8),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)[0]
+            contour=max(contours,key=cv2.contourArea);perimeter=cv2.arcLength(contour,True)
+            if not perimeter or 4*np.pi*cv2.contourArea(contour)/perimeter**2<.72:continue
+            candidates.append((float(centres[i][0]+left),float(centres[i][1]+top)))
+        # Exact cardinality and preserved order avoid guessing missing dots or
+        # assigning one visible component to two registered instances.
+        if len(candidates)!=len(group):continue
+        candidates.sort(key=lambda c:c[axis])
+        if max(p[1-axis] for p in candidates)-min(p[1-axis] for p in candidates)>diameter*.5:continue
+        if any(candidates[i+1][axis]-p[axis]<diameter*1.5 for i,p in enumerate(candidates[:-1])):continue
+        if any(abs(p[axis]-(seed(e)[along]+(e['h'] if axis else e['w'])/2))>pad for e,p in zip(group,candidates)):continue
+        for e,(x,y) in zip(group,candidates):
+            nx=x-e['w']/2;ny=y-e['h']/2
+            output[e['key']]={'key':e['key'],'accepted':True,'x':round(nx,3),'y':round(ny,3),
+                'dx':round(nx-e['x'],3),'dy':round(ny-e['y'],3),'confidence':.9,
+                'method':'distinct-reference-circle-components','members':members,
+                'referenceCenter':[round(x,3),round(y,3)]}
+    return output
+
+
 def locate(element,mask_file,reference):
     key=element['key'];row={'key':key,'accepted':False}
     rendered=cv2.imread(str(mask_file),cv2.IMREAD_UNCHANGED)
@@ -14,8 +86,9 @@ def locate(element,mask_file,reference):
     filled=alpha>max(24,float(alpha.max())*.45)
     if filled.sum()<12:return {**row,'reason':'insufficient-object-evidence'}
     text=element['type'] in ('text','formula')
+    compact=not text and element['type'] in ('shape','rect','ellipse') and max(element['w'],element['h'])<=100 and float(element.get('strokeWidth') or 0)==0
     # Use visible geometry, not an opaque box or inherited parent translation.
-    if not text:
+    if not text and not compact:
         filled=cv2.morphologyEx(filled.astype(np.uint8),cv2.MORPH_GRADIENT,np.ones((3,3),np.uint8))>0
     yy,xx=np.where(filled)
     left,top,right,bottom=int(xx.min()),int(yy.min()),int(xx.max()+1),int(yy.max()+1)
@@ -27,10 +100,21 @@ def locate(element,mask_file,reference):
         if split is not None:bottom=min(bottom,top+int(split))
         right=min(right,left+max(80,min(190,int(float(element.get('size',24))*6))))
     template=filled[top:bottom,left:right].astype(np.float32)
+    accent=None
+    if text:
+        pixels=rendered[top:bottom,left:right,:3].astype(float)
+        saturated=(pixels.max(axis=2)-pixels.min(axis=2)>70)&(template>0)
+        if saturated.sum()>=max(20,template.sum()*.15):
+            # The coloured prefix is more distinctive than neighbouring white
+            # lines. Match that prefix in its own colour, preserving identity.
+            accent=np.median(pixels[saturated],axis=0)
+            template=saturated.astype(np.float32)
     if min(template.shape)<3 or template.sum()<12:return {**row,'reason':'insufficient-object-extent'}
     # Fixed original neighbourhood bounds prevent repeated refits walking across rows.
     seed=(element.get('objectIdentity') or {}).get('sourceBox') or element
-    radius_x=min(60,max(12,float(element['w'])*.15));radius_y=min(90,max(18,float(element['h'])*.8))
+    radius_x=min(60,max(12,float(element['w'])*.15));radius_y=min(90,max(18,float(element['h'])*.8,float(element.get('size',24))*2.5 if text else 0))
+    if compact:
+        radius_x=radius_y=min(80,max(28,min(element['w'],element['h'])*2))
     sx=float(seed.get('x',element['x']));sy=float(seed.get('y',element['y']))
     dx0=max(-radius_x,sx-radius_x-element['x']);dx1=min(radius_x,sx+radius_x-element['x'])
     dy0=max(-radius_y,sy-radius_y-element['y']);dy1=min(radius_y,sy+radius_y-element['y'])
@@ -42,12 +126,21 @@ def locate(element,mask_file,reference):
     if text:
         rgb=np.median(rendered[:,:,:3][alpha>max(64,float(alpha.max())*.7)],axis=0)
         gray=cv2.cvtColor(crop,cv2.COLOR_BGR2GRAY).astype(float)
-        if rgb.mean()>150:
-            hsv=cv2.cvtColor(crop,cv2.COLOR_BGR2HSV);observed=((gray>max(120,float(np.percentile(gray,40))+35))&(hsv[:,:,1]<110)).astype(np.float32)
+        if accent is not None:
+            observed=(np.linalg.norm(crop.astype(float)-accent,axis=2)<65).astype(np.float32)
+        elif rgb.mean()>150:
+            # Yellow accent prefixes belong to the same text as white prose.
+            # A low-saturation-only mask made the leading-span match reject them.
+            observed=(gray>max(120,float(np.percentile(gray,40))+35)).astype(np.float32)
         elif rgb.mean()<100:
             observed=(gray<min(125,float(np.percentile(gray,65))-30)).astype(np.float32)
         else:
             delta=np.linalg.norm(crop.astype(float)-rgb,axis=2);observed=(delta<48).astype(np.float32)
+    elif compact:
+        rgb=np.median(rendered[:,:,:3][alpha>max(64,float(alpha.max())*.7)],axis=0)
+        # Match the filled silhouette, not nearby letter edges. The declared
+        # palette scopes correspondence; paint is still measured independently.
+        observed=(np.linalg.norm(crop.astype(float)-rgb,axis=2)<75).astype(np.float32)
     else:
         observed=(cv2.Canny(crop,35,100)>0).astype(np.float32)
     # Small antialias tolerance, with normalised agreement penalising nearby clutter.
@@ -73,6 +166,9 @@ def locate(element,mask_file,reference):
     row.update(beforeScore=round(baseline,5),afterScore=round(best,5),margin=round(margin,5),dx=dx,dy=dy)
     if best<(.56 if text else .28) or best-baseline<.035 or margin<.015:
         return {**row,'reason':'ambiguous-or-no-position-gain'}
+    confidence=float(min(.95,best)*min(1,margin/.04))
+    if max(abs(dx),abs(dy))>8 and confidence<.45:
+        return {**row,'reason':'weak-large-displacement','confidence':round(confidence,4)}
     if abs(dx)<1 and abs(dy)<1:return {**row,'reason':'already-aligned'}
     # Do not accept a maximum truncated by the bounded search window.
     if bx in (0,scores.shape[1]-1) or by in (0,scores.shape[0]-1):return {**row,'reason':'search-boundary-maximum'}
@@ -81,8 +177,13 @@ def locate(element,mask_file,reference):
 
 def main():
     spec=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'));reference=cv2.resize(cv2.imread(spec['reference']),(1600,900))
+    background=cv2.imread(spec['background']) if spec.get('background') else None
+    if background is not None:background=cv2.resize(background,(1600,900))
+    grouped=locate_circle_columns(spec.get('circleElements',spec['elements']),reference,background)
     masks={m['key']:m.get('file') for m in spec.get('objectMasks',[])};results=[]
     for e in spec['elements']:
+        if e['key'] in grouped:
+            results.append(grouped[e['key']]);continue
         try:row=locate(e,masks.get(e['key']),reference) if masks.get(e['key']) else {'key':e['key'],'accepted':False,'reason':'no-object-mask'}
         except Exception as error:row={'key':e['key'],'accepted':False,'reason':str(error)[:200]}
         results.append(row)

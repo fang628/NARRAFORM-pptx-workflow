@@ -515,6 +515,32 @@ def measured_outer(table,reference):
     if not all(k in outer for k in ('x','y','w','h')):return None
     x,y,w,h=[float(outer[k]) for k in ('x','y','w','h')]
     if w<60 or h<40:return None
+    # A complete observed lattice is stronger than offsets inferred from text
+    # boxes, which may already be wrapped or independently relocated.
+    row_count=len(table.get('rows') or []);column_count=len(table.get('columns') or [])
+    x0,x1=max(0,round(x+8)),min(reference.shape[1],round(x+w-8))
+    y0,y1=max(0,round(y-55)),min(reference.shape[0],round(y+h+55))
+    horizontal=straight_vertical_lines(np.transpose(reference[y0:y1,x0:x1],(1,0,2)))
+    def continuous(axis,at,lo,hi):
+        samples=np.linspace(lo,hi,200).astype(int);at=round(at)
+        gray=cv2.cvtColor(reference,cv2.COLOR_RGB2GRAY).astype(float)
+        if axis=='y':
+            if not 2<=at<gray.shape[0]-2:return False
+            samples=np.clip(samples,0,gray.shape[1]-1);ridge=gray[at,samples]-np.maximum(gray[at-2,samples],gray[at+2,samples])
+        else:
+            if not 2<=at<gray.shape[1]-2:return False
+            samples=np.clip(samples,0,gray.shape[0]-1);ridge=gray[samples,at]-np.maximum(gray[samples,at-2],gray[samples,at+2])
+        return float((ridge>3).mean())>=.6
+    horizontal=[y0+at for at in horizontal if y-45<=y0+at<=y+h+45 and continuous('y',y0+at,x+w*.1,x+w*.9)]
+    if len(horizontal)==row_count+1 and all(b-a>=12 for a,b in zip(horizontal,horizontal[1:])):
+        top,bottom=horizontal[0],horizontal[-1]
+        left_roi,right_roi=max(0,round(x-45)),min(reference.shape[1],round(x+w+45))
+        vertical=[left_roi+at for at in straight_vertical_lines(reference[round(top)+3:round(bottom)-3,left_roi:right_roi]) if x<=left_roi+at<=x+w and continuous('x',left_roi+at,top+5,bottom-5)]
+        if len(vertical)==column_count+1 and all(b-a>=12 for a,b in zip(vertical,vertical[1:])):
+            left,right=vertical[0],vertical[-1]
+            if .7*w<right-left<1.3*w and .65*h<bottom-top<1.35*h:
+                return {'x':left,'y':top,'w':right-left,'h':bottom-top,'right':right,'bottom':bottom,'confidence':.95,
+                        'source':'measured-frame-ridges','horizontal':horizontal,'vertical':vertical}
     gray=cv2.cvtColor(reference,cv2.COLOR_RGB2GRAY).astype(float)
     found=[];supports=[]
     for axis,edge in [('y',y),('y',y+h),('x',x),('x',x+w)]:
@@ -541,6 +567,36 @@ def measured_outer(table,reference):
             'confidence':round(min(supports),3),'source':'measured-frame-ridges'}
 
 
+def measure_grid_strokes(image,horizontal,vertical):
+    """Observe a boundary ridge; a plain row colour transition is not a line."""
+    if len(horizontal)<2 or len(vertical)<2:return []
+    result=[]
+    for role,positions,limits in [('hline',horizontal,(vertical[0],vertical[-1])),('vline',vertical,(horizontal[0],horizontal[-1]))]:
+        for index,at in enumerate(positions):
+            stations=np.linspace(limits[0]+5,limits[1]-5,min(300,max(24,int((limits[1]-limits[0])/3))))
+            offsets=np.arange(-5,5.01,.5)
+            x,y=(np.meshgrid(stations,offsets) if role=='hline' else np.meshgrid(offsets,stations))
+            if role=='hline':y=y+at
+            else:x=x+at;x=x.T;y=y.T
+            colors=cv2.remap(image.astype(np.float32),x.astype(np.float32),y.astype(np.float32),cv2.INTER_LINEAR,borderMode=cv2.BORDER_REPLICATE).transpose(1,0,2)
+            a=np.median(colors[:,:3],axis=1);b=np.median(colors[:,-3:],axis=1);direction=b-a
+            t=np.clip(np.sum((colors-a[:,None,:])*direction[:,None,:],axis=2)/np.maximum(1,np.sum(direction*direction,axis=1))[:,None],0,1)
+            ridge=np.linalg.norm(colors-a[:,None,:]-t[:,:,None]*direction[:,None,:],axis=2)
+            eligible=np.abs(offsets)<=2;peaks=np.argmax(np.where(eligible[None,:],ridge,-1),axis=1)
+            strength=ridge[np.arange(len(stations)),peaks];hit=strength>16
+            if hit.mean()<.55 or any(group.mean()<.35 for group in np.array_split(hit,4)):continue
+            widths=[]
+            for i in np.where(hit)[0]:
+                lo=hi=int(peaks[i]);threshold=strength[i]*.65
+                while lo>0 and ridge[i,lo-1]>=threshold:lo-=1
+                while hi<len(offsets)-1 and ridge[i,hi+1]>=threshold:hi+=1
+                widths.append((hi-lo+1)*.5)
+            width=float(np.median(widths));color=np.median(colors[np.arange(len(stations)),peaks][hit],axis=0)
+            if not .4<=width<=5:continue
+            result.append({'role':role,'boundaryIndex':index,'color':hex_color(color),'strokeWidth':round(width,2),'confidence':round(float(hit.mean()),4),'source':'grid-boundary-ridge'})
+    return result
+
+
 def measure_table(table, reference, mask, options, scene):
     started = time.perf_counter()
     table_id = str(table.get("tableId") or "")
@@ -554,6 +610,10 @@ def measure_table(table, reference, mask, options, scene):
                          "source": "cell-constraints"},
                 "rows": [], "colorGroups": [], "diagnostics": {"elapsedMs": 0.0}}
     cells = [cell for cell in table.get("cells") or [] if isinstance(cell, dict)]
+    semantic=sorted(table.get('rows') or [],key=lambda r:int(r['rowIndex']))
+    columns=sorted(table.get('columns') or [],key=lambda c:int(c['columnIndex']))
+    if any(r['bottom']<=r['y'] or i and r['y']<semantic[i-1]['y'] for i,r in enumerate(semantic)) or any(i and c['x']<=columns[i-1]['x'] for i,c in enumerate(columns)):
+        return {'tableId':table_id,'status':'partial','issues':['invalid-cell-topology'],'grid':{'boundaries':[],'verticalBoundaries':[],'confidence':0},'rows':[],'alignment':[]}
     frame=measured_outer(table,reference)
     outer = frame or table.get("outer") or {}
     if not pixel_box(outer, scene) and cells:
@@ -632,8 +692,8 @@ def measure_table(table, reference, mask, options, scene):
     internal_y=[top+value for value in horizontal if 5<value<bottom-top-5]
     if len(internal_y)==len(rows)-1:
         boundaries=[float(top+2),*internal_y,float(bottom-2)];confidence=max(confidence,.9)
-    for index in range(1, len(boundaries)):
-        boundaries[index] = max(boundaries[index], boundaries[index - 1] + 1.0)
+    if any(b-a<8 for a,b in zip(boundaries,boundaries[1:])):
+        return {'tableId':table_id,'status':'partial','issues':['collapsed-row-grid'],'grid':{'boundaries':[],'verticalBoundaries':[],'confidence':0},'rows':[],'alignment':[]}
     columns = sorted([column for column in table.get("columns") or []
                       if isinstance(column, dict)], key=lambda column: float(column.get("x", 0)))
     if len(columns) >= 2:
@@ -689,6 +749,8 @@ def measure_table(table, reference, mask, options, scene):
             0.75 * confidence + 0.25 * max(vertical_confidence, vertical_baseline), 0.0, 1.0))
     else:
         vertical_boundaries = []
+    if frame and frame.get('horizontal') and frame.get('vertical'):
+        boundaries=frame['horizontal'];vertical_boundaries=frame['vertical'];confidence=.95
     inset = float(options.get("sampleInset", 0.12))
     # Sample inside the cell columns when they are known: this keeps the frame stroke/glow and the
     # side gutters (row icons, edge bloom) out of the row colour, which the full outer width includes.
@@ -774,6 +836,7 @@ def measure_table(table, reference, mask, options, scene):
                  "source": "cells+colour-steps" if confidence >= 0.5 else "cell-constraints"},
         "rows": measured_rows,
         "colorGroups": color_groups,
+        "strokes":measure_grid_strokes(reference,boundaries,vertical_boundaries),
         "alignment":measure_alignment(reference,cells,rows,boundaries,vertical_boundaries,options),
         "diagnostics": {"elapsedMs": round((time.perf_counter() - started) * 1000.0, 1)},
     }

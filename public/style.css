@@ -1051,19 +1051,17 @@ button:is(.close,.danger,[data-delete],[data-delete-project],[data-delete-style]
 /* NARRAFORM: a folded ribbon forms an unmistakable N. */
 .brand{gap:10px;align-items:center;letter-spacing:0}
 .brand .brand-icon{width:40px;height:40px;flex:0 0 40px;color:var(--yellow);transition:filter .3s ease}
-.brand .brand-icon svg{display:block;overflow:visible}
+.brand .brand-icon img{display:block;width:100%;height:100%;object-fit:contain}
 .brand-wordmark{min-width:0}
-.brand-name{display:block;white-space:nowrap;color:#f5f4ed;font:750 21px/1.1 "Bahnschrift","Segoe UI",sans-serif;letter-spacing:-.7px}
-.brand-name>span{color:#c6c5bc;font-weight:550}
+.brand-name{display:block;white-space:nowrap;color:#f5f4ed;font:760 23px/1 "Bahnschrift","Segoe UI",sans-serif;letter-spacing:-.35px;transform:translateY(1px)}
+.brand-name>span{color:var(--yellow);font-weight:700}
 .brand .brand-wordmark small{margin-top:6px;color:#a9a79d;font:7px/1.2 var(--mono);letter-spacing:1.55px;white-space:nowrap}
-.brand .brand-fold{transition:transform .35s cubic-bezier(.2,.8,.2,1);transform-origin:32px 32px}
 .brand:hover .brand-icon{filter:drop-shadow(0 0 7px #fff23824)}
-.brand:hover .brand-fold{transform:translateY(-1.5px)}
 .brand:focus-visible{outline-color:var(--yellow)}
 @media(max-width:1000px){.brand .brand-icon{width:36px;height:36px;flex-basis:36px}.brand-name{font-size:19px}}
 @media(max-width:540px){.brand{gap:8px}.brand .brand-icon{width:32px;height:32px;flex-basis:32px}.brand-name{font-size:18px}.brand .brand-wordmark small{font-size:6px;letter-spacing:1.2px;margin-top:5px}}
 @media(max-width:360px){.brand .brand-icon{width:28px;height:28px;flex-basis:28px}.brand-name{font-size:16px}.brand .brand-wordmark small{letter-spacing:.9px}}
-@media(prefers-reduced-motion:reduce){.brand .brand-icon,.brand .brand-fold{transition:none}.brand:hover .brand-fold{transform:none}}
+@media(prefers-reduced-motion:reduce){.brand .brand-icon{transition:none}}
 
 /* Artifact inventory and the restrained delivery presentation controls. */
 .artifact-storage-dialog{width:min(800px,calc(100vw - 36px));max-height:85vh;overflow:auto;background:#eeede7;color:#30302e;border:1px solid #b9b7ad;padding:28px}

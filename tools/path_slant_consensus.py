@@ -4,6 +4,46 @@ import cv2
 import numpy as np
 from parameter_confidence import confidence,weighted_median,parameter_blocked,provenance
 from constrained_shapes import _quad_slant_from_properties,_merged_slant_properties
+from arrow_geometry_fit import arrow_kind
+
+
+def pointed_members(e,label):
+    from shape_reference import seed_polygon
+    polygon=seed_polygon(e)
+    if not polygon:return []
+    tail=arrow_kind(e);hexagon=e.get('shape')=='hexagon'
+    if not tail and not hexagon:return []
+    if e.get('customGeometry') and not hexagon:return []
+    # A rotated hexagon's head coordinate is its local y axis.
+    vertical_hex=False
+    if hexagon and e.get('customGeometry'):
+        vertices=(e.get('customGeometry') or {}).get('points')
+        if not vertices or len(vertices)!=6:return []
+        p=np.asarray(vertices,float)
+        vertical=(abs(p[0,0]-.5)<.015 and abs(p[0,1])<.015 and abs(p[3,0]-.5)<.015 and abs(p[3,1]-1)<.015)
+        horizontal=(abs(p[2,0]-1)<.015 and abs(p[2,1]-.5)<.015 and abs(p[5,0])<.015 and abs(p[5,1]-.5)<.015)
+        if not vertical and not horizontal:return []
+        vertical_hex=vertical
+    parameters=[('headDepth',list(range(6)) if hexagon else [2,3] if tail=='shaft' else [1,2])]
+    if tail=='notched':parameters.append(('notchDepth',[4,5]))
+    result=[];points=np.asarray(polygon,float)
+    for parameter,indices in parameters:
+        if parameter_blocked(e,parameter):continue
+        specific=(e.get('parameterEvidence') or {}).get(parameter)
+        weight=confidence(e,'slant',specific) if specific is not None else confidence(e,'slant')
+        for sign in (-1,1):
+            selected=[];angles=[]
+            for i in indices:
+                a,b=points[i],points[(i+1)%len(points)];d=b-a
+                angle=math.degrees(math.atan2(abs(d[1]),abs(d[0])))
+                if np.linalg.norm(d)<8 or not 3<=angle<=87 or (1 if d[0]*d[1]>0 else -1)!=sign:continue
+                selected.append(i);angles.append(angle)
+            if selected and max(angles)-min(angles)<=1:
+                result.append({'element':e,'angle':float(np.mean(angles)),'sign':sign,'label':label,
+                    'confidence':weight,'parameter':parameter,'edgeIndices':selected,
+                    'descriptor':{'pointed':True,'symmetric':True,'parameter':parameter,'verticalHex':vertical_hex},
+                    'id':e['key']+':'+parameter+':'+str(sign)})
+    return result
 
 
 def members(elements):
@@ -29,6 +69,9 @@ def members(elements):
                                 'confidence':confidence(e,'slant',specific) if specific is not None else confidence(e,'slant'),'a':a,'b':b,'id':e['key']+':'+str(index)})
                 previous=end
         elif e.get('type') in ('shape','rect'):
+            pointed=pointed_members(e,label)
+            if pointed:
+                result.extend(pointed);continue
             d=_quad_slant_from_properties(e)
             if d:
                 for sign in ([d['sign']] if d['sign'] in (-1,1) else [-1,1]):result.append({'element':e,'angle':d['angle'],'sign':sign,'label':label,'confidence':confidence(e,'slant'),
@@ -43,7 +86,9 @@ def points_for(member,element):
     from shape_reference import seed_polygon
     polygon=seed_polygon(element)
     if not polygon:return None
-    p=np.asarray(polygon);return np.concatenate([np.linspace(a,b,24) for a,b in zip(p,np.roll(p,-1,axis=0))])
+    p=np.asarray(polygon)
+    indices=member.get('edgeIndices',range(len(p)))
+    return np.concatenate([np.linspace(p[i]+(p[(i+1)%len(p)]-p[i])*.10,p[i]+(p[(i+1)%len(p)]-p[i])*.90,32) for i in indices])
 
 
 def boundary(points,distance,hidden):
@@ -61,6 +106,24 @@ def member_boundary(member,element,distance,hidden):
 
 def proposal(m,angle):
     e=copy.deepcopy(m['element'])
+    if m.get('descriptor',{}).get('pointed'):
+        vertical=m['descriptor'].get('verticalHex') or e.get('arrowDirection') in ('up','down')
+        length,cross=(e['h'],e['w']) if vertical else (e['w'],e['h'])
+        depth=(cross*math.tan(math.radians(angle))/2/length if vertical else cross/2/math.tan(math.radians(angle))/length)
+        if not .005<=depth<=.49:return None
+        depth=round(depth,7)
+        parameter=m['parameter'];g={**(e.get('shapeGeometry') or {})}
+        if parameter=='headDepth' and arrow_kind(e)=='notched' and 'notchDepth' not in g:
+            from arrow_geometry_fit import initial_depths
+            g['notchDepth']=initial_depths(e,[e['x'],e['y'],e['w'],e['h']])[1]
+        g[parameter]=round(depth,7)
+        if parameter=='headDepth':g.pop('slantAngle',None)
+        e['shapeGeometry']=g
+        if m['descriptor'].get('verticalHex'):
+            e['customGeometry']={'points':[[.5,0],[1,depth],[1,1-depth],[.5,1],[0,1-depth],[0,depth]],'closed':True}
+        elif e.get('shape')=='hexagon' and e.get('customGeometry'):
+            e['customGeometry']={'points':[[depth,0],[1-depth,0],[1,.5],[1-depth,1],[depth,1],[0,.5]],'closed':True}
+        return e
     if 'segment' not in m:return _merged_slant_properties({'properties':e,'family':'quad'},m['descriptor'],angle)
     c=e['linePath']['commands'];i=m['segment'];a=np.array(c[i-1]['points'][-1])*[e['w'],e['h']]+[e['x'],e['y']];b=np.array(c[i]['points'][-1])*[e['w'],e['h']]+[e['x'],e['y']]
     if len(c)==2:
@@ -113,8 +176,14 @@ def merge(elements,reference,hidden,target_keys=None):
             if not sources:continue
             if max(m['angle'] for m in sources.values())-min(m['angle'] for m in sources.values())>1.:continue
             angle=weighted_median([m['angle'] for m in sources.values()],[m['confidence'] for m in sources.values()]);updates={};valid=True
-            if any(m.get('descriptor',{}).get('symmetric') and m['element']['key'] in symmetric_angles
-                   and abs(symmetric_angles[m['element']['key']]-angle)>.01 for m in group):continue
+            symmetric_key=lambda m:(m['element']['key'],m.get('parameter','slant'))
+            existing=[symmetric_angles[symmetric_key(m)] for m in group if m.get('descriptor',{}).get('symmetric') and symmetric_key(m) in symmetric_angles]
+            if existing:
+                if max(existing)-min(existing)>.01:continue
+                # Paired symmetric sides share one geometric parameter. A second
+                # signed group must reuse it, never tilt the other half differently.
+                angle=existing[0]
+                if any(abs(m['angle']-angle)>2 for m in group):continue
             for m in group:
                 key=m['element']['key']
                 if target_keys is not None and key not in target_keys:continue
@@ -152,9 +221,18 @@ def merge(elements,reference,hidden,target_keys=None):
                 evidence={'angle':angle,'group':scope[1] or 'measured-near-slant','sources':list(sources),'members':[m['id'] for m in group],'boundaryChecked':True}
                 previous=[item for item in e.get('pathSlantEvidence',[]) if item.get('members')!=evidence['members']]
                 e['pathSlantEvidence']=[*previous,evidence]
-                if any(m['element']['key']==key and m.get('descriptor',{}).get('symmetric') for m in group):symmetric_angles[key]=angle
+                for m in group:
+                    if m['element']['key']==key and m.get('descriptor',{}).get('symmetric'):symmetric_angles[symmetric_key(m)]=angle
                 parameters=['slant:'+str(m['segment']) for m in group if m['element']['key']==key and 'segment' in m]
-                if e.get('type')!='line' or len(e['linePath']['commands'])==2:parameters.append('slant')
-                for parameter in parameters:e.setdefault('parameterEvidence',{})[parameter]=provenance(list(sources),max(m['confidence'] for m in sources.values()))
+                parameters.extend(m['parameter'] for m in group if m['element']['key']==key and m.get('parameter'))
+                if not parameters and (e.get('type')!='line' or len(e['linePath']['commands'])==2):parameters.append('slant')
+                for parameter in parameters:
+                    old=(e.get('parameterEvidence') or {}).get(parameter) or {}
+                    # A consensus changes this value into an inherited one. Keep
+                    # the independent observation separately for diagnostics.
+                    inherited=provenance(list(sources),max(m['confidence'] for m in sources.values()))
+                    observation=old.get('observation') or (copy.deepcopy(old) if old.get('independent') else None)
+                    if observation:inherited['observation']=observation
+                    e.setdefault('parameterEvidence',{})[parameter]=inherited
             records.append({'angle':angle,'members':[m['id'] for m in group],'sources':list(sources),'changedKeys':list(updates),'accepted':True})
     return output,records

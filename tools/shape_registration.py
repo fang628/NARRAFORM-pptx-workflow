@@ -1,19 +1,17 @@
 #!/usr/bin/env python
 """Registration + completion for the committed S2 path.
 
-Input spec (JSON): {preview, background?, elements:[...], minAreaRatio?}
+Input spec (JSON): {preview, background?, elements:[...]}
 - seeds are the elements already registered by the rebuild pipeline (audit/committed list);
-- the preview is compared with the registered background; foreground regions not covered by
-  any non-text seed are registered as automatic frame candidates (补全);
+- frame identity comes exclusively from the audited seeds, never a difference-region bbox;
 - every seed is kept: text/image/svg/cutout pass through, shapes become fitting targets.
 - independent narrow bright geometric cores (e.g. a slanted illuminated strip drawn between
   panels) that the audit missed are registered directly as SVG effects, but only with
   continuous/strong ridge evidence that is absent from the wordless background, is not text or a
   registered image, is not a near-parallel copy of an existing shape/line edge, and is not a soft
-  halo or ornamental arc. The auto-frame logic is unchanged; the new lines are appended as
-  foreground effects so they are not buried by the completion frames.
+  halo or ornamental arc. New lines are appended as foreground effects.
 
-Output: registry JSON with the complete element list, auto frames, auto lines and coverage stats.
+Output: registry JSON with audited elements, independent light effects and coverage stats.
 CLI: python tools/shape_registration.py <spec.json> <out.json>
 """
 import json
@@ -34,73 +32,6 @@ def load(path):
     if image is None:
         return None
     return cv2.resize(image, (WIDTH, HEIGHT))
-
-
-def classify(mask, box):
-    x, y, w, h = box
-    region = np.zeros_like(mask)
-    region[y:y + h, x:x + w] = mask[y:y + h, x:x + w]
-    contours = cv2.findContours(region, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
-    if not contours:
-        return 'roundRect', 4
-    contour = max(contours, key=cv2.contourArea)
-    approx = cv2.approxPolyDP(contour, 0.02 * max(4.0, 2 * (w + h)), True)
-    vertices = len(approx)
-    aspect = w / max(1.0, h)
-    if 5 <= vertices <= 7 and 0.7 <= aspect <= 1.4:
-        return 'hexagon', vertices
-    if 3 <= vertices <= 4:
-        return 'rect', vertices
-    return 'roundRect', vertices
-
-
-def discover_frames(preview, background, min_area_ratio, protected=()):
-    diff = np.abs(preview.astype(np.int16) - background.astype(np.int16)).max(axis=2).astype(np.uint8)
-    mask = (diff > 14).astype(np.uint8)
-    # Text and formulas are already native objects. Their glyphs are not missing frames.
-    for element in protected:
-        x, y, w, h = (float(element.get(key, 0)) for key in ('x', 'y', 'w', 'h'))
-        left, top = max(0, int(np.floor(x)) - 2), max(0, int(np.floor(y)) - 2)
-        right, bottom = min(WIDTH, int(np.ceil(x + w)) + 2), min(HEIGHT, int(np.ceil(y + h)) + 2)
-        if right > left and bottom > top:
-            mask[top:bottom, left:right] = 0
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-    count, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, 8)
-    frames = []
-    page_area = WIDTH * HEIGHT
-    for component in range(1, count):
-        x, y, w, h, area = [int(value) for value in stats[component]]
-        if area < max(900, page_area * min_area_ratio):
-            continue
-        if w > WIDTH * 0.92 and h > HEIGHT * 0.92:
-            continue
-        if w < 18 or h < 12:
-            continue
-        # A clipped background ornament has no closed contour to reconstruct.
-        # Its difference bbox must not be promoted into a new opaque panel.
-        if x<=1 or y<=1 or x+w>=WIDTH-1 or y+h>=HEIGHT-1:
-            continue
-        component_mask = labels[y:y + h, x:x + w] == component
-        # Sparse contours and disconnected glyphs are evidence candidates, not solid carriers.
-        if area / max(1, w * h) < 0.55:
-            continue
-        inside = preview[y:y + h, x:x + w][component_mask]
-        if len(inside) == 0:
-            continue
-        median = np.median(inside, axis=0)
-        fill = '%02X%02X%02X' % (int(median[2]), int(median[1]), int(median[0]))
-        kind, vertices = classify(mask, (x, y, w, h))
-        frames.append({'x': x, 'y': y, 'w': w, 'h': h, 'area': area, 'fill': fill,
-                       'kind': kind, 'vertices': vertices})
-    frames.sort(key=lambda frame: -frame['area'])
-    return frames
-
-
-def overlap_ratio(frame, element):
-    ix = max(0, min(frame['x'] + frame['w'], element['x'] + element['w']) - max(frame['x'], element['x']))
-    iy = max(0, min(frame['y'] + frame['h'], element['y'] + element['h']) - max(frame['y'], element['y']))
-    return (ix * iy) / max(1, min(frame['w'] * frame['h'], max(1, element['w'] * element['h'])))
 
 
 # ---------------------------------------------------------------- missing light-strip cores
@@ -472,7 +403,13 @@ def _same_light_strip(first, second):
                             first['y'] + (first['h'] if first['flipV'] else 0.0)])
     second_start = np.array([second['x'] + (second['w'] if second['flipH'] else 0.0),
                              second['y'] + (second['h'] if second['flipV'] else 0.0)])
-    if float(np.linalg.norm(first_start - second_start)) > 14.0:
+    first_end = np.array([first['x'] + (0.0 if first['flipH'] else first['w']),
+                          first['y'] + (0.0 if first['flipV'] else first['h'])])
+    second_end = np.array([second['x'] + (0.0 if second['flipH'] else second['w']),
+                           second['y'] + (0.0 if second['flipV'] else second['h'])])
+    distance = min(max(np.linalg.norm(first_start-second_start), np.linalg.norm(first_end-second_end)),
+                   max(np.linalg.norm(first_start-second_end), np.linalg.norm(first_end-second_start)))
+    if float(distance) > 14.0:
         return False
     if abs(first['length'] - second['length']) > max(12.0, 0.08 * max(first['length'], second['length'])):
         return False
@@ -505,61 +442,21 @@ def main():
     preview = load(spec['preview'])
     background = load(spec['background']) if spec.get('background') else None
     seeds = spec.get('elements') or []
-    min_area_ratio = float(spec.get('minAreaRatio') or 0.0015)
 
     pass_through = [element for element in seeds if element.get('type') in PASS_TYPES]
     shape_seeds = [element for element in seeds if element.get('type') in SHAPE_TYPES]
     prototypes = [element for element in shape_seeds
                   if str(element.get('shape') or '').lower() in {name.lower() for name in PROTOTYPES}]
-    auto_frames = []
     auto_lines = []
-    coverage = {'diffFrames': 0, 'uncovered': 0, 'autoRegistered': 0, 'autoLines': 0,
-                'fullPageDiff': 0.0}
+    coverage = {'autoLines': 0, 'fullPageDiff': 0.0}
     if preview is not None and background is not None:
-        frames = discover_frames(preview, background, min_area_ratio,
-                                 [e for e in seeds if e.get('type') in ('text', 'formula')]+list(spec.get('protected') or []))
         diff = np.abs(preview.astype(np.int16) - background.astype(np.int16)).max(axis=2)
-        coverage['diffFrames'] = len(frames)
         coverage['fullPageDiff'] = round(float((diff > 14).mean()), 4)
-        covered_by = [element for element in seeds if element.get('type') not in ('text', 'formula')]
-        for frame in frames:
-            if any(overlap_ratio(frame, element) >= 0.55 for element in covered_by):
-                continue
-            # A thin residual touching an existing same-colour body is its
-            # missed extent, not evidence for a second opaque block.
-            attached=False
-            for element in shape_seeds:
-                if min(frame['w'],frame['h'])>24:continue
-                try:
-                    a=np.array([int(frame['fill'][i:i+2],16) for i in (0,2,4)])
-                    b=np.array([int(element.get('fill','')[i:i+2],16) for i in (0,2,4)])
-                    gap_x=max(frame['x']-element['x']-element['w'],element['x']-frame['x']-frame['w'],0)
-                    gap_y=max(frame['y']-element['y']-element['h'],element['y']-frame['y']-frame['h'],0)
-                    overlap_x=max(0,min(frame['x']+frame['w'],element['x']+element['w'])-max(frame['x'],element['x']))
-                    overlap_y=max(0,min(frame['y']+frame['h'],element['y']+element['h'])-max(frame['y'],element['y']))
-                    if np.linalg.norm(a-b)<45 and max(gap_x,gap_y)<=5 and (overlap_x>=frame['w']*.8 or overlap_y>=frame['h']*.8):attached=True;break
-                except (ValueError,TypeError):pass
-            if attached:continue
-            coverage['uncovered'] += 1
-            number = len(auto_frames) + 1
-            used = {e.get('key') for e in seeds + auto_frames}
-            while 'auto-frame-' + str(number) in used:
-                number += 1
-            auto_frames.append({
-                'key': 'auto-frame-' + str(number),
-                'type': 'shape',
-                'shape': frame['kind'],
-                'x': frame['x'], 'y': frame['y'], 'w': frame['w'], 'h': frame['h'],
-                'fill': frame['fill'], 'strokeWidth': 0,
-                'classHint': frame['kind'], 'autoRegistered': True,
-                'role': 'background-diff',
-            })
-        coverage['autoRegistered'] = len(auto_frames)
         # Missing narrow bright geometric cores (e.g. the slanted illuminated strip between p11
         # panels). Evidence only: continuous/strong ridge, absent from the wordless background,
         # not text/image, not a near-parallel existing edge, not a soft halo or ornament arc.
-        strips = discover_light_strips(preview, background, list(seeds) + auto_frames + list(spec.get('protected') or []))
-        used_keys = {element.get('key') for element in list(seeds) + auto_frames}
+        strips = discover_light_strips(preview, background, list(seeds) + list(spec.get('protected') or []))
+        used_keys = {element.get('key') for element in seeds}
         for strip in strips:
             number = len(auto_lines) + 1
             while 'auto-line-' + str(number) in used_keys:
@@ -569,17 +466,15 @@ def main():
             auto_lines.append(light_strip_element(strip,key))
         coverage['autoLines'] = len(auto_lines)
 
-    # New carriers belong behind the already audited text and foreground objects; the completed
-    # light cores are foreground effect cores, so they are appended last (never behind the frames).
     from arc_light_completion import discover_arc_lights
-    arcs=discover_arc_lights(preview,background,list(seeds)+list(spec.get('protected') or [])) if preview is not None and background is not None else []
-    used={e.get('key') for e in auto_frames+list(seeds)+auto_lines}
+    arcs=discover_arc_lights(preview,background,list(seeds)+auto_lines+list(spec.get('protected') or [])) if preview is not None and background is not None else []
+    used={e.get('key') for e in list(seeds)+auto_lines}
     for i,arc in enumerate(arcs):
         key='auto-arc-'+str(i+1)
         while key in used:key+='x'
         arc['key']=key;used.add(key)
     coverage['autoArcs']=len(arcs)
-    registry = arcs + auto_frames + list(seeds) + auto_lines
+    registry = arcs + list(seeds) + auto_lines
     targets = [element['key'] for element in registry if element.get('type') in SHAPE_TYPES]
     by_class = {}
     for element in registry:
@@ -594,7 +489,7 @@ def main():
         'targets': targets,
         'counts': {'seeds': len(seeds), 'passThrough': len(pass_through),
                    'shapeSeeds': len(shape_seeds), 'prototypes': len(prototypes),
-                   'autoRegistered': len(auto_frames), 'autoLines': len(auto_lines),
+                   'autoLines': len(auto_lines), 'autoArcs': len(arcs),
                    'total': len(registry)},
         'byClass': by_class,
         'coverage': coverage,

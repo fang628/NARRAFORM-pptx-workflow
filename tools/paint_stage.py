@@ -44,6 +44,7 @@ from native_effects import detect_native_effects,without_soft_exterior
 from circle_paint import joint_circle_paint
 from fill_end_alpha import fit_fill_end_alpha
 from frame_highlight import fit_frame_highlight
+from fill_presence import unsupported_borderless_fill
 
 SCENE = (1600, 900)
 PAINT_TYPES = ('shape', 'rect', 'ellipse','line')
@@ -262,6 +263,11 @@ def main():
             patch=ref[y0:y1,x0:x1];visible=np.ones(patch.shape[:2],bool)
             if front_alpha is not None:visible &= front_alpha[y0:y1,x0:x1]<8
             pixels=patch[visible]
+            lower_file=underlays.get(key)
+            lower=_load_rgb(lower_file,(page_height,page_width)) if lower_file else page_background
+            if lower is not None and unsupported_borderless_fill(element,pixels,lower[y0:y1,x0:x1][visible]):
+                return {'key':key,'status':'uncertain-kept','properties':{'parameterEvidence':{'fill':{
+                    'confidence':0,'independent':True,'source':'borderless-fill-matches-lower'}}},'diagnostics':detail}
             if len(pixels)>=8:
                 median=np.median(pixels,axis=0);deviation=np.linalg.norm(pixels-median,axis=1)
                 reliable=deviation<18
@@ -443,6 +449,9 @@ def main():
             reasons.append('stroke:inconsistent-with-ridge')
 
         evidence={}
+        if fill_detail.get('reason')=='borderless-fill-matches-lower':
+            for field in ('fill','gradient','fillOpacity'):properties.pop(field,None)
+            evidence['fill']={'confidence':0,'independent':True,'source':'borderless-fill-matches-lower'}
         for parameter,observation in [('fill',fill_detail),('stroke',stroke_detail)]:
             has_paint=any(name in properties for name in (('fill','gradient') if parameter=='fill' else ('color','strokeGradient')))
             if has_paint:
@@ -472,6 +481,7 @@ def main():
             detail['stroke']['reason']='unresolved-fill-or-lower-composite-for-alpha'
         if evidence:properties['parameterEvidence']=evidence
         for parameter,field in [('fill','gradient'),('stroke','strokeGradient')]:
+            if parameter=='fill' and fill_detail.get('reason')=='borderless-fill-matches-lower':continue
             alpha_detail=(alpha_evidence.get('parameters') or {}).get(parameter) or {}
             if alpha_detail.get('status')=='accepted':
                 properties.setdefault('parameterEvidence',{})[parameter]={'confidence':alpha_detail['confidence'],'independent':True,'source':'fill-end-alpha-reference'}

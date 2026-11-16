@@ -1,4 +1,5 @@
 import {formulaLatex,formulaMarkdown} from './formula-content.js';
+import {configureFormulaField,formulaFieldMessage} from './formula-compatibility.js';
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let library;
 const snippets=[['分数','\\frac{#0}{#?}'],['上下标','x_{#0}^{#?}'],['根式','\\sqrt{#0}'],['求和','\\sum_{i=1}^{n} #0'],['积分','\\int_{a}^{b} #0\\,dx'],['矩阵','\\begin{pmatrix}#0 & #?\\\\#? & #?\\end{pmatrix}']];
@@ -19,27 +20,31 @@ export async function bindFormulaEditors(root){
     for(const field of previews){
       if(!field.isConnected||field.dataset.formulaBound)continue;
       field.readOnly=true;field.mathVirtualKeyboardPolicy='manual';
+      configureFormulaField(field);
       field.setValue(formulaLatex(field.dataset.formulaLatex||field.textContent),{silenceNotifications:true});
+      formulaFieldMessage(field);
       field.dataset.formulaBound='true';
     }
     for(const editor of editors){
       if(!editor.isConnected)continue;
       const field=editor.querySelector('math-field'),source=editor.querySelector('[data-formula-source]'),state=editor.querySelector('.formula-edit-state');
       field.readOnly=source.disabled;
+      configureFormulaField(field);
       let initial='';try{initial=formulaLatex(source.value);}catch(error){state.textContent=error.message;editor.querySelector('.formula-source').open=true;}
       field.setValue(initial,{silenceNotifications:true});
+      if(initial)state.textContent=formulaFieldMessage(field);
       if(editor.dataset.restoreFocus){delete editor.dataset.restoreFocus;field.focus();if(editor.formulaSelection)field.selection=editor.formulaSelection;delete editor.formulaSelection;}
       if(editor.dataset.bound)continue;editor.dataset.bound='true';field.mathVirtualKeyboardPolicy='manual';
       let updating=false;
       field.addEventListener('input',()=>{
         if(updating||source.disabled)return;
         const latex=field.getValue('latex');source.value='$$\n'+latex+'\n$$';
-        try{formulaLatex(latex);state.textContent='';}catch(error){state.textContent=error.message;}
+        try{formulaLatex(latex);state.textContent=formulaFieldMessage(field);}catch(error){state.textContent=error.message;}
         // Notify the form without feeding our own update back into setValue(),
         // which resets the caret inside fractions and superscripts on each key.
         updating=true;try{source.dispatchEvent(new Event('input',{bubbles:true}));}finally{updating=false;}
       });
-      source.addEventListener('input',()=>{if(updating)return;try{updating=true;field.setValue(formulaLatex(source.value),{silenceNotifications:true});state.textContent='';}catch(error){state.textContent=error.message;}finally{updating=false;}});
+      source.addEventListener('input',()=>{if(updating)return;try{updating=true;field.setValue(formulaLatex(source.value),{silenceNotifications:true});state.textContent=formulaFieldMessage(field);}catch(error){state.textContent=error.message;field.setAttribute('aria-invalid','true');}finally{updating=false;}});
       editor.addEventListener('click',event=>{const button=event.target.closest('[data-formula-insert]');if(!button||source.disabled)return;field.focus();field.insert(button.dataset.formulaInsert);});
     }
   }catch{

@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import math
 import re
+from object_masks import object_alpha
 
 
 def ellipse_arc_path(cx,cy,a,b,angle,start,end,origin):
@@ -45,10 +46,25 @@ def discover_arc_lights(preview,background,seeds):
     delta=np.max(np.abs(preview.astype(float)-background.astype(float)),axis=2)
     hsv=cv2.cvtColor(preview,cv2.COLOR_BGR2HSV)
     mask=((delta>30)&(hsv[:,:,2]>145)).astype(np.uint8)*255
+    _,labels,stats,_=cv2.connectedComponentsWithStats((mask>0).astype(np.uint8),8)
+    occupied_native=np.zeros(mask.shape,np.uint8)
     for e in seeds:
+        if e.get('type') in ('rect','ellipse','shape','line'):
+            alpha=object_alpha(e)
+            if alpha is not None:
+                occupied=cv2.dilate((alpha>0).astype(np.uint8),np.ones((9,9),np.uint8))>0
+                occupied_native[occupied]=1
+                mask[occupied]=0
+            continue
         x,y,w,h=[float(e.get(k,0)) for k in ('x','y','w','h')]
         if e.get('type') in ('text','formula','image','svg','cutout') or e.get('managed'):
             mask[max(0,int(y)-4):min(900,int(y+h)+4),max(0,int(x)-4):min(1600,int(x+w)+4)]=0
+    # A measured carrier may be slightly displaced. Do not leave fragments of
+    # its connected bright boundary behind and reinterpret them as a new arc.
+    overlap=np.bincount(labels[occupied_native>0],minlength=len(stats))
+    owned=np.where(overlap>=np.maximum(6,stats[:,cv2.CC_STAT_AREA]*.08))[0]
+    owned=owned[owned>0]
+    if len(owned):mask[np.isin(labels,owned)]=0
     contours=cv2.findContours(mask,cv2.RETR_LIST,cv2.CHAIN_APPROX_NONE)[0]
     distance=cv2.distanceTransform(255-mask,cv2.DIST_L2,3);thickness=cv2.distanceTransform(mask,cv2.DIST_L2,3);accepted=[]
     for contour in sorted(contours,key=lambda c:cv2.arcLength(c,False),reverse=True):
@@ -56,6 +72,12 @@ def discover_arc_lights(preview,background,seeds):
         (cx,cy),(a,b),angle=cv2.fitEllipse(contour)
         if min(a,b)<18 or max(a,b)<220 or max(a,b)/min(a,b)>24:continue
         if max(a,b)>2100 or not -200<cx<1800 or not -200<cy<1100:continue
+        # Fit the source contour itself before consulting nearby bright pixels.
+        # Straight panel sides cannot borrow unrelated pixels to become a ring.
+        q=contour[:,0,:].astype(float)-[cx,cy];r=math.radians(angle)
+        u=q[:,0]*math.cos(r)+q[:,1]*math.sin(r);v=-q[:,0]*math.sin(r)+q[:,1]*math.cos(r)
+        radial=np.sqrt((u/(a/2))**2+(v/(b/2))**2)
+        if np.percentile(abs(radial-1)*min(a,b)/2,90)>2.5:continue
         t=np.linspace(0,2*np.pi,721);r=np.deg2rad(angle)
         xx=cx+a/2*np.cos(t)*np.cos(r)-b/2*np.sin(t)*np.sin(r)
         yy=cy+a/2*np.cos(t)*np.sin(r)+b/2*np.sin(t)*np.cos(r)

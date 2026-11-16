@@ -574,12 +574,12 @@ if(designBatchPending){toast('正在保存并确认内容与设计，请稍候')
     const field=$(`[data-rebuild-asset-instruction="${Number(b.dataset.assetPage)}"]`),line='删除非事实元素「'+b.dataset.suggestRemoveAsset+'」。';if(field){field.value=[field.value.trim(),line].filter(Boolean).join('\n');field.focus();field.dispatchEvent(new Event('input',{bubbles:true}));}return;
   }
   if(b.dataset.repairRebuildPage!==undefined){
-    if(!p.rebuildReady){openAPI();toast('请配置支持视觉输入的主模型，或选填独立高性能视觉模型');return;}
+    if(!p.rebuildReady){openAPI();toast('请配置支持视觉输入的主模型');return;}
     const index=Number(b.dataset.repairRebuildPage);
     await act('repairRebuildPage',{index});return;
   }
   if(b.dataset.retryRebuildPage!==undefined){
-    if(!p.rebuildReady){openAPI();toast('请配置支持视觉输入的主模型，或选填独立高性能视觉模型');return;}
+    if(!p.rebuildReady){openAPI();toast('请配置支持视觉输入的主模型');return;}
     await act('retryRebuildPage',{index:Number(b.dataset.retryRebuildPage)});return;
   }
   if(b.dataset.reviseRebuildAssets!==undefined){
@@ -591,7 +591,7 @@ if(designBatchPending){toast('正在保存并确认内容与设计，请稍候')
     await flushSlideEdits();const form=$('#briefForm');if(form&&!sameBrief(readBrief(form))){if(!form.reportValidity())return;await act('requirements',{brief:readBrief(form)});}
     await act('reuseDownstream');toast('已沿用原布局与图片，新文案已同步到后续设计');return;
   }
-  if(b.dataset.action){if(['content','concepts','draftPageDesigns'].includes(b.dataset.action)&&!p.apiReady){openAPI();toast('先连接文字模型，再执行生成');return;}if(['concepts','generateFullPreview'].includes(b.dataset.action)&&!p.imageReady){openAPI();toast('请配置通用生图 API');return;}if(['build','reconstructPreview'].includes(b.dataset.action)&&!p.rebuildReady){openAPI();toast('请配置支持视觉输入的主模型，或选填独立高性能视觉模型');return;}if(b.dataset.action==='draftPageDesigns')await flushSlideEdits();if(b.dataset.action==='concepts')await prepareConceptPreview(p,()=>act('enterVisualStage',{},2));const next={approvePreview:4,generateFullPreview:3}[b.dataset.action],extra={};await act(b.dataset.action,extra,next);return;}
+  if(b.dataset.action){if(['content','concepts','draftPageDesigns'].includes(b.dataset.action)&&!p.apiReady){openAPI();toast('先连接文字模型，再执行生成');return;}if(['concepts','generateFullPreview'].includes(b.dataset.action)&&!p.imageReady){openAPI();toast('请配置通用生图 API');return;}if(['build','reconstructPreview'].includes(b.dataset.action)&&!p.rebuildReady){openAPI();toast('请配置支持视觉输入的主模型');return;}if(b.dataset.action==='draftPageDesigns')await flushSlideEdits();if(b.dataset.action==='concepts')await prepareConceptPreview(p,()=>act('enterVisualStage',{},2));const next={approvePreview:4,generateFullPreview:3}[b.dataset.action],extra={};await act(b.dataset.action,extra,next);return;}
   if(b.dataset.theme){await act('selectTheme',{id:b.dataset.theme},3);return;}
   if(b.id==='demo'){await create({title:'示例项目',pages:5,progress:true},true);return;}
   if(b.id==='addSlide'){const slides=collectSlides();slides.push({kind:'content',title:'新的页面',subtitle:'',body:[],notes:'',sources:[],imageId:null});await act('saveContent',{slides});return;}

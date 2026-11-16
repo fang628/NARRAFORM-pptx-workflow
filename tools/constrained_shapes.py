@@ -22,6 +22,7 @@ from shape_reference import seed_polygon
 from parameter_confidence import weighted_median,provenance
 from structural_edges import match_panel
 from object_masks import object_alpha,mask_entries
+from arrow_geometry_fit import arrow_kind,fit_arrow_parameters
 
 cv2.setNumThreads(1)
 WIDTH, HEIGHT = 1600, 900
@@ -36,6 +37,7 @@ def load(file):
 
 
 def family(element):
+    if arrow_kind(element):return 'arrow'
     shape = str(element.get('shape') or element.get('type') or '').lower()
     if shape == 'hexagon':
         return 'hexagon'
@@ -57,8 +59,12 @@ def family(element):
 def prototype(e, box, kind):
     x, y, w, h = box
     if kind == 'hexagon':
-        points = np.array([[.5,0],[1,.25],[1,.75],[.5,1],[0,.75],[0,.25]] if e.get('_hexVertical')
-                          else [[.25, 0], [.75, 0], [1, .5], [.75, 1], [.25, 1], [0, .5]])
+        g=e.get('shapeGeometry') or {};depth=float(g.get('headDepth',.25))
+        if g.get('slantAngle') is not None and not e.get('_hexVertical'):
+            depth=h/2/math.tan(math.radians(g['slantAngle']))/w
+        depth=float(np.clip(depth,.005,.49))
+        points = np.array([[.5,0],[1,depth],[1,1-depth],[.5,1],[0,1-depth],[0,depth]] if e.get('_hexVertical')
+                          else [[depth, 0], [1-depth, 0], [1, .5], [1-depth, 1], [depth, 1], [0, .5]])
         return points * [w, h] + [x, y]
     if kind == 'ellipse':
         angles = np.linspace(0, math.tau, 64, endpoint=False)
@@ -570,7 +576,7 @@ def quad_side_candidates(e, reference, distance, valid, edge, box, baseline):
         preferred = -1 if declared_sign == -1 else 1
         variants = [preferred, -preferred]
     candidates = [(baseline, prototype(e, box, 'quad'))]  # declared geometry remains a candidate
-    if str(e.get('shape') or '').lower()=='parallelogram' and min(w,h)<=80:
+    if str(e.get('shape') or '').lower() in ('parallelogram','freeform') and min(w,h)<=80:
         colors=[e.get('fill')]+[stop.get('color') for stop in (e.get('gradient') or {}).get('stops',[])]
         hues=[]
         for color in colors:
@@ -585,9 +591,26 @@ def quad_side_candidates(e, reference, distance, valid, edge, box, baseline):
             hsv=cv2.cvtColor(reference[top_roi:bottom_roi,left:right],cv2.COLOR_BGR2HSV).astype(float)
             hue_distance=np.minimum.reduce([np.minimum(abs(hsv[:,:,0]-hue),180-abs(hsv[:,:,0]-hue)) for hue in hues])
             ink=((hue_distance<16)&(hsv[:,:,1]>80)&(hsv[:,:,2]>100)).astype(np.uint8)*255
+            ink=cv2.morphologyEx(ink,cv2.MORPH_OPEN,np.ones((3,3),np.uint8))
             contours=cv2.findContours(ink,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)[0]
             for contour in contours:
                 if cv2.contourArea(contour)<max(25,w*h*.12):continue
+                bx,by,bw,bh=cv2.boundingRect(contour)
+                if .55*w<bw<1.5*w and .65*h<bh<1.4*h:
+                    envelope=[]
+                    for row in range(by+max(2,round(bh*.18)),by+round(bh*.82)):
+                        columns=np.flatnonzero(ink[row,bx:bx+bw])
+                        if len(columns)>bw*.5:envelope.append([row,columns[0]+bx,columns[-1]+bx])
+                    if len(envelope)>=12:
+                        edge=np.asarray(envelope,float);slopes=[np.polyfit(edge[:,0],edge[:,i],1) for i in (1,2)]
+                        if slopes[0][0]*slopes[1][0]>0 and abs(slopes[0][0]-slopes[1][0])*bh<4:
+                            slope=sum(s[0] for s in slopes)/2;mid=by+bh/2
+                            centers=[float(np.median(edge[:,i]-slope*(edge[:,0]-mid))) for i in (1,2)]
+                            lo_y,hi_y=float(by),float(by+bh-1)
+                            poly=np.array([[centers[0]+slope*(lo_y-mid),lo_y],[centers[1]+slope*(lo_y-mid),lo_y],
+                                [centers[1]+slope*(hi_y-mid),hi_y],[centers[0]+slope*(hi_y-mid),hi_y]])+[left,top_roi]
+                            pm=score(poly,distance,valid)
+                            if pm and pm['support']>=.85 and pm['p95']<=3:candidates.append(({**pm,'cost':pm['cost']-.3},poly))
                 polygon=cv2.approxPolyDP(cv2.convexHull(contour),.035*cv2.arcLength(contour,True),True)[:,0,:].astype(float)+[left,top_roi]
                 if len(polygon)!=4:continue
                 order=np.argsort(polygon[:,1]);upper=polygon[order[:2]][np.argsort(polygon[order[:2],0])]
@@ -638,6 +661,15 @@ def quad_side_candidates(e, reference, distance, valid, edge, box, baseline):
                               [left[1], bottom]])
         observed = score(candidate, distance, valid)
         if observed:
+            # Shared evidence for the two slanted sides is preferable to
+            # independently drifting endpoints when the full parallel contour fits.
+            dl=candidate[3,0]-candidate[0,0];dr=candidate[2,0]-candidate[1,0]
+            if dl*dr>0 and abs(dl-dr)<=max(5,.4*max(abs(dl),abs(dr))):
+                shift=(dl+dr)/2;centers=(candidate[:2,0]+candidate[[3,2],0])/2
+                parallel=np.array([[centers[0]-shift/2,top],[centers[1]-shift/2,top],[centers[1]+shift/2,bottom],[centers[0]+shift/2,bottom]])
+                pm=score(parallel,distance,valid)
+                if pm and pm['support']>=observed['support']-.04 and pm['cost']<=observed['cost']+.25:
+                    candidates.append(({**pm,'cost':pm['cost']-.15},parallel))
             candidates.append((observed, candidate))
     visible = [item for item in candidates if item[0] and item[0]['support'] >= .6
                and item[1][1,0]>item[1][0,0]+1 and item[1][2,0]>item[1][3,0]+1
@@ -880,6 +912,27 @@ def fit(e, ref, distance, edge, valid):
                       'adjustments': None, 'flipH': False, 'flipV': False}
         properties['customGeometry'] = ({'points': [[.5,0],[1,.25],[1,.75],[.5,1],[0,.75],[0,.25]],
                                          'closed': True} if e.get('_hexVertical') else None)
+        if any(p in e.get('keepParameters',[]) for p in ('geometry','shape','slant','headDepth')):
+            properties['shapeGeometry']=e.get('shapeGeometry')
+            if e.get('_hexVertical'):
+                p=prototype(e,[x,y,w,h],'hexagon')
+                properties['customGeometry']={'points':((p-[x,y])/[w,h]).tolist(),'closed':True}
+        # Measure the four slanted sides independently of the horizontal span.
+        # Keep the six-edge symmetry, but do not fix every hexagon at depth .25.
+        if accepted and not any(p in e.get('keepParameters',[]) for p in ('geometry','shape','slant','headDepth')):
+            vertical=bool(e.get('_hexVertical'));winner=None
+            for values in (np.linspace(.04,.46,43),None):
+                if values is None:
+                    if winner is None:break
+                    values=np.linspace(max(.005,winner[1]-.012),min(.49,winner[1]+.012),25)
+                for depth in values:
+                    normalized=np.array([[.5,0],[1,depth],[1,1-depth],[.5,1],[0,1-depth],[0,depth]] if vertical else
+                                        [[depth,0],[1-depth,0],[1,.5],[1-depth,1],[depth,1],[0,.5]])
+                    points=normalized*[w,h]+[x,y];observed=score(points,distance,valid)
+                    if observed and (winner is None or observed['cost']<winner[0]):winner=(observed['cost'],float(depth),observed,normalized)
+            if winner and winner[2]['support']>=.7 and winner[2]['p95']<=3 and winner[2]['cost']<=metric['cost']+.1:
+                metric=winner[2];properties['shapeGeometry']={'headDepth':round(winner[1],6)}
+                if vertical:properties['customGeometry']={'points':winner[3].tolist(),'closed':True}
     elif kind == 'ellipse':
         properties = {'x': round(float(x), 3), 'y': round(float(y), 3),
                       'w': round(float(w), 3), 'h': round(float(h), 3),
@@ -892,6 +945,9 @@ def fit(e, ref, distance, edge, valid):
                           w=round(float(w), 3), h=round(float(h), 3))
     return {'key': e['key'], 'status': 'accepted' if accepted else 'retained',
             'family': kind, 'properties': properties if accepted else {},
+            **({'parameterEvidence':{'headDepth':{'confidence':round(min(.95,metric['support'])*(1-min(.5,metric['p95']/12)),4),
+                'independent':True,'source':'symmetric-hexagon-boundaries'}}}
+               if accepted and kind=='hexagon' and properties.get('shapeGeometry',{} ) and properties['shapeGeometry'].get('headDepth') is not None else {}),
             **({'cornerEvidence':_corners} if kind=='quad' else {}),
             'locatedDot': located_dot, 'metrics': metric, 'before': baseline,
             'elapsedMs': round((time.perf_counter()-started)*1000, 1)}
@@ -1370,7 +1426,10 @@ def main():
                 badge=e.get('type')=='ellipse' and any(other.get('role')=='visual-number'
                     and e['x']<=other['x']+other['w']/2<=e['x']+e['w'] and e['y']<=other['y']+other['h']/2<=e['y']+e['h'] for other in spec.get('elements',[]))
                 circle=e.get('shape')=='circle' or e['key'] in {k for group in spec.get('circleGroups',[]) for k in group['keys']} or max(e['w'],e['h'])/max(1,min(e['w'],e['h']))<=1.18
-                results.append(fit({**e,'_formulaCarrier':formula_carrier,'_structuralPanel':panel,'_badge':badge,'_circle':circle}, ref, distance, strength, local_valid))
+                if family(e)=='arrow':
+                    results.append(fit_arrow_parameters(e,ref,distance,local_valid,score))
+                else:
+                    results.append(fit({**e,'_formulaCarrier':formula_carrier,'_structuralPanel':panel,'_badge':badge,'_circle':circle}, ref, distance, strength, local_valid))
             except Exception as error:
                 results.append({'key': e['key'], 'status': 'retained', 'error': str(error)[:250]})
     # Table icon rows are an explicit repeated-shape group. Share size only after each member's
