@@ -692,7 +692,7 @@ def measure_table(table, reference, mask, options, scene):
     internal_y=[top+value for value in horizontal if 5<value<bottom-top-5]
     if len(internal_y)==len(rows)-1:
         boundaries=[float(top+2),*internal_y,float(bottom-2)];confidence=max(confidence,.9)
-    if any(b-a<8 for a,b in zip(boundaries,boundaries[1:])):
+    if any(b<=a for a,b in zip(boundaries,boundaries[1:])):
         return {'tableId':table_id,'status':'partial','issues':['collapsed-row-grid'],'grid':{'boundaries':[],'verticalBoundaries':[],'confidence':0},'rows':[],'alignment':[]}
     columns = sorted([column for column in table.get("columns") or []
                       if isinstance(column, dict)], key=lambda column: float(column.get("x", 0)))
@@ -751,6 +751,14 @@ def measure_table(table, reference, mask, options, scene):
         vertical_boundaries = []
     if frame and frame.get('horizontal') and frame.get('vertical'):
         boundaries=frame['horizontal'];vertical_boundaries=frame['vertical'];confidence=.95
+    # Resolve spacing before colour sampling and cell anchors. Never straighten
+    # only the output bands while retaining the old irregular sampling slots.
+    from table_spacing import regularize_axis
+    spacing_strokes=measure_grid_strokes(reference,boundaries,vertical_boundaries)
+    raw_boundaries=list(boundaries);raw_vertical=list(vertical_boundaries)
+    boundaries,row_spacing=regularize_axis(boundaries,'hline',spacing_strokes)
+    vertical_boundaries,column_spacing=regularize_axis(vertical_boundaries,'vline',spacing_strokes)
+    grid_strokes=spacing_strokes if boundaries==raw_boundaries and vertical_boundaries==raw_vertical else measure_grid_strokes(reference,boundaries,vertical_boundaries)
     inset = float(options.get("sampleInset", 0.12))
     # Sample inside the cell columns when they are known: this keeps the frame stroke/glow and the
     # side gutters (row icons, edge bloom) out of the row colour, which the full outer width includes.
@@ -833,10 +841,11 @@ def measure_table(table, reference, mask, options, scene):
         "grid": {"boundaries": [round(value, 1) for value in boundaries],
                  "verticalBoundaries": [round(value, 1) for value in vertical_boundaries],
                  "confidence": round(confidence, 4),
+                 "spacingEvidence": {"rows":row_spacing,"columns":column_spacing},
                  "source": "cells+colour-steps" if confidence >= 0.5 else "cell-constraints"},
         "rows": measured_rows,
         "colorGroups": color_groups,
-        "strokes":measure_grid_strokes(reference,boundaries,vertical_boundaries),
+        "strokes":grid_strokes,
         "alignment":measure_alignment(reference,cells,rows,boundaries,vertical_boundaries,options),
         "diagnostics": {"elapsedMs": round((time.perf_counter() - started) * 1000.0, 1)},
     }

@@ -554,6 +554,16 @@ def top_bottom_evidence(edge, valid, x, y, w, h):
     return horizontal[0], horizontal[1]
 
 
+def measured_parallel_candidates(points):
+    """Each measured side supplies one slope; neither slope is averaged."""
+    points = np.asarray(points, float)
+    top, bottom = points[0, 1], points[3, 1]
+    centers = (points[:2, 0] + points[[3, 2], 0]) / 2
+    for shift in (points[3, 0] - points[0, 0], points[2, 0] - points[1, 0]):
+        yield np.array([[centers[0] - shift / 2, top], [centers[1] - shift / 2, top],
+                        [centers[1] + shift / 2, bottom], [centers[0] + shift / 2, bottom]])
+
+
 def quad_side_candidates(e, reference, distance, valid, edge, box, baseline):
     x, y, w, h = box
     top, bottom = top_bottom_evidence(edge, valid, x, y, w, h)
@@ -604,13 +614,12 @@ def quad_side_candidates(e, reference, distance, valid, edge, box, baseline):
                     if len(envelope)>=12:
                         edge=np.asarray(envelope,float);slopes=[np.polyfit(edge[:,0],edge[:,i],1) for i in (1,2)]
                         if slopes[0][0]*slopes[1][0]>0 and abs(slopes[0][0]-slopes[1][0])*bh<4:
-                            slope=sum(s[0] for s in slopes)/2;mid=by+bh/2
-                            centers=[float(np.median(edge[:,i]-slope*(edge[:,0]-mid))) for i in (1,2)]
                             lo_y,hi_y=float(by),float(by+bh-1)
-                            poly=np.array([[centers[0]+slope*(lo_y-mid),lo_y],[centers[1]+slope*(lo_y-mid),lo_y],
-                                [centers[1]+slope*(hi_y-mid),hi_y],[centers[0]+slope*(hi_y-mid),hi_y]])+[left,top_roi]
-                            pm=score(poly,distance,valid)
-                            if pm and pm['support']>=.85 and pm['p95']<=3:candidates.append(({**pm,'cost':pm['cost']-.3},poly))
+                            measured=np.array([[np.polyval(slopes[0],lo_y),lo_y],[np.polyval(slopes[1],lo_y),lo_y],
+                                [np.polyval(slopes[1],hi_y),hi_y],[np.polyval(slopes[0],hi_y),hi_y]])+[left,top_roi]
+                            for poly in measured_parallel_candidates(measured):
+                                pm=score(poly,distance,valid)
+                                if pm and pm['support']>=.85 and pm['p95']<=3:candidates.append(({**pm,'cost':pm['cost']-.3},poly))
                 polygon=cv2.approxPolyDP(cv2.convexHull(contour),.035*cv2.arcLength(contour,True),True)[:,0,:].astype(float)+[left,top_roi]
                 if len(polygon)!=4:continue
                 order=np.argsort(polygon[:,1]);upper=polygon[order[:2]][np.argsort(polygon[order[:2],0])]
@@ -665,11 +674,10 @@ def quad_side_candidates(e, reference, distance, valid, edge, box, baseline):
             # independently drifting endpoints when the full parallel contour fits.
             dl=candidate[3,0]-candidate[0,0];dr=candidate[2,0]-candidate[1,0]
             if dl*dr>0 and abs(dl-dr)<=max(5,.4*max(abs(dl),abs(dr))):
-                shift=(dl+dr)/2;centers=(candidate[:2,0]+candidate[[3,2],0])/2
-                parallel=np.array([[centers[0]-shift/2,top],[centers[1]-shift/2,top],[centers[1]+shift/2,bottom],[centers[0]+shift/2,bottom]])
-                pm=score(parallel,distance,valid)
-                if pm and pm['support']>=observed['support']-.04 and pm['cost']<=observed['cost']+.25:
-                    candidates.append(({**pm,'cost':pm['cost']-.15},parallel))
+                for parallel in measured_parallel_candidates(candidate):
+                    pm=score(parallel,distance,valid)
+                    if pm and pm['support']>=observed['support']-.04 and pm['cost']<=observed['cost']+.25:
+                        candidates.append(({**pm,'cost':pm['cost']-.15},parallel))
             candidates.append((observed, candidate))
     visible = [item for item in candidates if item[0] and item[0]['support'] >= .6
                and item[1][1,0]>item[1][0,0]+1 and item[1][2,0]>item[1][3,0]+1
