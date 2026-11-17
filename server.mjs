@@ -82,6 +82,7 @@ import {createProjectEvents} from './lib/project-events.mjs';
 import {acquireDataLease} from './lib/data-lease.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url)), data=path.resolve(root,process.env.PPT_AGENT_DATA||'data'), port=Number(process.env.PORT||4357);
+const appVersion=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).version;
 fs.mkdirSync(data,{recursive:true});
 try{await acquireDataLease(data);}catch(error){console.error(error.message);process.exit(1);}
 const projects=new Map(), tasks=new Map();
@@ -505,7 +506,7 @@ const server=http.createServer(async(req,res)=>{
       const rawMaterial=parts[0]==='api'&&parts[1]==='projects'&&parts.length===4&&parts[3]==='materials'&&req.headers['content-type']==='application/octet-stream';
       if(!rawMaterial&&!rawPackage&&!req.headers['content-type']?.startsWith('application/json')) return json(res,415,{error:'仅接受 JSON 或材料文件流请求'});
     }
-    if(url.pathname==='/api/health') return json(res,200,{ok:true,mode:'local-native-layout',version:'0.1.0',imageRequestTimeoutMs:providerTimeoutMs('images/generations'),textRequestTimeoutMs:providerTimeoutMs('chat/completions'),previewReviewRecovery:true,textGenerationRetryLimit,titlePageOption:true,materialLimits,pageLimits,materialStreaming:true});
+    if(url.pathname==='/api/health') return json(res,200,{ok:true,mode:'local-native-layout',version:appVersion,imageRequestTimeoutMs:providerTimeoutMs('images/generations'),textRequestTimeoutMs:providerTimeoutMs('chat/completions'),previewReviewRecovery:true,textGenerationRetryLimit,titlePageOption:true,materialLimits,pageLimits,materialStreaming:true});
     if(url.pathname==='/api/workflow-library'&&req.method==='GET')return json(res,200,workflowLibrarySummary);
     if(url.pathname.startsWith('/workflow-library/')&&req.method==='GET'){
       const file=workflowFile(decodeURIComponent(url.pathname.slice('/workflow-library/'.length)));ensure(null,!!file,'规范库文件不存在');

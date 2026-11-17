@@ -1,7 +1,7 @@
 {
   "source": "pptx-workflow",
   "agentPolicyVersion": "agent-visual-v4",
-  "version": "5d70d854968ab93a",
+  "version": "5a762e181abbb0c1",
   "previousVersions": [
     "bae5344c81b0a105",
     "f1849671466acc58",
@@ -16,7 +16,8 @@
     "b0cd07a57d64ba02",
     "7c171342fa5cd2c6",
     "3b830e8f885ee2b0",
-    "a1fad553ad89d0b9"
+    "a1fad553ad89d0b9",
+    "5d70d854968ab93a"
   ],
   "copiedAt": "2026-11-09T00:05:41.036Z",
   "files": [
@@ -207,8 +208,8 @@
     },
     {
       "file": "stages/32-asset-rebuild/steps/rebuild.md",
-      "sha256": "2cab57aa7ef093039c46c7fb4814e298f6ca9d72cd2baee442d31e7dcb4ffa53",
-      "bytes": 9200
+      "sha256": "3aca1cacb2ca30bec83dc997ce275d4be383e223b565add951aa94d92ed8aaa8",
+      "bytes": 10269
     }
   ]
 }

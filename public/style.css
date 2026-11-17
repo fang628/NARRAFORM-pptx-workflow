@@ -791,13 +791,8 @@ html{scroll-padding-top:90px}
 .registered-style .style-delete{margin:10px 18px;padding:6px 12px;color:#48483f;background:#e8e6cd}.registered-style .style-delete:hover{color:#24241f;background:#fff238}
 
 #previewApprovalDialog{width:min(720px,94vw)}#previewApprovalDialog .preview-approval-issues{max-height:40vh;overflow:auto;padding:14px 14px 14px 34px;background:#ebeade;border-left:3px solid #c4b74e;font-size:13px;line-height:1.8;overflow-wrap:anywhere}#previewApprovalDialog .text-button{color:#4b4b42}#previewApprovalDialog .checkbox{margin:22px 0}.preview-accepted-issues{margin:16px 0;text-align:left}
-/* Live rebuilding and the last rendered draft use the delivery palette. */
-.rebuild-live,.candidate-download{margin:25px 0;text-align:left}
-.rebuild-live-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
-.rebuild-live-grid figure{margin:0;min-width:0;background:#d4d3cd}
-.rebuild-live-grid img{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;background:#c9c8c1}
-.rebuild-live-grid figcaption{display:grid;gap:6px;padding:12px;font-size:12px;color:#353535}
-.rebuild-live-grid figcaption span{font-size:11px;color:#666254}
+/* The last rendered draft uses the delivery palette. */
+.candidate-download{margin:25px 0;text-align:left}
 .candidate-download .download-grid{margin-bottom:0}
 .rebuild-assets{margin:25px 0;text-align:left}
 .rebuild-assets-scroll{max-height:min(620px,65vh);min-height:150px;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:10px}
@@ -846,7 +841,6 @@ html{scroll-padding-top:90px}
 .rebuild-font-list p>*{min-width:0;overflow-wrap:anywhere}
 .rebuild-font-list strong{font-weight:400;overflow-wrap:anywhere;white-space:pre-wrap}
 .rebuild-font-list span{color:#625e50}
-@media(max-width:700px){.rebuild-live-grid{grid-template-columns:1fr}}
 /* Optional speaker manuscript, visually aligned with the delivery panels. */
 .speaker-script-panel{margin:30px 0 22px;text-align:left;max-width:100%}
 .speaker-script-panel h3{margin:5px 0 0;font-size:21px}
