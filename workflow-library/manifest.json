@@ -1,7 +1,7 @@
 {
   "source": "pptx-workflow",
   "agentPolicyVersion": "agent-visual-v4",
-  "version": "a1fad553ad89d0b9",
+  "version": "5d70d854968ab93a",
   "previousVersions": [
     "bae5344c81b0a105",
     "f1849671466acc58",
@@ -15,7 +15,8 @@
     "ae4608b14e248945",
     "b0cd07a57d64ba02",
     "7c171342fa5cd2c6",
-    "3b830e8f885ee2b0"
+    "3b830e8f885ee2b0",
+    "a1fad553ad89d0b9"
   ],
   "copiedAt": "2026-11-09T00:05:41.036Z",
   "files": [
@@ -31,8 +32,8 @@
     },
     {
       "file": "shared/content-density-and-text-color.md",
-      "sha256": "d97bef26063fbd58f5d08420de30e335c31a06dbd37e2fea0bef3eeb10c11367",
-      "bytes": 6613
+      "sha256": "b1c7f92065d33e8307d8077ed038df0f8b05587654782db36a9489dc1959fb9e",
+      "bytes": 6706
     },
     {
       "file": "shared/design-principles.md",

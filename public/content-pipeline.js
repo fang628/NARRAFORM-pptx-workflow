@@ -2,7 +2,7 @@ const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt
 
 // Finished pages use the normal editable form; live progress belongs to the task list.
 export function contentPageIndices(p){
-  if(!p.contentPipeline)return (p.slides||[]).map((_,index)=>index);
+  if(!p.contentPipeline)return (p.slides||[]).flatMap((s,index)=>s.generatedChapter?[]:[index]);
   return p.contentPipeline.pages.filter(entry=>entry.slide).map(entry=>entry.index);
 }
 export function contentPipelinePanel(p){

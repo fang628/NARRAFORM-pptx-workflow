@@ -6,6 +6,7 @@ import {enterVisualStage} from './lib/content-stage.mjs';
 import {syncPageDesignText} from './lib/page-design-text.mjs';
 import {savePageContentAction,savePipelinePageContentAction} from './lib/page-content-save.mjs';
 import {contentEditorView} from './lib/content-editor-view.mjs';
+import {prepareChapterPages} from './lib/chapter-workflow.mjs';
 import {materialStructureContext} from './lib/content-evidence-scope.mjs';
 import {designEditingActive,designOutputBusy,concurrentDesignEditActions} from './public/design-editing.js';
 import {regenerateProgressSections} from './lib/progress-regeneration.mjs';
@@ -120,6 +121,7 @@ for(const p of projects.values())if(p.visualMode==='ai'&&p.selectedTheme&&!p.arc
 }
 function project(id) { const p=projects.get(id); if(!p) throw Error('项目不存在'); return p; }
 function clean(p) {
+  prepareChapterPages(p);
   const stamp=contentGenerationStamp(p),editorView=contentEditorView(p,stamp),c=credentials.get(p.id)||{};
   const {reuseCheckpoint,rebuildEditHistory,rebuildPageChanges,contentGenerationDraft,contentPipelineDraft,speakerScriptDraft,...publicProject}=p;
   return {...publicProject,materials:p.materials.map(publicMaterialRecord),...automaticModePublic(p),progressSections:progressSectionsOf(p),
@@ -231,7 +233,7 @@ function launch(p,label,fn,{onComplete,priorStage}={}) {
 async function body(req) { let size=0, chunks=[]; for await(const chunk of req) {size+=chunk.length; if(size>30_000_000) throw Error('请求超过 30 MB'); chunks.push(chunk);} try { return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}'); } catch {throw Error('请求 JSON 无效');} }
 function json(res,status,value) { res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'}); res.end(JSON.stringify(value)); }
 function imageExtension(buf) { if(buf.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) return '.png'; if(buf[0]===255&&buf[1]===216&&buf[2]===255) return '.jpg'; throw Error('仅支持有效的 PNG／JPEG 图片'); }
-function briefOf(b) { if(!b||!String(b.title||'').trim()) throw Error('请填写演示文稿主题'); if(b.pageNumbers!==undefined&&typeof b.pageNumbers!=='boolean')throw Error('页脚页码选项须为布尔值'); const n=optionalPageCount(b.pages); return {title:String(b.title).slice(0,120),audience:String(b.audience||'').slice(0,500),purpose:String(b.purpose||'').slice(0,4000),pages:n,language:String(b.language||'中文').slice(0,50),toc:n!==1&&!!b.toc,thanks:n!==1&&!!b.thanks,progress:b.progress!==false,speaker:!!b.speaker,cover:b.cover!==false}; }
+function briefOf(b) { if(!b||!String(b.title||'').trim()) throw Error('请填写演示文稿主题'); if(b.pageNumbers!==undefined&&typeof b.pageNumbers!=='boolean')throw Error('页脚页码选项须为布尔值'); const n=optionalPageCount(b.pages); return {title:String(b.title).slice(0,120),audience:String(b.audience||'').slice(0,500),purpose:String(b.purpose||'').slice(0,4000),pages:n,language:String(b.language||'中文').slice(0,50),toc:n!==1&&!!b.toc,chapterPages:!!b.chapterPages,thanks:n!==1&&!!b.thanks,progress:b.progress!==false,speaker:!!b.speaker,cover:b.cover!==false}; }
 async function drainImageQueue(p){
   if(tasks.has(p.id)||uploads.has(p.id)||credentialWrites.has(p.id)||queueDispatch.has(p.id)||projects.get(p.id)!==p||p.archivedAt)return;
   const job=p.imageTaskQueue?.find(t=>t.status==='queued');if(!job)return;

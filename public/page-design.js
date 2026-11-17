@@ -3,7 +3,7 @@ import {mathFieldMarkup,renderMathText} from './math-markup.js';
 import {renderInlineText} from './inline-text.js';
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function contentPageCountNotice(p){
-  const actual=p.contentPipeline?.contentReady??(p.slides?.length||0),expected=p.brief?.pages;
+  const actual=p.contentPipeline?.contentReady??(p.slides?.filter(s=>!s.generatedChapter).length||0),expected=p.brief?.pages;
   if(!expected)return '';
   return `<p class="subtle content-page-count" role="status">实际 ${actual} / 目标 ${h(expected)} 页（含封面、目录等）${!p.contentPipeline&&actual&&actual!==expected?' · 页数不一致，重新生成时将按目标调整':''}</p>`;
 }
