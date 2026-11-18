@@ -11,6 +11,7 @@ import json
 import os
 import re
 import sys
+from functools import lru_cache
 
 import numpy as np
 
@@ -21,6 +22,14 @@ image = None
 surface_image = None
 page_width = 1600.0
 ratio = 1.0
+
+
+@lru_cache(maxsize=4)
+def glyph_alpha(file, width, height):
+    glyph = cv2.imread(file, cv2.IMREAD_UNCHANGED)
+    if glyph is None or glyph.ndim != 3 or glyph.shape[2] != 4:
+        return None
+    return cv2.resize(glyph[:, :, 3], (width, height))
 
 # Exact roles only: substring/size fallbacks used to promote subtitles to titles.
 TITLE_ROLES = {'title'}
@@ -120,6 +129,27 @@ def to_lab(rgb):
     return cv2.cvtColor(pixel, cv2.COLOR_RGB2LAB)[0, 0].astype(np.float32)
 
 
+def robust_lab_median(values, tolerance=12.0, iterations=2):
+    """Median colour of ink-core pixels, trimmed twice so anti-aliased fringes and a
+    minority accent/decoration colour cannot pull the solid base colour away."""
+    values = np.asarray(values, np.float32).reshape(-1, 3)
+    if not len(values):
+        return None, 0.0
+    median = np.median(values, axis=0)
+    for _ in range(max(1, int(iterations))):
+        distances = np.linalg.norm(values - median, axis=1)
+        keep = distances <= tolerance
+        if int(keep.sum()) < max(8, int(len(values) * 0.35)):
+            break
+        updated = np.median(values[keep], axis=0)
+        if float(np.linalg.norm(updated - median)) < 0.5:
+            median = updated
+            break
+        median = updated
+    distances = np.linalg.norm(values - median, axis=1)
+    return median, float(np.median(distances))
+
+
 def kmeans_colours(pixels, k):
     if len(pixels) < k * 12:
         return []
@@ -161,6 +191,7 @@ def analyse_text(element):
     # A bounded badge/label lives on its carrier, not on the page surrounding
     # that carrier. Sample the local surface when its declared colour is present.
     carrier_mask=None
+    local_carrier=None
     carriers=sorted(spec.get('elements',[]) if spec else [],key=lambda c:(c.get('key')!=element.get('carrierId'),float(c.get('w',0))*float(c.get('h',0))))
     declared_carrier=next((c for c in carriers if c.get('key')==element.get('carrierId')),None)
     for carrier in carriers:
@@ -173,19 +204,21 @@ def analyse_text(element):
             candidates=lab.reshape(-1,3);candidates=candidates[np.linalg.norm(candidates-ink,axis=1)<45]
             if len(candidates)>=40:
                 background=np.median(candidates,axis=0)
+                local_carrier=carrier
                 if carrier.get('type')=='ellipse':
                     yy,xx=np.mgrid[0:patch.shape[0],0:patch.shape[1]]
                     carrier_mask=((xx/ratio+x-ox)/ow-.5)**2+((yy/ratio+y-oy)/oh-.5)**2<.44**2
                 break
         except (TypeError,ValueError):pass
     distance = np.linalg.norm(lab - background, axis=2)
+    surface_patch=None
     if surface_image is not None:
         surface=surface_image[max(0,y0):y1,max(0,x0):x1]
         if surface.shape==patch.shape:
-            surface_lab=cv2.cvtColor(surface,cv2.COLOR_BGR2LAB).astype(np.float32)
+            surface_patch=cv2.cvtColor(surface,cv2.COLOR_BGR2LAB).astype(np.float32)
             # Protect the actual fitted gradient/background at each location,
             # not a page-wide median that can mistake a blue carrier for ink.
-            distance=np.minimum(distance,np.linalg.norm(lab-surface_lab,axis=2))
+            distance=np.minimum(distance,np.linalg.norm(lab-surface_patch,axis=2))
     mask = distance > 22.0
     if declared_carrier is not None:
         palette=[declared_carrier.get('fill')]+[s.get('color') for s in (declared_carrier.get('gradient') or {}).get('stops',[])]
@@ -194,12 +227,78 @@ def analyse_text(element):
                 base=to_lab([int(str(color).lstrip('#')[i:i+2],16) for i in (0,2,4)])
                 mask &= np.linalg.norm(lab-base,axis=2)>35
             except (TypeError,ValueError):pass
+    # Pixels that belong to another object are not this text's ink: an overhanging audit
+    # box can include a neighbouring label, a bullet, a frame edge or a decoration. Those
+    # pixels used to become fake emphasis colours and pulled solid colours toward the
+    # culprit's paint, so remove them before any colour sampling.
+    def build_foreign_mask():
+        foreign = np.zeros(lab.shape[:2], bool)
+
+        def intersect(first, second):
+            return (max(0, min(first[2], second[2]) - max(first[0], second[0]))
+                    * max(0, min(first[3], second[3]) - max(first[1], second[1])))
+
+        own = (int(round(x * ratio)), int(round(y * ratio)),
+               int(round((x + w) * ratio)), int(round((y + h) * ratio)))
+        own_area = max(1, (own[2] - own[0]) * (own[3] - own[1]))
+        for other in ((spec or {}).get('elements') or []):
+            if not isinstance(other, dict) or other.get('key') == element.get('key'):
+                continue
+            if other is local_carrier or other is declared_carrier:
+                continue
+            kind = str(other.get('type') or '')
+            try:
+                ox, oy, ow, oh = [float(other.get(key, 0) or 0) for key in ('x', 'y', 'w', 'h')]
+            except (TypeError, ValueError):
+                continue
+            if ow <= 0 or oh <= 0:
+                continue
+            box = (int(round(ox * ratio)), int(round(oy * ratio)),
+                   int(round((ox + ow) * ratio)), int(round((oy + oh) * ratio)))
+            if intersect(own, box) <= 0:
+                continue
+            if kind == 'text':
+                entry = next((row for row in ((spec or {}).get('objectMasks') or [])
+                              if row.get('key') == other.get('key') and row.get('file')), None)
+                if not entry:
+                    continue
+                alpha = glyph_alpha(entry['file'], image.shape[1], image.shape[0])
+                if alpha is None:
+                    continue
+                patch_alpha = alpha[max(0, y0):y1, max(0, x0):x1]
+                if patch_alpha.shape == foreign.shape:
+                    foreign |= patch_alpha > 128
+                continue
+            # Only nearby small objects can contaminate a text box; large card/page
+            # surfaces are background, and carriers were handled above.
+            if kind not in ('shape', 'rect', 'ellipse', 'line'):
+                continue
+            box_area = (box[2] - box[0]) * (box[3] - box[1])
+            if box_area > own_area * 1.5:
+                continue
+            left = max(0, box[0] - max(0, x0))
+            top = max(0, box[1] - max(0, y0))
+            right = min(foreign.shape[1], box[2] - max(0, x0))
+            bottom = min(foreign.shape[0], box[3] - max(0, y0))
+            if right > left and bottom > top:
+                foreign[top:bottom, left:right] = True
+        return foreign
+
+    raw_mask = mask
+    foreign = build_foreign_mask()
+    foreign_reliable = True
+    if foreign.any():
+        mask = raw_mask & ~foreign
+        if int(mask.sum()) < max(40, int(raw_mask.sum() * 0.25)):
+            # The other objects' boxes cover most of this one: the audit geometry is
+            # contradictory, so do not guess a colour from that sample.
+            mask = raw_mask
+            foreign_reliable = False
     glyph_core = None
     glyph_entry=next((m for m in (spec or {}).get('objectMasks',[]) if m.get('key')==element.get('key') and m.get('file')),None)
     if glyph_entry:
-        glyph=cv2.imread(glyph_entry['file'],cv2.IMREAD_UNCHANGED)
-        if glyph is not None and glyph.ndim==3 and glyph.shape[2]==4:
-            alpha=cv2.resize(glyph[:,:,3],(image.shape[1],image.shape[0]))
+        alpha=glyph_alpha(glyph_entry['file'],image.shape[1],image.shape[0])
+        if alpha is not None:
             glyph_core=alpha[max(0,y0):y1,max(0,x0):x1]>180
             # A predicted mask may have different wrapping/font metrics. Keep it
             # as supporting evidence; clipping to it would erase real accents.
@@ -213,10 +312,54 @@ def analyse_text(element):
         if ch>size*1.8 or cw>size*2.5 or area>size*size*1.4 or (max(cw,ch)>size*.9 and min(cw,ch)<2):
             mask[labels==label]=False
     if mask.sum() < 40:
-        return None
+        if raw_mask.sum() >= 40:
+            # Cleanup/foreign subtraction left too little ink to trust; keep the audit colour.
+            mask = raw_mask
+            foreign_reliable = False
+        else:
+            return None
     background_lab = background
     rows = np.where(mask.any(axis=1))[0]
     text_pixels = lab[mask]
+    glyph_usable = False
+    if glyph_core is not None and glyph_core.shape == mask.shape:
+        predicted = int((glyph_core & mask).sum())
+        # Predicted masks can be offset by later position fitting; only use them when they
+        # clearly coincide with the measured ink, otherwise they would bias the sample.
+        if (glyph_core.sum() >= 40 and predicted >= max(30, int(0.60 * glyph_core.sum()))
+                and predicted >= int(0.45 * max(1, int(mask.sum())))):
+            glyph_usable = True
+    surface_strength = (np.linalg.norm(lab - surface_patch, axis=2)
+                        if surface_patch is not None else distance)
+
+    def local_solid_sample():
+        """Solid ink colour from high-contrast glyph-core pixels only.
+
+        Mask pixels include anti-aliased fringes, and contaminated boxes include other
+        objects' paint. Neither belongs to a single-colour glyph fill, so the sample uses
+        the ink core (measured against the rendered surface/background when available),
+        trims twice and records background/dispersion as conservative evidence. The
+        predicted glyph mask is deliberately not used here: position fitting can offset it.
+        """
+        if int(mask.sum()) < 40:
+            return None
+        values = surface_strength[mask]
+        cutoff = max(24.0, float(np.percentile(values, 70)))
+        region = mask & (surface_strength >= cutoff)
+        if int(region.sum()) < 20:
+            region = mask
+        color, dispersion = robust_lab_median(lab[region])
+        if color is None:
+            return None
+        local_background = background_lab
+        if surface_patch is not None:
+            values = surface_patch[region]
+            if len(values) >= 20:
+                local_background = np.median(values, axis=0)
+        return {'lab': color, 'region': region, 'dispersion': dispersion,
+                'localBackground': local_background, 'ink': int(mask.sum()),
+                'core': int(region.sum())}
+
     # Main title only: explicit role/node/part identity. Subtitle/heading/table-header must not be
     # promoted by 'title' substrings, key naming or a large font size.
     title = is_title_element(element)
@@ -311,21 +454,34 @@ def analyse_text(element):
     # Italic/bold heuristics only make sense for body/table text; calligraphic titles keep the
     # project-level title style and must not be judged as bold/italic from stroke thickness.
     style = style_features() if not title and spec.get('measureTypography',True) else None
+    if not foreign_reliable:
+        # Another object's box covers most of this text box: the audit geometry is
+        # contradictory, so a colour guessed from the remaining pixels is not trustworthy.
+        return {'key': element.get('key'), 'kind': 'title' if title else 'body',
+                'color': element.get('color'), 'role': role_of(element), 'gradient': None,
+                'colorRuns': [], 'confident': False, 'colorConfident': False, 'style': style}
 
-    def contrast_ok(colour_lab):
-        delta_l = abs(float(colour_lab[0]) - float(background_lab[0]))
-        chroma = float(np.linalg.norm(colour_lab[1:] - background_lab[1:]))
+    def contrast_ok(colour_lab, reference_lab=None):
+        reference = background_lab if reference_lab is None else reference_lab
+        delta_l = abs(float(colour_lab[0]) - float(reference[0]))
+        chroma = float(np.linalg.norm(colour_lab[1:] - reference[1:]))
         return delta_l >= 24.0 or chroma >= 18.0
 
+    sample = local_solid_sample()
     if title:
-        # per-row median text colour, then linear fit over rows -> vertical gradient only
+        # per-row median text colour, then linear fit over rows -> vertical gradient only.
+        # Prefer glyph-core pixels so anti-aliasing cannot bend either gradient stop.
+        core_region = sample['region'] if sample else None
         row_colours = []
         for row in rows:
-            values = lab[row][mask[row]]
+            if core_region is not None and int(core_region[row].sum()) >= 2:
+                values = lab[row][core_region[row]]
+            else:
+                values = lab[row][mask[row]]
             if len(values) >= 3:
                 row_colours.append((row, np.median(values, axis=0)))
         gradient = None
-        solid = to_hex(np.median(text_pixels, axis=0)) if len(text_pixels) else None
+        solid = to_hex(sample['lab']) if sample else (to_hex(np.median(text_pixels, axis=0)) if len(text_pixels) else None)
         if len(row_colours) >= 8:
             ys = np.asarray([item[0] for item in row_colours], np.float32)
             values = np.asarray([item[1] for item in row_colours], np.float32)
@@ -348,17 +504,18 @@ def analyse_text(element):
                             'delta': round(total, 1)}
                 solid = to_hex(top)
         confident = True
+        local_background = sample['localBackground'] if sample else None
         if solid:
             try:
                 solid_lab = to_lab([int(solid[i:i + 2], 16) for i in (0, 2, 4)])
-                confident = contrast_ok(solid_lab)
+                confident = contrast_ok(solid_lab, local_background)
             except Exception:
                 confident = True
         if gradient:
             for stop in gradient.get('stops', []):
                 try:
                     stop_lab = to_lab([int(stop['color'][i:i + 2], 16) for i in (0, 2, 4)])
-                    if not contrast_ok(stop_lab):
+                    if not contrast_ok(stop_lab, local_background):
                         confident = False
                 except Exception:
                     pass
@@ -400,17 +557,28 @@ def analyse_text(element):
     if not clusters:
         return None
     main = clusters[0][0]
-    try:
-        # Refine the solid colour on the glyph core only: the cluster centre includes
-        # anti-aliased edge pixels and would read white text as light grey.
-        core = text_pixels[np.linalg.norm(text_pixels - np.asarray(main, np.float32), axis=1) <= 14.0]
-        if len(core) >= 20:
-            main = np.median(core, axis=0)
-    except Exception:
-        pass
+    if sample is not None:
+        main = np.asarray(sample['lab'], np.float32)
+    else:
+        try:
+            # Refine the solid colour on the glyph core only: the cluster centre includes
+            # anti-aliased edge pixels and would read white text as light grey.
+            core = text_pixels[np.linalg.norm(text_pixels - np.asarray(main, np.float32), axis=1) <= 14.0]
+            if len(core) >= 20:
+                main = np.median(core, axis=0)
+        except Exception:
+            pass
+    # A single solid ink fill has a tight core. Wide Lab spread or a tiny core means the
+    # box is contaminated (neighbouring text/decoration or mixed glyph paint), so keep the
+    # audit colour instead of inventing a colour.
+    if sample is not None and (sample['dispersion'] > 22.0
+                               or sample['core'] < max(20, int(0.10 * sample['ink']))):
+        return {'key': element.get('key'), 'kind': 'body', 'color': element.get('color'),
+                'role': role_of(element), 'gradient': None, 'colorRuns': [],
+                'confident': False, 'colorConfident': False, 'style': style}
     try:
         main_lab = np.asarray(main, np.float32)
-        if not contrast_ok(main_lab):
+        if not contrast_ok(main_lab, sample['localBackground'] if sample else None):
             return {'key': element.get('key'), 'kind': 'body', 'color': element.get('color'),
                     'role': role_of(element), 'gradient': None, 'colorRuns': [], 'confident': False,
                     'colorConfident': False, 'style': style}
@@ -425,6 +593,7 @@ def analyse_text(element):
         pass
     runs = []
     accent_masks = {}
+    accent_centres = {}
     total = sum(count for _, count in clusters)
     # Evidence gate: a different-coloured run is only used when the evidence is obvious — it must
     # be a large enough share, differ in hue/saturation (not just brightness) and be far away from
@@ -440,6 +609,14 @@ def analyse_text(element):
     debug = bool(os.environ.get('TEXTCOLOR_DEBUG'))
     for center, count in clusters[1:]:
         share = count / max(1, total)
+        # Anti-aliased fringe pixels sit between the emphasis ink and its background and pull
+        # the k-means centre toward the background. Re-measure the run colour on the tight
+        # core around the cluster so real accents keep their designed colour.
+        near_pixels = (np.linalg.norm(lab - center, axis=2) < 18.0) & mask
+        if int(near_pixels.sum()) >= 20:
+            refined, _ = robust_lab_median(lab[near_pixels])
+            if refined is not None:
+                center = refined
         if debug:
             reasons = []
             if share < 0.02: reasons.append('share<2%%')
@@ -494,7 +671,15 @@ def analyse_text(element):
             if accent_core>=3 and accent_core>=.70*max(1,total_core):supported[:,column]|=extra[:,column]
         if int(supported.sum())<max(8,int(extra.sum()*.40)):
             continue
+        # A real emphasis colour sits on this text's glyphs. When a predicted glyph mask is
+        # available and trustworthy, reject "accents" that live mostly outside it (bullets,
+        # frame edges, neighbouring labels caught by an overhanging audit box).
+        if glyph_usable:
+            overlap = float((supported & glyph_core).sum()) / max(1, int(supported.sum()))
+            if overlap < 0.45:
+                continue
         accent_masks[to_hex(center)] = supported
+        accent_centres[to_hex(center)] = center
         channel_rows = []
         for row in rows:
             values = lab[row][mask[row]]
@@ -537,12 +722,13 @@ def analyse_text(element):
     centres = [(cluster[0], cluster) for cluster in clusters]
     if runs and line_bands:
         for run in runs:
-            target = None
-            # find the cluster centre whose hex equals the run colour
-            for centre, _cluster in centres:
-                if to_hex(centre).lower() == str(run['color']).lower():
-                    target = centre
-                    break
+            target = accent_centres.get(str(run['color']).lower())
+            if target is None:
+                # find the cluster centre whose hex equals the run colour
+                for centre, _cluster in centres:
+                    if to_hex(centre).lower() == str(run['color']).lower():
+                        target = centre
+                        break
             if target is None:
                 continue
             spans = []
@@ -590,8 +776,17 @@ def analyse_text(element):
             'colorRuns': runs, 'confident': True, 'colorConfident': True, 'style': style}
 
 
+# OpenCV converts 8-bit RGB to 8-bit Lab: L is 0..255 (not 0..100) and a/b are
+# offset by 128. Keep the snap thresholds at the actual near-black/near-white ends
+# of that scale (L* ~= 3.1/98.7). The previous 92/14 thresholds treated any grey
+# lighter than ~36% lightness as white and lifted mid greys to #FFFFFF.
+EXTREME_WHITE_LIGHTNESS = 252.0
+EXTREME_BLACK_LIGHTNESS = 8.0
+EXTREME_NEUTRAL_CHROMA = 4.0
+
+
 def snap_extreme(value):
-    """Near-white becomes pure white, near-black becomes pure black (neutral-only snap)."""
+    """Only true near-white/near-black neutral fills become pure #FFFFFF/#000000."""
     text = str(value or '').lstrip('#')
     if len(text) != 6:
         return value
@@ -601,9 +796,9 @@ def snap_extreme(value):
         return value
     lightness = float(lab[0])
     chroma = float(np.hypot(float(lab[1]) - 128.0, float(lab[2]) - 128.0))
-    if lightness >= 92.0 and chroma <= 14.0:
+    if lightness >= EXTREME_WHITE_LIGHTNESS and chroma <= EXTREME_NEUTRAL_CHROMA:
         return 'FFFFFF'
-    if lightness <= 14.0 and chroma <= 14.0:
+    if lightness <= EXTREME_BLACK_LIGHTNESS and chroma <= EXTREME_NEUTRAL_CHROMA:
         return '000000'
     return text.upper()
 
@@ -621,6 +816,11 @@ def main():
     ratio = image.shape[1] / page_width
     results = []
     targets=set(spec['targetKeys']) if spec.get('targetKeys') is not None else None
+    size_keys = set(spec.get('uniformSizeKeys') or [])
+    if size_keys:
+        from uniform_text_size import measure_uniform_text_size
+        logical_image = cv2.resize(image, (1600, 900), interpolation=cv2.INTER_AREA)
+        masks = {m['key']: m.get('file') for m in spec.get('objectMasks', [])}
     for element in spec.get('elements') or []:
         if targets is not None and element.get('key') not in targets:continue
         if element.get('type') != 'text':
@@ -629,6 +829,15 @@ def main():
             row = analyse_text(element)
         except Exception as error:
             row = {'key': element.get('key'), 'error': str(error)[:200]}
+        key = element.get('key')
+        if key in size_keys and masks.get(key):
+            row = row or {'key': key, 'confident': False}
+            try:
+                measurement = measure_uniform_text_size(element, masks[key], logical_image, element['x'], element['y'])
+                if measurement:
+                    row['uniformTextSize'] = measurement
+            except (ValueError, OSError, cv2.error) as error:
+                row['sizeError'] = str(error)[:200]
         if row:
             # Audit weight/slant is explicit evidence; weak stroke statistics must not clear it.
             row['auditStyle'] = {'bold': element.get('bold') is True, 'italic': element.get('italic') is True}

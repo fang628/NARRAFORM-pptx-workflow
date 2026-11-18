@@ -31,6 +31,7 @@ Sampling contract (05 paint quality):
 Geometry is owned by S3: this stage only reports paint properties.
 """
 import json
+from functools import lru_cache
 import sys
 import time
 
@@ -169,6 +170,7 @@ def legacy_excluded(element):
 
 
 def main():
+    load_underlay = lru_cache(maxsize=3)(_load_rgb)
     started_all = time.monotonic()
     spec = json.load(open(sys.argv[1], encoding='utf-8'))
     out_path = sys.argv[2]
@@ -264,7 +266,7 @@ def main():
             if front_alpha is not None:visible &= front_alpha[y0:y1,x0:x1]<8
             pixels=patch[visible]
             lower_file=underlays.get(key)
-            lower=_load_rgb(lower_file,(page_height,page_width)) if lower_file else page_background
+            lower=load_underlay(lower_file,(page_height,page_width)) if lower_file else page_background
             if lower is not None and unsupported_borderless_fill(element,pixels,lower[y0:y1,x0:x1][visible]):
                 return {'key':key,'status':'uncertain-kept','properties':{'parameterEvidence':{'fill':{
                     'confidence':0,'independent':True,'source':'borderless-fill-matches-lower'}}},'diagnostics':detail}
@@ -304,7 +306,7 @@ def main():
         underlay_source = None
         file = underlays.get(key) if isinstance(key, str) else None
         if file:
-            underlay = _load_rgb(file, (page_height, page_width))
+            underlay = load_underlay(file, (page_height, page_width))
             if underlay is not None:
                 underlay_source = 'underlay'
         if underlay is None and not fill_translucent:

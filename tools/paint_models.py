@@ -248,6 +248,7 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
     if variance<12:return reject('uniform-fill-use-solid-model')
     if max(np.ptp(xx)/max(1,element['w']),np.ptp(yy)/max(1,element['h']))<.35:return reject('insufficient-spatial-coverage')
     train,test,holdout_layout=spatial_holdout(xx,yy);candidates=[]
+    observed_train=observed[train]
     # Stop-count freedom must be supported by the object's actual pixel size: a 34 px icon
     # cannot resolve five independently measured stops, and per-instance noise then produces
     # different models for equal peers. Larger carriers keep the calibrated 5-stop range.
@@ -267,19 +268,23 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
         physical=max(1.,min_dimension)
         if len(knots)>2 and np.min(np.diff(knots))*physical<5:return None
         matrix=_spline(t,knots)
-        if np.linalg.matrix_rank(matrix[train])<len(knots):return None
-        effective=effective_alpha(t) if composited else np.ones(len(t))
-        design=matrix*effective[:,None]
-        offset=(1-effective[:,None])*background if composited else np.zeros_like(observed)
-        target=observed-offset
-        coef=np.linalg.lstsq(design[train],target[train],rcond=None)[0]
+        training_design=matrix[train]
+        if np.linalg.matrix_rank(training_design)<len(knots):return None
+        if composited:
+            effective=effective_alpha(t)[:,None]
+            offset=(1-effective)*background
+            training_design=training_design*effective[train]
+            training_target=(observed-offset)[train]
+        else:
+            training_target=observed_train
+        coef=np.linalg.lstsq(training_design,training_target,rcond=None)[0]
         for _ in range(4):
-            residual=np.mean(abs(design[train]@coef-target[train]),axis=1);scale=max(2,float(np.median(residual))*1.5);weights=np.minimum(1,scale/np.maximum(.1,residual))**2
-            coef=np.linalg.lstsq(design[train]*weights[:,None],target[train]*weights[:,None],rcond=None)[0]
+            residual=np.mean(abs(training_design@coef-training_target),axis=1);scale=max(2,float(np.median(residual))*1.5);weights=np.minimum(1,scale/np.maximum(.1,residual))**2
+            coef=np.linalg.lstsq(training_design*weights[:,None],training_target*weights[:,None],rcond=None)[0]
         if coef.min() < -18 or coef.max()>273:return None
         colors=np.clip(coef,0,255);raw=matrix@colors
         # Error evaluation always happens against the observed composite.
-        predicted=effective[:,None]*raw+offset
+        predicted=effective*raw+offset if composited else raw
         res=np.mean(abs(predicted-observed),axis=1)
         error=float(np.mean(res[test]));robust=float(np.mean(np.sort(res[test])[:max(1,int(test.sum()*.85))]));r2=1-float(np.mean((predicted[test]-observed[test])**2))/max(1,variance)
         slopes=np.diff(colors,axis=0)/np.diff(knots)[:,None]/physical

@@ -121,6 +121,13 @@ def terminal(ref,bg,tip,inward,width,kind,hidden):
     visible=inside.copy();visible[inside]&=~hidden[q[:,:,1][inside],q[:,:,0][inside]];hit &= visible
     perimeter=(abs(a)>extent-1)|(abs(b)>extent-1)
     if not (perimeter&visible).any() or np.median(delta[perimeter&visible])>12:return {},{'type':kind,'status':'unobservable','reason':'terminal-underlay-mismatch'}
+    # Nearby labels may have the same colour. Only the component meeting the
+    # axis at the tip can supply this terminal's wings. Allow subpixel rounding.
+    _,labels=cv2.connectedComponents(hit.astype(np.uint8),connectivity=8)
+    core=hit&(abs(b)<=1.5)&(abs(a)<=max(2.,min(4.,width*.6)))
+    candidates=np.unique(labels[core])
+    if len(candidates)!=1:return {},{'type':kind,'status':'unobservable','reason':'ambiguous-terminal-component'}
+    hit=labels==candidates[0]
     # Terminal wings, not the attached shaft, determine marker dimensions.
     wings=hit&(abs(b)>width*.85)&(abs(a)<extent*.75)
     if wings.sum()<8:return {},{'type':kind,'status':'unobservable','reason':'no-terminal-wings'}
@@ -198,7 +205,251 @@ def dash_profile(points,observed_valid,width):
     return 'sysDot' if np.median(sizes)<width*1.6 else 'dash'
 
 
+AXIS_LINE_MIN_LENGTH=16.
+AXIS_LINE_MIN_PAD=60.
+AXIS_LINE_MAX_PAD=200.
+AXIS_LINE_COLOR_DISTANCE=95.
+AXIS_LINE_HUE_DEGREES=20.
+AXIS_LINE_MIN_CONFIDENCE=.85
+AXIS_LINE_DIRECTIONAL=('triangle','stealth','arrow','diamond')
+AXIS_LINE_MAX_DISPLACEMENT=180.
+
+
+def axis_line_descriptor(e):
+    """A declared straight axial span is the only instance a repeated-line group may locate."""
+    if e.get('type')!='line' or e.get('managed') or e.get('tableId') or e.get('tableRole'):return None
+    if e.get('dashType','solid')!='solid':return None
+    if any(k in (e.get('keepParameters') or []) for k in ('position','x','y','geometry','linePath')):return None
+    line=e.get('linePath') or {}
+    if line.get('nodes'):return None
+    commands=line.get('commands') or []
+    if len(commands)!=2 or commands[0].get('op')!='M' or commands[1].get('op')!='L':return None
+    try:
+        w,h=float(e.get('w') or 0),float(e.get('h') or 0);stroke=float(e.get('strokeWidth') or 1)
+        opacity=float(e.get('opacity',1))*float(e.get('colorOpacity',1))
+        first=[float(v) for v in commands[0]['points'][0]];last=[float(v) for v in commands[1]['points'][0]]
+    except (TypeError,ValueError,KeyError,IndexError):return None
+    # Only a truly horizontal or vertical single-span path is an axis instance; bent or
+    # slanted declared paths are never reset by repeated-line registration.
+    dx=(last[0]-first[0])*w;dy=(last[1]-first[1])*h
+    if abs(dy)<=max(1.5,.02*abs(dx)) and abs(dx)>=AXIS_LINE_MIN_LENGTH:axis=0;length=abs(dx)
+    elif abs(dx)<=max(1.5,.02*abs(dy)) and abs(dy)>=AXIS_LINE_MIN_LENGTH:axis=1;length=abs(dy)
+    else:return None
+    raw=str(e.get('color') or '').lstrip('#').upper()
+    if len(raw)!=6:return None
+    try:rgb=np.array([int(raw[i:i+2],16) for i in (0,2,4)],float)
+    except ValueError:return None
+    return {'axis':axis,'length':length,'rgb':rgb,'strokeWidth':stroke,'opacity':round(opacity,3),
+            'arrow':(e.get('beginArrowType') or 'none',e.get('endArrowType') or 'none'),
+            'state':str(e.get('visualState',e.get('emphasis','normal')))}
+
+
+def axis_line_groups(elements):
+    """Explicit repetition: same declared appearance, aligned row or column, distinct order."""
+    buckets={}
+    for e in elements:
+        d=axis_line_descriptor(e)
+        if d is None:continue
+        buckets.setdefault((d['axis'],d['rgb'].tobytes(),round(d['strokeWidth'],2),d['arrow'],d['state'],d['opacity']),[]).append((e,d))
+    groups=[]
+    for items in buckets.values():
+        if len(items)<2:continue
+        axis=items[0][1]['axis'];rows=[];usable=True
+        for e,d in items:
+            try:ex,ey,ew,eh=float(e['x']),float(e['y']),float(e['w']),float(e['h'])
+            except (KeyError,TypeError,ValueError):usable=False;break
+            if axis==0:along,cross=ex+ew/2,ey+eh/2
+            else:along,cross=ey+eh/2,ex+ew/2
+            rows.append({'element':e,'descriptor':d,'along':along,'cross':cross})
+        if not usable or len(rows)!=len(items):continue
+        length=float(np.median([r['descriptor']['length'] for r in rows]));tolerance=max(4.,.15*length)
+        if min(r['descriptor']['length'] for r in rows)<.8*length:continue
+        crosses=[r['cross'] for r in rows];along_coords=[r['along'] for r in rows]
+        if max(crosses)-min(crosses)<=tolerance and max(along_coords)-min(along_coords)>max(8.,length*.5):ordering='along'
+        elif max(along_coords)-min(along_coords)<=tolerance and max(crosses)-min(crosses)>max(8.,length*.5):ordering='cross'
+        else:continue
+        rows.sort(key=lambda r:(r[ordering],str(r['element'].get('key'))))
+        coords=[r[ordering] for r in rows];gaps=[coords[i+1]-coords[i] for i in range(len(coords)-1)]
+        if not gaps:continue
+        median_gap=float(np.median(gaps))
+        if median_gap<max(8.,length*.5) or min(gaps)<max(6.,median_gap*.45):continue
+        groups.append({'items':rows,'axis':axis,'ordering':ordering,'length':length,'medianGap':median_gap})
+    groups.sort(key=lambda g:(-len(g['items']),g['axis'],g['ordering'],-g['medianGap']))
+    return groups
+
+
+def locate_axis_group(reference,hidden,group):
+    """Exact cardinality plus preserved order assigns one preview component per declared line."""
+    items=group['items'];axis=group['axis'];ordering=group['ordering']
+    length=float(group['length']);pad=min(AXIS_LINE_MAX_PAD,max(AXIS_LINE_MIN_PAD,.7*float(group['medianGap'])))
+    centres=[]
+    for r in items:
+        e=r['element']
+        try:centres.append((float(e['x'])+float(e['w'])/2,float(e['y'])+float(e['h'])/2))
+        except (KeyError,TypeError,ValueError):return None
+    x0=max(0,int(np.floor(min(c[0] for c in centres)-pad)));x1=min(1600,int(np.ceil(max(c[0] for c in centres)+pad)))
+    y0=max(0,int(np.floor(min(c[1] for c in centres)-pad)));y1=min(900,int(np.ceil(max(c[1] for c in centres)+pad)))
+    crop=reference[y0:y1,x0:x1].astype(float)
+    if crop.size==0:return None
+    rgb=np.asarray(items[0]['descriptor']['rgb'],float)
+    delta=np.linalg.norm(crop-rgb[None,None,:],axis=2)
+    hsv=cv2.cvtColor(crop.astype(np.uint8),cv2.COLOR_RGB2HSV)
+    prior=cv2.cvtColor(np.rint(rgb).astype(np.uint8).reshape(1,1,3),cv2.COLOR_RGB2HSV)[0,0]
+    # Measure the true preview ink: the declared colour scopes hue, while brightness must stay
+    # near the declared paint. Deeper same-hue text (headings) never becomes a line candidate.
+    value=max(1.,float(rgb.max()));low_value=.85*value;high_value=min(255.,1.3*value)
+    eligible=(delta<AXIS_LINE_COLOR_DISTANCE)&(hsv[:,:,2]>=low_value)&(hsv[:,:,2]<=high_value)
+    if float(prior[1])>110:
+        dh=np.abs(hsv[:,:,0].astype(float)-float(prior[0]));dh=np.minimum(dh,180-dh)
+        eligible|=(dh<AXIS_LINE_HUE_DEGREES)&(hsv[:,:,1]>130)&(hsv[:,:,2]>=low_value)&(hsv[:,:,2]<=high_value)&(delta<150)
+    count,labels,stats,_=cv2.connectedComponentsWithStats(eligible.astype(np.uint8),8)
+    median_stroke=float(np.median([r['descriptor']['strokeWidth'] for r in items]))
+    limit=max(8.,2.*median_stroke+5.);min_thickness=max(1.,.4*median_stroke)
+    # One-directional arrows must show a taper before counting: the tip side is derived from the
+    # declared marker so a real extra arrow still rejects, while text strokes never pass counting.
+    arrow=(items[0]['element'].get('beginArrowType') or 'none',items[0]['element'].get('endArrowType') or 'none')
+    begin_directional=arrow[0] in AXIS_LINE_DIRECTIONAL;end_directional=arrow[1] in AXIS_LINE_DIRECTIONAL
+    directional=begin_directional!=end_directional
+    marker_highs=set()
+    if directional:
+        position=0 if axis==0 else 1
+        for r in items:
+            commands=(r['element'].get('linePath') or {}).get('commands') or []
+            if len(commands)<2:marker_highs=set();break
+            end_high=float(commands[-1]['points'][-1][position])>=float(commands[0]['points'][0][position])
+            marker_highs.add(end_high if end_directional else not end_high)
+    marker_high=next(iter(marker_highs)) if len(marker_highs)==1 else None
+    candidates=[]
+    for index in range(1,count):
+        x,y,w,h,area=[int(v) for v in stats[index]]
+        if area<12:continue
+        if x<=0 or y<=0 or x+w>=eligible.shape[1] or y+h>=eligible.shape[0]:continue
+        # Early axial length, narrowness and thickness filtering keep the scan local.
+        if axis==0:along_lo,along_ext,cross_ext=x,w,h
+        else:along_lo,along_ext,cross_ext=y,h,w
+        if along_ext<max(AXIS_LINE_MIN_LENGTH,.55*length) or along_ext>1.5*length:continue
+        if along_ext<1.25*max(1.,cross_ext):continue
+        if cross_ext<min_thickness:continue
+        local=labels[y:y+h,x:x+w]==index;ys,xs=np.nonzero(local)
+        if ys.size<8:continue
+        if axis==0:
+            counts=local.sum(axis=0)
+            weights=np.bincount(xs,minlength=w).astype(float);sums=np.bincount(xs,weights=ys.astype(float),minlength=w)
+            cross=float(np.median(sums[weights>0]/weights[weights>0]))+y+y0+.5
+        else:
+            counts=local.sum(axis=1)
+            weights=np.bincount(ys,minlength=h).astype(float);sums=np.bincount(ys,weights=xs.astype(float),minlength=h)
+            cross=float(np.median(sums[weights>0]/weights[weights>0]))+x+x0+.5
+        counts=counts[counts>0].astype(float)
+        if float(np.median(counts))<min_thickness:continue
+        if directional:
+            # Shaft width, expanded arrowhead and taper direction are judged before cardinality.
+            span=max(2,int(round(counts.size*.12)))
+            low=float(np.mean(counts[:span]));high=float(np.mean(counts[-span:]))
+            shaft=max(low,high);head=float(np.max(counts))
+            if shaft<min_thickness:continue
+            if head<max(shaft*1.5,shaft+4.):continue
+            if abs(low-high)<max(2.,.3*shaft):continue
+            if marker_high is not None and (high<low)!=marker_high:continue
+        thin=float((counts<=limit).mean())
+        if thin<.6:continue
+        span=max(2,int(round(counts.size*.12)))
+        along_start=along_lo+(x0 if axis==0 else y0)
+        candidates.append({'box':[x+x0,y+y0,w,h],'along':along_start,'alongExt':along_ext,
+            'cross':cross,'order':(along_start+along_ext/2.) if ordering=='along' else cross,
+            'thin':thin,'first':float(np.mean(counts[:span])),'last':float(np.mean(counts[-span:])),
+            'color':np.median(crop[y:y+h,x:x+w][local],axis=0)})
+    if len(candidates)!=len(items):return None
+    members=sorted(items,key=lambda r:r[ordering]);registered=[float(r[ordering]) for r in members]
+    gaps=[registered[i+1]-registered[i] for i in range(len(registered)-1)]
+    if not gaps or min(gaps)<=0:return None
+    candidates.sort(key=lambda c:c['order']);observed=[float(c['order']) for c in candidates]
+    for i in range(len(observed)-1):
+        if observed[i+1]-observed[i]<max(6.,min(gaps)*.45):return None
+    max_displacement=max(AXIS_LINE_MAX_DISPLACEMENT,1.1*length)
+    for r,c in zip(members,candidates):
+        e=r['element']
+        try:ex,ey,ew,eh=float(e['x']),float(e['y']),float(e['w']),float(e['h'])
+        except (KeyError,TypeError,ValueError):return None
+        if axis==0:along_delta=float(c['along'])-ex;cross_delta=float(c['cross'])-(ey+eh/2)
+        else:along_delta=float(c['along'])-ey;cross_delta=float(c['cross'])-(ex+ew/2)
+        if float(np.hypot(along_delta,cross_delta))>max_displacement:return None
+        if abs(float(c['order'])-float(r[ordering]))>pad+8:return None
+    colours=[np.asarray(c['color'],float) for c in candidates]
+    if max(float(np.linalg.norm(a-b)) for a in colours for b in colours)>40:return None
+    for r,c in zip(members,candidates):
+        e=r['element'];begin=e.get('beginArrowType') or 'none';end=e.get('endArrowType') or 'none'
+        begin_directional=begin in AXIS_LINE_DIRECTIONAL;end_directional=end in AXIS_LINE_DIRECTIONAL
+        if begin_directional==end_directional:continue
+        commands=(e.get('linePath') or {}).get('commands') or []
+        if len(commands)<2:return None
+        position=0 if axis==0 else 1
+        end_high=float(commands[-1]['points'][-1][position])>=float(commands[0]['points'][0][position])
+        marker_high=end_high if end_directional else not end_high
+        if abs(float(c['first'])-float(c['last']))<1.:return None
+        if (float(c['last'])<float(c['first']))!=marker_high:return None
+    colour=''.join(f'{max(0,min(255,int(round(float(v))))):02X}' for v in np.median(np.asarray(colours),axis=0))
+    member_keys=[str(r['element'].get('key')) for r in members];seeds={}
+    for r,c in zip(members,candidates):
+        e=r['element'];d=r['descriptor']
+        markers=(e.get('beginArrowType') or 'none',e.get('endArrowType') or 'none')
+        if not any(kind in ('oval','diamond') for kind in markers):start=float(c['along']);extent=float(c['alongExt'])
+        else:
+            centre=float(c['along'])+float(c['alongExt'])/2.;start=centre-float(d['length'])/2.;extent=float(d['length'])
+        if axis==0:x,y,w,h=start,float(c['cross']),extent,float(e.get('h') or 0)
+        else:x,y,w,h=float(c['cross']),start,float(e.get('w') or 0),extent
+        seeds[str(e.get('key'))]={'x':round(x,3),'y':round(y,3),'w':round(w,3),'h':round(h,3),
+            'evidence':{'method':'preview-repeated-axis-lines','members':member_keys,
+                'axis':'horizontal' if axis==0 else 'vertical','ordering':ordering,'confidence':.9,
+                'previewColor':colour,'componentBox':[int(c['box'][0]),int(c['box'][1]),int(c['box'][2]),int(c['box'][3])],
+                'thinRatio':round(float(c['thin']),4),
+                'registered':[round(float(e.get('x') or 0),3),round(float(e.get('y') or 0),3),round(float(e.get('w') or 0),3),round(float(e.get('h') or 0),3)]}}
+    return seeds
+
+
+def locate_axis_lines(elements,reference,hidden):
+    """Repeated similar axial lines are seeded by preview colour, cardinality and order only."""
+    seeds={}
+    try:groups=axis_line_groups(elements)
+    except Exception:return seeds
+    for group in groups:
+        try:located=locate_axis_group(reference,hidden,group)
+        except Exception:located=None
+        if located:seeds.update(located)
+    return seeds
+
+
+def localized_geometry(e):
+    """Take the registered line's measured box while keeping its declared path."""
+    controls,segments,basis=path_model(e)
+    geometry=encode(controls,segments);declared=e.get('linePath') or {}
+    for field in ('nodes','terminals','segmentGroups'):
+        if declared.get(field):geometry['linePath'][field]=declared[field]
+    return geometry
+
+
 def fit(e,ref,bg,hidden):
+    """Fit one registered path; a repeated-axis-line group may seed the real preview position."""
+    seed=e.get('_axisSeed') if isinstance(e.get('_axisSeed'),dict) else None
+    if seed is None:return fit_registered(e,ref,bg,hidden)
+    registered={k:v for k,v in e.items() if k!='_axisSeed'}
+    try:positioned={**registered,'x':float(seed['x']),'y':float(seed['y']),'w':float(seed['w']),'h':float(seed['h']),'_fixedGeometry':True}
+    except (KeyError,TypeError,ValueError):return fit_registered(registered,ref,bg,hidden)
+    if all(abs(positioned[k]-float(registered.get(k,0)))<1 for k in ('x','y','w','h')):return fit_registered(registered,ref,bg,hidden)
+    seeded=None
+    try:seeded=fit_registered(positioned,ref,bg,hidden)
+    except Exception:seeded=None
+    localization=seed.get('evidence') if isinstance(seed.get('evidence'),dict) else {}
+    if isinstance(seeded,dict) and seeded.get('accepted'):
+        return {**seeded,'evidence':{**(seeded.get('evidence') or {}),'source':'preview-axis-line-registration','axisLocalization':localization}}
+    if float(localization.get('confidence') or 0)<AXIS_LINE_MIN_CONFIDENCE:return fit_registered(registered,ref,bg,hidden)
+    try:geometry=localized_geometry(positioned)
+    except Exception:return fit_registered(registered,ref,bg,hidden)
+    return {'key':e['key'],'accepted':True,'geometry':geometry,
+        'evidence':{'source':'preview-axis-line-registration','support':localization.get('thinRatio'),'axisLocalization':localization}}
+
+
+def fit_registered(e,ref,bg,hidden):
     controls,segments,basis=path_model(e);original=controls.copy();topology='registered-path'
     fixed=e.get('_fixedGeometry',False) or any(k in e.get('keepParameters',[]) for k in ('position','x','y','geometry','linePath'))
     topology_locked=parameter_blocked(e,'slant') or any(str(p).startswith('slant:') for p in e.get('keepParameters',[])) or bool(e['linePath'].get('segmentGroups'))
@@ -327,6 +578,10 @@ def main():
             masks[m['key']]=cv2.resize(im[:,:,3],(1600,900))>24
             if scene_types.get(m['key']) in ('text','formula','image','svg'):hidden |= masks[m['key']]
     results=[];scene=spec.get('scene') or spec['elements'];slants=[]
+    axis_seeds={}
+    if spec.get('operation') not in ('style','finalize'):
+        try:axis_seeds=locate_axis_lines(spec['elements'],ref,hidden)
+        except Exception:axis_seeds={}
     if spec.get('operation')=='finalize':
         from path_slant_consensus import merge
         boundary_masks=hidden
@@ -351,6 +606,8 @@ def main():
     for e in spec['elements']:
         if spec.get('operation')=='style':e={**e,'_fixedGeometry':True}
         elif spec.get('operation') in ('fit','finalize'):e={**e,'_measureStyle':False}
+        seed=axis_seeds.get(e['key'])
+        if seed:e={**e,'_axisSeed':seed}
         lower=cv2.imread((spec.get('underlays') or {}).get(e['key'],'')) if (spec.get('underlays') or {}).get(e['key']) else None
         if lower is not None:lower=cv2.resize(lower,(1600,900))[:,:,::-1].astype(float)
         own_hidden=hidden

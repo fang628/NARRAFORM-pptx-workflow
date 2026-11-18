@@ -78,7 +78,7 @@ import {speakerScriptAction,speakerScriptPublic,speakerScriptRoute} from './lib/
 import {withExecutionContext,advanceExecutionVersion} from './lib/execution-context.mjs';
 import {requestScheduler} from './lib/resource-scheduler.mjs';
 import {createLocalExecutor} from './lib/local-executor.mjs';
-import {createProjectStore} from './lib/project-store.mjs';
+import {createProjectStore,recoverProgressState,cleanupProgressStates} from './lib/project-store.mjs';
 import {createProjectEvents} from './lib/project-events.mjs';
 import {acquireDataLease} from './lib/data-lease.mjs';
 
@@ -104,17 +104,35 @@ const automaticRunner=createAutomaticRunner({
   execute:async(p,request,id)=>{automaticDispatch.set(p.id,id);try{await action(p,request,{writeHead(){},end(){}},false,id);}finally{automaticDispatch.delete(p.id);}}
 });
 const run=createLocalExecutor();
+// Only projects whose running task was recovered in this startup (from the full record or from a
+// matching lightweight progress overlay) are sealed back to the full record. Already-interrupted
+// records are never rewritten, so restarts do not keep rewriting large interrupted projects.
+const startupSeal=new Set();
 for(const name of fs.readdirSync(data)) {
   if(!/^[a-f0-9-]{36}$/.test(name)) continue;
-  try { const p=JSON.parse(fs.readFileSync(path.join(data,name,'project.json'),'utf8')); if(p.task?.status==='running') p.task={...p.task,status:'interrupted',message:'服务重启导致任务中断，请检查 API 配置后重试'}; if(p.task?.status==='interrupted')p.task.jobs=(p.task.jobs||[]).map(j=>['running','queued'].includes(j.status)?{...j,status:'interrupted'}:j); interruptImageTasks(p);if(p.provider)delete p.provider.ocr;projects.set(p.id,p); } catch {}
+  try {
+    const p=JSON.parse(fs.readFileSync(path.join(data,name,'project.json'),'utf8'));
+    const recovered=recoverProgressState(p,data),interrupted=p.task?.status==='running';
+    if(interrupted)p.task={...p.task,status:'interrupted',message:'服务重启导致任务中断，请检查 API 配置后重试'};
+    if(p.task?.status==='interrupted')p.task.jobs=(p.task.jobs||[]).map(j=>['running','queued'].includes(j.status)?{...j,status:'interrupted'}:j);
+    interruptImageTasks(p);if(p.provider)delete p.provider.ocr;projects.set(p.id,p);
+    if(recovered||interrupted)startupSeal.add(p.id);
+  } catch {}
 }
 for(const p of projects.values()){
   normalizeCompositeMaterialVisibility(p.materials);
   interruptAutomaticMode(p);
   delete p.provider;
 }
-function save(p,options={}) { if(p.task?.status==='running'&&p.task.message!==p.task.progressMessage){p.task.progressMessage=p.task.message;recordProgress(p.task,{kind:'step',message:p.task.message});}projectStore.save(p,options);
+for(const p of projects.values())if(startupSeal.has(p.id)){
+  try{projectStore.save(p,{immediate:true});}catch(error){console.error('重启状态保存失败：',error.code||error.name);}
 }
+cleanupProgressStates(data,new Set(projects.keys()));
+function recordTaskMessage(p) { if(p.task?.status==='running'&&p.task.message!==p.task.progressMessage){p.task.progressMessage=p.task.message;recordProgress(p.task,{kind:'step',message:p.task.message});} }
+function save(p,options={}) { recordTaskMessage(p);projectStore.save(p,options); }
+// Pure progress saves only rewrite the small overlay; structure and forced saves write the full record.
+function saveProgress(p,options={}) { recordTaskMessage(p);projectStore.save(p,{...options,progressOnly:true}); }
+
 function event(p,message) { p.events=[...(p.events||[]),{time:new Date().toISOString(),message}].slice(-80); save(p,{immediate:true,results:true}); }
 // Upgrade existing selected projects without re-generating their representative images.
 for(const p of projects.values())if(p.visualMode==='ai'&&p.selectedTheme&&!p.archivedAt){
@@ -169,7 +187,7 @@ async function understandMaterials(p,signal,includeImages,options={}){
           &&r.readingEndpoint===credentials.get(p.id)?.text?.baseURL&&(m.kind==='image'||r.informationIndex?.version===1)
           &&(!needsPhotoAssessment||r.photoAssessment?.version===1&&r.photoAssessment.sourceHash===m.sha256));
         if(cached){remember(cached);p.task.message=`已复用 ${i+1}/${sources.length}：${m.name}`;save(p);return;}
-        p.task.message=`正在理解 ${i+1}/${sources.length}：${m.name}`;save(p);
+        p.task.message=`正在理解 ${i+1}/${sources.length}：${m.name}`;saveProgress(p);
         const sendImage=includeImages&&(!options.imageIds||options.imageIds.includes(m.id));
         const useOCR=m.kind==='image'&&!!(m.ocrTextApprovedAt||m.ocr?.approvedAt)&&!sendImage;
         if(m.kind==='image'&&!sendImage&&!useOCR) {remember({id:m.id,category:'图片',status:'skipped',summary:'图片已保存为配图素材，本轮未发送给模型。',keyPoints:[],facts:[],suggestedUse:'如需理解画面，请勾选图片识别并使用支持视觉的模型。',questions:[]});return;}
@@ -199,7 +217,7 @@ async function understandMaterials(p,signal,includeImages,options={}){
         if(m.documentFigure?.decorative===false&&!m.excludedFromContent)remember({id:m.id,category:m.documentFigure.kind,status:'read',coverage:'image',summary:m.documentFigure.caption,keyPoints:[m.documentFigure.evidence],facts:[],suggestedUse:'沿用原稿内容图片',questions:[]});
       }
       const readable=readings.filter(r=>r.status==='read'&&sources.some(m=>m.id===r.id&&!m.excludedFromContent&&!(m.extracted&&m.documentFigure?.kind==='table')));ensure(p,readable.length>0,'没有可理解的材料；图片需要启用图片识别，空文档请补充文字');
-      p.task.message='正在整理材料之间的关联与待确认问题';save(p);
+      p.task.message='正在整理材料之间的关联与待确认问题';saveProgress(p);
       const r=await synthesizeMaterials({config:credentials.get(p.id)?.text,system,brief:p.brief,instruction:p.materialInstruction,reviewNotes,readings:readable,materials:sources,progressSections:p.progressSectionsManual?p.progressSections:undefined,requireRelations:true,cache:p.analysisDraft,save:()=>save(p),signal});
       const synthesis=r.synthesis;if(signal.aborted)throw Error('已取消');
       if(!p.brief.pages||optimizingOriginalPPT(p))p.brief=briefOf({...p.brief,pages:synthesis.pageCountSuggestion.pages});
@@ -216,7 +234,7 @@ function launch(p,label,fn,{onComplete,priorStage}={}) {
   unlocked(p); const controller=new AbortController(); tasks.set(p.id,controller);
   let completed=null;
   p.task={id:crypto.randomUUID(),...(queueDispatch.has(p.id)?{queueId:queueDispatch.get(p.id)}:{}),...(automaticDispatch.has(p.id)?{automaticRunId:automaticDispatch.get(p.id)}:{}),status:'running',label,message:label,concurrency:concurrencyLimit(p.executionConcurrency),startedAt:new Date().toISOString(),...(priorStage?{priorStage}:{})}; event(p,label+'开始');
-  const stop=observeTask(controller.signal,entry=>{recordProgress(p.task,entry);save(p,{immediate:entry.kind==='job'&&['done','failed','cancelled'].includes(entry.status),results:entry.kind==='job'&&entry.status==='done'});});
+  const stop=observeTask(controller.signal,entry=>{recordProgress(p.task,entry);saveProgress(p,{results:entry.kind==='job'&&entry.status==='done'});});
   const revision={version:p.version};
   const queuedRequest=p.imageTaskQueue?.find(job=>job.id===p.task.queueId)?.request;
   const interactive=queuedRequest?.index!==undefined||/第\s*\d+\s*页|修改|改写|单页/.test(label);
@@ -536,8 +554,8 @@ const server=http.createServer(async(req,res)=>{
       if(parts.length===4&&parts[3]==='events'&&req.method==='GET'){projectEvents.subscribe(p,req,res);return;}
       if(parts.length===4&&parts[3]==='package'&&req.method==='GET'){
         unlocked(p);uploads.add(p.id);let bundle;
-        try{bundle=await exportProjectPackage(p,data);res.setHeader('Content-Disposition',"attachment; filename*=UTF-8''"+encodeURIComponent((p.brief.title||'NARRAFORM')+'.narra'));res.once('close',bundle.cleanup);return await sendFile(res,bundle.file,'application/zip');}
-        catch(error){bundle?.cleanup();throw error;}finally{uploads.delete(p.id);}
+        try{projectStore.flush(p.id);bundle=await exportProjectPackage(p,data);res.setHeader('Content-Disposition',"attachment; filename*=UTF-8''"+encodeURIComponent((p.brief.title||'NARRAFORM')+'.narra'));res.once('close',bundle.cleanup);return await sendFile(res,bundle.file,'application/zip');}
+        catch(error){bundle?.cleanup();throw error;}finally{uploads.delete(p.id);automaticRunner.wake(p);}
       }
       if(parts.length===4&&parts[3]==='storage'&&req.method==='GET'){unlocked(p);return json(res,200,publicArtifactReport(artifactInventory(p,data)));}
       if(parts.length===5&&parts[3]==='styles'&&req.method==='GET'){

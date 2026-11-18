@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Registration + completion for the committed S2 path.
 
-Input spec (JSON): {preview, background?, elements:[...]}
+Input spec (JSON): {preview, background?, elements:[...], nativeOnly?}
 - seeds are the elements already registered by the rebuild pipeline (audit/committed list);
 - frame identity comes exclusively from the audited seeds, never a difference-region bbox;
 - every seed is kept: text/image/svg/cutout pass through, shapes become fitting targets.
@@ -10,6 +10,9 @@ Input spec (JSON): {preview, background?, elements:[...]}
   continuous/strong ridge evidence that is absent from the wordless background, is not text or a
   registered image, is not a near-parallel copy of an existing shape/line edge, and is not a soft
   halo or ornamental arc. New lines are appended as foreground effects.
+- nativeOnly (set by the shared TOC/thanks policy) completes nothing and passes no SVG light
+  effect through: real dividers stay native seeds, legacy auto light effects are dropped. Native
+  decoration on the registered wordless background is the only allowed representation there.
 
 Output: registry JSON with audited elements, independent light effects and coverage stats.
 CLI: python tools/shape_registration.py <spec.json> <out.json>
@@ -25,6 +28,16 @@ WIDTH, HEIGHT = 1600, 900
 PASS_TYPES = {'text', 'formula', 'image', 'svg', 'cutout', 'crop', 'generate'}
 SHAPE_TYPES = {'shape', 'rect', 'ellipse', 'line'}
 PROTOTYPES = {'hexagon', 'chevron', 'triangle', 'trapezoid', 'arrow', 'rightArrow', 'leftArrow', 'upArrow', 'downArrow'}
+
+
+def _light_decoration(element):
+    """Auto-registered light effect, raw or materialized as an SVG image asset."""
+    effect = (element.get('role') == 'effect' or element.get('effectOf')
+              or element.get('visualKind') == 'light-effect'
+              or element.get('effectKind') == 'lit-stroke')
+    representation = (element.get('type') == 'svg'
+                      or (element.get('type') == 'image' and element.get('implementation') == 'svg'))
+    return bool(effect and representation)
 
 
 def load(path):
@@ -442,6 +455,9 @@ def main():
     preview = load(spec['preview'])
     background = load(spec['background']) if spec.get('background') else None
     seeds = spec.get('elements') or []
+    native_only = bool(spec.get('nativeOnly'))
+    if native_only:
+        seeds = [element for element in seeds if not _light_decoration(element)]
 
     pass_through = [element for element in seeds if element.get('type') in PASS_TYPES]
     shape_seeds = [element for element in seeds if element.get('type') in SHAPE_TYPES]
@@ -449,7 +465,7 @@ def main():
                   if str(element.get('shape') or '').lower() in {name.lower() for name in PROTOTYPES}]
     auto_lines = []
     coverage = {'autoLines': 0, 'fullPageDiff': 0.0}
-    if preview is not None and background is not None:
+    if not native_only and preview is not None and background is not None:
         diff = np.abs(preview.astype(np.int16) - background.astype(np.int16)).max(axis=2)
         coverage['fullPageDiff'] = round(float((diff > 14).mean()), 4)
         # Missing narrow bright geometric cores (e.g. the slanted illuminated strip between p11
@@ -467,7 +483,7 @@ def main():
         coverage['autoLines'] = len(auto_lines)
 
     from arc_light_completion import discover_arc_lights
-    arcs=discover_arc_lights(preview,background,list(seeds)+auto_lines+list(spec.get('protected') or [])) if preview is not None and background is not None else []
+    arcs=[] if native_only else (discover_arc_lights(preview,background,list(seeds)+auto_lines+list(spec.get('protected') or [])) if preview is not None and background is not None else [])
     used={e.get('key') for e in list(seeds)+auto_lines}
     for i,arc in enumerate(arcs):
         key='auto-arc-'+str(i+1)

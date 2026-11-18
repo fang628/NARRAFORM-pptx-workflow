@@ -1,5 +1,6 @@
 """Measured whole-paint and individual colour-node consensus. Geometry and alpha stay independent."""
 import json
+from functools import lru_cache
 import sys
 from pathlib import Path
 
@@ -36,6 +37,7 @@ def load(file):
 
 
 def sample_members(elements, reference, masks, underlays):
+    load_underlay = lru_cache(maxsize=3)(load)
     front = np.zeros(reference.shape[:2], np.uint8)
     output = {}
     for element in reversed(elements):
@@ -57,7 +59,7 @@ def sample_members(elements, reference, masks, underlays):
                 if len(xx) >= (16 if min(element['w'],element['h'])<16 else 80):
                     stride = max(1, len(xx)//2500)
                     xx, yy = xx[::stride], yy[::stride]
-                    background = load(underlays.get(key))
+                    background = load_underlay(underlays.get(key))
                     output[key] = {'pixels': reference[yy, xx].astype(float), 'xx': xx+.5, 'yy': yy+.5,
                                    'background': background[yy, xx].astype(float) if background is not None else None}
                     if float(element.get('strokeWidth') or 0)>=.7:
@@ -263,8 +265,17 @@ def merge_nodes(elements, samples, records):
     for node in nodes:
         scope = node['element'].get('parameterGroups',{}).get('strokeColor' if node['stroke'] else 'gradientStops') or node['element'].get('parameterGroups',{}).get('stroke' if node['stroke'] else 'fill')
         node['scope'] = (node['stroke'],'explicit',scope) if scope else (node['stroke'],'local',node['element'].get('tableId') or node['element'].get('parentKey'),node['element'].get('role') or node['element'].get('tableRole'))
-        target=next((g for g in groups if g[0]['scope']==node['scope']
-                     and all(np.linalg.norm(other['lab']-node['lab'])<=4.5 for other in g)),None)
+        # Match a colour across objects. Two stops of the same ramp are two
+        # independent observations, even when their colours are very close.
+        target=None
+        best_distance=float('inf')
+        for group in groups:
+            if group[0]['scope']!=node['scope'] or any(other['element'] is node['element'] for other in group):
+                continue
+            distance=max(np.linalg.norm(other['lab']-node['lab']) for other in group)
+            if distance<=4.5 and distance<best_distance:
+                target=group
+                best_distance=distance
         if target is None:
             groups.append([node])
         else:

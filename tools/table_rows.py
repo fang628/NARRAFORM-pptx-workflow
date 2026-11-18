@@ -60,6 +60,7 @@ Rules enforced here, not in the caller:
     a lower confidence and status=partial).
 """
 import json
+import math
 import sys
 import time
 
@@ -176,7 +177,7 @@ def straight_vertical_lines(image):
     return [float(np.mean(cluster)) for cluster in clusters]
 
 
-def measure_alignment(image,cells,rows,boundaries,vertical,options):
+def measure_alignment(image,cells,rows,boundaries,vertical,options,icons=()):
     observations=[]
     if len(vertical)<2:return observations
     ordered=sorted(rows,key=lambda r:r['y']);slots={int(r['rowIndex']):i for i,r in enumerate(ordered)}
@@ -189,41 +190,53 @@ def measure_alignment(image,cells,rows,boundaries,vertical,options):
         if min(patch.shape[:2],default=0)<6:continue
         bg=np.median(patch.reshape(-1,3),axis=0)
         ink=(np.linalg.norm(patch.astype(float)-bg,axis=2)>45).astype(np.uint8)
-        count,labels,stats,centers=cv2.connectedComponentsWithStats(ink);parts=[]
+        icon_right=left
+        glyph_min_x=left
+        for ix,iy,ir,ib in icons:
+            if left<=ix<ir<=(left+right)/2 and top<=(iy+ib)/2<=bottom:
+                icon_right=max(icon_right,ir)
+                glyph_min_x=max(glyph_min_x,ir+max(3,(ir-ix)*.08))
+        count,_,stats,centroids=cv2.connectedComponentsWithStats(ink);parts=[]
         for k in range(1,count):
             x,y,w,h,area=stats[k]
-            if area>=4 and 3<=h<=patch.shape[0]*.95 and w<patch.shape[1]*.9:parts.append((x,y,w,h,area))
-        if len(parts)<2:continue
+            if (area>=4 and 3<=h<=patch.shape[0]*.95 and w<patch.shape[1]*.9
+                    and x0+centroids[k,0]>=glyph_min_x):parts.append((x,y,w,h,area))
+        if not parts:continue
+        glyph_height=max(p[3] for p in parts)
+        # Tiny components touching the crop belong to the rim or a grid junction.
+        parts=[p for p in parts if not (p[3]<glyph_height*.45 and p[2]<glyph_height*.55
+               and (p[0]<=1 or p[1]<=1 or p[0]+p[2]>=patch.shape[1]-1 or p[1]+p[3]>=patch.shape[0]-1))]
+        if not parts or glyph_height<5:continue
         ink_left=int(x0+min(p[0] for p in parts));ink_right=int(x0+max(p[0]+p[2] for p in parts))
         ink_top=int(y0+min(p[1] for p in parts));ink_bottom=int(y0+max(p[1]+p[3] for p in parts))
-        if ink_right-ink_left>(right-left)*.9:continue
+        if ink_right-ink_left>(right-left)*.97:continue
         observations.append({'key':cell.get('key'),'row':row,'column':column,'kind':ordered[i].get('kind','data'),
             'inkLeft':ink_left,'inkRight':ink_right,'inkTop':ink_top,'inkBottom':ink_bottom,'left':left,'right':right,'top':top,'bottom':bottom,
-            'confidence':round(min(.95,.6+len(parts)*.015),3),'independent':True})
-    for kind in ('header','data'):
-        for column in sorted({o['column'] for o in observations}):
-            peers=[o for o in observations if o['kind']==kind and o['column']==column]
-            if not peers:continue
-            weights=[o['confidence'] for o in peers]
-            offsets={'left':[o['inkLeft']-o['left'] for o in peers],
-                'center':[(o['inkLeft']+o['inkRight']-o['left']-o['right'])/2 for o in peers],
-                'right':[o['right']-o['inkRight'] for o in peers]}
-            medians={a:weighted_median(v,weights) for a,v in offsets.items()}
-            errors={a:float(np.average(np.abs(np.asarray(v)-medians[a]),weights=weights)) for a,v in offsets.items()}
-            # A centred header can be identified from one row; a left/right
-            # column needs several text lengths agreeing on the same anchor.
-            errors['center']+=abs(medians['center'])*.35
-            if len(peers)==1:
-                mode='center' if abs(medians['center'])<=max(6,(peers[0]['right']-peers[0]['left'])*.035) else 'left' if medians['left']<medians['right'] else 'right'
-            else:mode=min(errors,key=errors.get)
-            width=peers[0]['right']-peers[0]['left']
-            if mode!='center' and medians[mode]>width*.2:
-                if abs(medians['center'])<=max(8,width*.04):mode='center'
-                else:continue
-            for o in peers:
-                o.update(align=mode,centerOffset=round(medians['center'],2) if mode=='center' else 0,inset=round(max(4,medians[mode]),1) if mode!='center' else 4,
-                         sourceKeys=[p['key'] for p in peers],confidence=round(min(weights),3))
-    return observations
+            'confidence':round(min(.95,.6+len(parts)*.015),3),'independent':True,'iconRight':icon_right})
+    groups={}
+    for o in observations:
+        groups.setdefault((o['kind'],o['column'],o['iconRight']>o['left']),[]).append(o)
+    for peers in groups.values():
+        weights=[o['confidence'] for o in peers]
+        offsets={'left':[o['inkLeft']-o['left'] for o in peers],
+            'center':[(o['inkLeft']+o['inkRight']-o['left']-o['right'])/2 for o in peers],
+            'right':[o['right']-o['inkRight'] for o in peers]}
+        medians={a:weighted_median(v,weights) for a,v in offsets.items()}
+        errors={a:float(np.average(np.abs(np.asarray(v)-medians[a]),weights=weights)) for a,v in offsets.items()}
+        width=peers[0]['right']-peers[0]['left']
+        icon_inset=weighted_median([o['iconRight']-o['left'] for o in peers],weights)
+        centered=abs(medians['center']-icon_inset/2)<=max(6,(width-icon_inset)*.04)
+        mode=min(('left','right'),key=lambda a:(round(errors[a],1),medians[a]-(icon_inset if a=='left' else 0)))
+        if centered and errors['center']<=errors[mode]+1.5:
+            mode='center'
+        elif medians[mode]-(icon_inset if mode=='left' else 0)>(width-icon_inset)*(.28 if icon_inset else .2):
+            if not centered:continue
+            mode='center'
+        for o in peers:
+            o.update(align=mode,centerOffset=round(medians['center'],2) if mode=='center' else 0,
+                     inset=round(max(4,medians[mode]),1) if mode!='center' else 4,
+                     sourceKeys=[p['key'] for p in peers],confidence=round(min(weights),3))
+    return [{k:v for k,v in o.items() if k!='iconRight'} for o in observations if 'align' in o]
 
 
 def colour_profile(image, mask, left, right, top, bottom):
@@ -290,7 +303,8 @@ def snap_boundaries(image, mask, region, candidates, window, axis):
         noise = profiles[index] + 1e-3
         strength = float(differences[best]) / noise
         confidence = float(np.clip((strength - 1.0) / 4.0, 0.0, 1.0))
-        snapped[index] = offset + best + 0.5
+        if confidence > 0 and differences[best] >= 3:
+            snapped[index] = offset + best + 0.5
         confidences[index] = round(confidence, 4)
     values = [value for value in confidences if value is not None]
     confidence = float(np.mean(values)) if values else 0.0
@@ -300,8 +314,9 @@ def snap_boundaries(image, mask, region, candidates, window, axis):
     return snapped, round(confidence, 4)
 
 
-def sample_grid(image, mask, region, y_bins, x_bins):
+def sample_grid(image, mask, region, y_bins, x_bins, band=None):
     left, top, right, bottom = region
+    bx, by, bw, bh = band or (left, top, right-left, bottom-top)
     if right - left < 4 or bottom - top < 2:
         return [], 0, 0
     height = bottom - top
@@ -328,7 +343,9 @@ def sample_grid(image, mask, region, y_bins, x_bins):
             core = pixels[distance <= max(24.0, float(np.percentile(distance, 70)))]
             colour = np.median(core, axis=0) if core.shape[0] >= max(4, pixels.shape[0] * 0.3) \
                 else median
-            bins.append({"x": (x_index + 0.5) / x_bins, "y": (y_index + 0.5) / y_bins,
+            ys, xs = np.nonzero(valid)
+            bins.append({"x": (x0 + np.median(xs) + .5 - bx) / bw,
+                         "y": (y0 + np.median(ys) + .5 - by) / bh,
                          "colour": colour, "count": int(pixels.shape[0])})
     area = max(1, (right - left) * (bottom - top))
     valid_pixels = int((mask[top:bottom, left:right] > 0).sum())
@@ -341,7 +358,9 @@ def fit_axis(bins, axis):
     if len(bins) < 4:
         return None
     t = np.asarray([item[axis] for item in bins], np.float32)
-    colours = np.asarray([to_lab(item["colour"]) for item in bins], np.float32)
+    colours = np.asarray([item["colour"] for item in bins], np.float32)
+    if np.ptp(t) < .25:
+        return None
     design = np.stack([np.ones_like(t), t], axis=1)
     coefficients, *_ = np.linalg.lstsq(design, colours, rcond=None)
     predicted = design @ coefficients
@@ -349,10 +368,10 @@ def fit_axis(bins, axis):
     variance = colours - colours.mean(axis=0, keepdims=True)
     total = float((variance ** 2).sum()) + 1e-6
     r2 = float(1.0 - (residual ** 2).sum() / total)
-    start = coefficients[0]
-    end = coefficients[0] + coefficients[1]
-    delta_e = lab_distance(start, end)
-    mean_error = float(np.linalg.norm(residual, axis=1).mean())
+    start = np.clip(coefficients[0], 0, 255)
+    end = np.clip(coefficients[0] + coefficients[1], 0, 255)
+    delta_e = lab_distance(to_lab(start), to_lab(end))
+    mean_error = float(np.abs(colours - (start + t[:,None]*(end-start))).mean())
     return {"r2": float(np.clip(r2, 0.0, 1.0)), "deltaE": float(delta_e),
             "meanError": mean_error, "axis": axis,
             "start": start, "end": end}
@@ -379,7 +398,7 @@ def row_paint(bins, options):
     filtered = robust_colour_bins(bins)
     colours = np.asarray([item["colour"] for item in filtered], np.float32)
     representative = np.median(colours, axis=0)
-    solid_error = float(np.linalg.norm(colours - representative, axis=1).mean())
+    solid_error = float(np.abs(colours - representative).mean())
     gradient = None
     evidence = None
     best = None
@@ -394,10 +413,7 @@ def row_paint(bins, options):
             if not best or fit["r2"] * fit["deltaE"] > best["r2"] * best["deltaE"]:
                 best = fit
     if best:
-        start_rgb = cv2.cvtColor(np.asarray(best["start"], np.float32).reshape(1, 1, 3),
-                                 cv2.COLOR_LAB2RGB)[0, 0] * 255.0
-        end_rgb = cv2.cvtColor(np.asarray(best["end"], np.float32).reshape(1, 1, 3),
-                               cv2.COLOR_LAB2RGB)[0, 0] * 255.0
+        start_rgb, end_rgb = best['start'], best['end']
         gradient = {"type": "linear", "angle": 90 if best["axis"] == "y" else 0,
                     "stops": [{"position": 0, "color": hex_color(start_rgb), "opacity": 1},
                               {"position": 1, "color": hex_color(end_rgb), "opacity": 1}]}
@@ -515,45 +531,19 @@ def measured_outer(table,reference):
     if not all(k in outer for k in ('x','y','w','h')):return None
     x,y,w,h=[float(outer[k]) for k in ('x','y','w','h')]
     if w<60 or h<40:return None
-    # A complete observed lattice is stronger than offsets inferred from text
-    # boxes, which may already be wrapped or independently relocated.
-    row_count=len(table.get('rows') or []);column_count=len(table.get('columns') or [])
-    x0,x1=max(0,round(x+8)),min(reference.shape[1],round(x+w-8))
-    y0,y1=max(0,round(y-55)),min(reference.shape[0],round(y+h+55))
-    horizontal=straight_vertical_lines(np.transpose(reference[y0:y1,x0:x1],(1,0,2)))
-    def continuous(axis,at,lo,hi):
-        samples=np.linspace(lo,hi,200).astype(int);at=round(at)
-        gray=cv2.cvtColor(reference,cv2.COLOR_RGB2GRAY).astype(float)
-        if axis=='y':
-            if not 2<=at<gray.shape[0]-2:return False
-            samples=np.clip(samples,0,gray.shape[1]-1);ridge=gray[at,samples]-np.maximum(gray[at-2,samples],gray[at+2,samples])
-        else:
-            if not 2<=at<gray.shape[1]-2:return False
-            samples=np.clip(samples,0,gray.shape[0]-1);ridge=gray[samples,at]-np.maximum(gray[samples,at-2],gray[samples,at+2])
-        return float((ridge>3).mean())>=.6
-    horizontal=[y0+at for at in horizontal if y-45<=y0+at<=y+h+45 and continuous('y',y0+at,x+w*.1,x+w*.9)]
-    if len(horizontal)==row_count+1 and all(b-a>=12 for a,b in zip(horizontal,horizontal[1:])):
-        top,bottom=horizontal[0],horizontal[-1]
-        left_roi,right_roi=max(0,round(x-45)),min(reference.shape[1],round(x+w+45))
-        vertical=[left_roi+at for at in straight_vertical_lines(reference[round(top)+3:round(bottom)-3,left_roi:right_roi]) if x<=left_roi+at<=x+w and continuous('x',left_roi+at,top+5,bottom-5)]
-        if len(vertical)==column_count+1 and all(b-a>=12 for a,b in zip(vertical,vertical[1:])):
-            left,right=vertical[0],vertical[-1]
-            if .7*w<right-left<1.3*w and .65*h<bottom-top<1.35*h:
-                return {'x':left,'y':top,'w':right-left,'h':bottom-top,'right':right,'bottom':bottom,'confidence':.95,
-                        'source':'measured-frame-ridges','horizontal':horizontal,'vertical':vertical}
     gray=cv2.cvtColor(reference,cv2.COLOR_RGB2GRAY).astype(float)
     found=[];supports=[]
     for axis,edge in [('y',y),('y',y+h),('x',x),('x',x+w)]:
         extent=h if axis=='y' else w
         radius=min(32,max(8,extent*.12))
         choices=[]
+        positions=np.linspace(x+w*.12,x+w*.88,180).astype(int) if axis=='y' else np.linspace(y+h*.12,y+h*.88,120).astype(int)
+        positions=np.clip(positions,1,gray.shape[1 if axis=='y' else 0]-2)
         for at in range(max(2,round(edge-radius)),min(gray.shape[0 if axis=='y' else 1]-2,round(edge+radius)+1)):
-            positions=np.linspace(x+w*.12,x+w*.88,180).astype(int) if axis=='y' else np.linspace(y+h*.12,y+h*.88,120).astype(int)
-            positions=np.clip(positions,1,gray.shape[1 if axis=='y' else 0]-2)
             center=gray[at,positions] if axis=='y' else gray[positions,at]
             a=gray[at-2,positions] if axis=='y' else gray[positions,at-2]
             b=gray[at+2,positions] if axis=='y' else gray[positions,at+2]
-            ridge=center-np.maximum(a,b)
+            ridge=np.maximum(center-np.maximum(a,b),np.minimum(a,b)-center)
             support=float((ridge>3).mean());strength=float(np.median(ridge))
             if support>=.6 and strength>3:choices.append((strength/(1+abs(at-edge)*.025),at,support))
         if not choices:return None
@@ -567,10 +557,105 @@ def measured_outer(table,reference):
             'confidence':round(min(supports),3),'source':'measured-frame-ridges'}
 
 
+def visible_axis(reference, outer, cells, slots, axis):
+    """Find a complete run of continuous boundaries separating the registered cell groups."""
+    if not slots or not all(key in outer for key in ('x','y','w','h')):
+        return None
+    vertical = axis == 'x'
+    group, length, cross, cross_length = ('column','w','y','h') if vertical else ('row','h','x','w')
+    groups = [[float(c[axis])+float(c[length])/2 for c in cells if c.get(group)==slot[group+'Index']]
+              for slot in slots]
+    if not all(groups):
+        return None
+    centers = [float(np.median(values)) for values in groups]
+    if any(b-a<12 for a,b in zip(centers,centers[1:])):
+        return None
+    image = reference if vertical else reference.transpose(1,0,2)
+    start, extent = float(outer[axis]), float(outer[length])
+    cross_start, span = float(outer[cross]), float(outer[cross_length])
+    reach = max(32, extent*.22)
+    lo, hi = max(0,round(start-reach-5)), min(image.shape[1],round(start+extent+reach+5))
+    a, b = max(0,round(cross_start+span*.1)), min(image.shape[0],round(cross_start+span*.9))
+    crop = image[a:b,lo:hi]
+    if min(crop.shape[:2]) < 12:
+        return None
+    candidates = straight_vertical_lines(crop)
+    if not candidates:
+        return None
+    samples = crop[np.linspace(0,len(crop)-1,min(240,len(crop))).astype(int)].astype(np.float32)
+    supported = []
+    for position in candidates:
+        at = round(position)
+        if not 4<=at<crop.shape[1]-4:
+            continue
+        before, after = samples[:,at-4], samples[:,at+4]
+        middle = samples[:,at-1:at+2]
+        step = np.max(abs(before-after),axis=1)
+        ridge = np.minimum(np.max(abs(middle-before[:,None]),axis=2),
+                           np.max(abs(middle-after[:,None]),axis=2)).max(axis=1)
+        hit = np.maximum(step,ridge)>=7
+        coverage = float(hit.mean())
+        if coverage>=.83 and all(part.mean()>=.72 for part in np.array_split(hit,4)):
+            supported.append((round(lo+position,1),coverage))
+    if not supported:
+        return None
+    edges = []
+    # Actual cell centres constrain identity, while the seed edges rank alternatives inside each gap.
+    expected = [start] + [(u+v)/2 for u,v in zip(centers,centers[1:])] + [start+extent]
+    limits = [start-reach,*centers,start+extent+reach]
+    allowance = min(8, .12 * min(np.diff(centers))) if len(centers)>1 else 2
+    for target,low,high in zip(expected,limits,limits[1:]):
+        choices = [(value,support) for value,support in supported if low-allowance<value<high+allowance]
+        if not choices:
+            return None
+        edges.append(max(choices,key=lambda c:(c[1]-.22*abs(c[0]-target)/max(16,high-low),-abs(c[0]-target))))
+    values, confidence = zip(*edges)
+    if any(b-a<12 for a,b in zip(values,values[1:])) or not .7*extent<values[-1]-values[0]<1.4*extent:
+        return None
+    return list(values),min(confidence),supported
+
+
+def grid_ends(reference, measured, cross, axis):
+    """Prefer a boundary at which the crossing grid dividers actually terminate."""
+    values, confidence, candidates = measured
+    dividers = np.rint(cross[0][1:-1]).astype(int)
+    if not len(dividers):
+        return measured
+    image = reference if axis=='x' else reference.transpose(1,0,2)
+    dividers = dividers[(dividers>=4)&(dividers<image.shape[0]-4)]
+    if not len(dividers):
+        return measured
+
+    def termination(at, direction):
+        offsets = np.arange(4, 12)
+        inside, outside = round(at)+direction*offsets, round(at)-direction*offsets
+        if min(inside.min(),outside.min())<0 or max(inside.max(),outside.max())>=image.shape[1]:
+            return 0
+        def contrast(positions):
+            strip = image[dividers[:,None,None]+np.arange(-4,5)[None,:,None],positions[None,None,:]]
+            return np.ptp(strip,axis=1).max(axis=2)
+        return float(np.median(contrast(inside).astype(float)-contrast(outside)))
+
+    updated = list(values)
+    for index, direction in ((0,1),(-1,-1)):
+        at = values[index]
+        neighbour = values[index+direction]
+        nearby = [(v,s) for v,s in candidates if 12<(neighbour-v)*direction
+                  and abs(v-at)<=min(32,abs(neighbour-at)*.25)]
+        if not nearby:
+            continue
+        selected, support = max(nearby,key=lambda c:termination(c[0],direction))
+        if termination(selected,direction)>max(8,termination(at,direction)+6):
+            updated[index] = selected
+            confidence = min(confidence,support)
+    return updated,confidence,candidates
+
+
 def measure_grid_strokes(image,horizontal,vertical):
     """Observe a boundary ridge; a plain row colour transition is not a line."""
     if len(horizontal)<2 or len(vertical)<2:return []
     result=[]
+    pixels=image.astype(np.float32)
     for role,positions,limits in [('hline',horizontal,(vertical[0],vertical[-1])),('vline',vertical,(horizontal[0],horizontal[-1]))]:
         for index,at in enumerate(positions):
             stations=np.linspace(limits[0]+5,limits[1]-5,min(300,max(24,int((limits[1]-limits[0])/3))))
@@ -578,7 +663,7 @@ def measure_grid_strokes(image,horizontal,vertical):
             x,y=(np.meshgrid(stations,offsets) if role=='hline' else np.meshgrid(offsets,stations))
             if role=='hline':y=y+at
             else:x=x+at;x=x.T;y=y.T
-            colors=cv2.remap(image.astype(np.float32),x.astype(np.float32),y.astype(np.float32),cv2.INTER_LINEAR,borderMode=cv2.BORDER_REPLICATE).transpose(1,0,2)
+            colors=cv2.remap(pixels,x.astype(np.float32),y.astype(np.float32),cv2.INTER_LINEAR,borderMode=cv2.BORDER_REPLICATE).transpose(1,0,2)
             a=np.median(colors[:,:3],axis=1);b=np.median(colors[:,-3:],axis=1);direction=b-a
             t=np.clip(np.sum((colors-a[:,None,:])*direction[:,None,:],axis=2)/np.maximum(1,np.sum(direction*direction,axis=1))[:,None],0,1)
             ridge=np.linalg.norm(colors-a[:,None,:]-t[:,:,None]*direction[:,None,:],axis=2)
@@ -629,7 +714,25 @@ def measure_table(table, reference, mask, options, scene):
                 "grid": {"boundaries": [], "verticalBoundaries": [], "confidence": 0.0,
                          "source": "cell-constraints"},
                 "rows": [], "colorGroups": [], "diagnostics": {"elapsedMs": 0.0}}
+    # The detected grid may extend beyond the registered frame, or sit inside a separate rim.
+    visible_x = visible_axis(reference, outer, cells, columns, 'x') if len(columns)>=2 else None
+    horizontal_search = (dict(outer,x=visible_x[0][0],w=visible_x[0][-1]-visible_x[0][0])
+                         if visible_x else outer)
+    visible_y = visible_axis(reference, horizontal_search, cells, semantic, 'y')
+    if visible_x and visible_y:
+        original_x = visible_x
+        visible_x = grid_ends(reference, visible_x, visible_y, 'x')
+        visible_y = grid_ends(reference, visible_y, original_x, 'y')
+    if not frame and visible_x and visible_y:
+        x0,x1 = visible_x[0][0],visible_x[0][-1]
+        y0,y1 = visible_y[0][0],visible_y[0][-1]
+        frame = dict(x=x0,y=y0,w=x1-x0,h=y1-y0,right=x1,bottom=y1,
+                     confidence=min(visible_x[1],visible_y[1]),source='complete-visible-grid')
     left, top, right, bottom = outer_box
+    if visible_x:
+        left,right = min(left,math.floor(visible_x[0][0])),max(right,math.ceil(visible_x[0][-1]))
+    if visible_y:
+        top,bottom = min(top,math.floor(visible_y[0][0])),max(bottom,math.ceil(visible_y[0][-1]))
     # All measurement happens on the table crop so image/mask/exclude coordinates stay local.
     local_image = reference[top:bottom, left:right]
     table_mask = mask[top:bottom, left:right].copy()
@@ -641,6 +744,7 @@ def measure_table(table, reference, mask, options, scene):
         table_mask[:, :margin] = 0
         table_mask[:, -margin:] = 0
     text_zones = []
+    icon_boxes = []
     for box in table.get("exclude") or []:
         if box.get('kind')=='line' and box.get('element'):
             from line_geometry import line_alpha
@@ -653,6 +757,8 @@ def measure_table(table, reference, mask, options, scene):
             continue
         kind = str(box.get("kind") or "")
         x0, y0, x1, y1 = pixel
+        if kind == 'icon':
+            icon_boxes.append(pixel)
         if kind == "text":
             # Text is a glyph zone, not a hole: only its ink is removed below, so the band colour
             # between glyphs (dense CJK text covers most of a header/row) stays measurable.
@@ -685,18 +791,17 @@ def measure_table(table, reference, mask, options, scene):
     # slot top before the frame edge). Clamp the grid to the measured outer box so no sample strip
     # ever reaches the enclosing panel/background above the table.
     boundaries = [min(bottom, max(top, value)) for value in boundaries]
-    if frame:
+    if visible_y:
+        boundaries, confidence, _ = visible_y
+    elif frame:
         boundaries[0]=float(top+2)
         boundaries[-1]=float(bottom-2)
-    horizontal=straight_vertical_lines(np.transpose(local_image,(1,0,2)))
-    internal_y=[top+value for value in horizontal if 5<value<bottom-top-5]
-    if len(internal_y)==len(rows)-1:
-        boundaries=[float(top+2),*internal_y,float(bottom-2)];confidence=max(confidence,.9)
     if any(b<=a for a,b in zip(boundaries,boundaries[1:])):
         return {'tableId':table_id,'status':'partial','issues':['collapsed-row-grid'],'grid':{'boundaries':[],'verticalBoundaries':[],'confidence':0},'rows':[],'alignment':[]}
-    columns = sorted([column for column in table.get("columns") or []
-                      if isinstance(column, dict)], key=lambda column: float(column.get("x", 0)))
-    if len(columns) >= 2:
+    if visible_x:
+        vertical_boundaries, vertical_confidence, _ = visible_x
+        confidence = .75 * confidence + .25 * vertical_confidence
+    elif len(columns) >= 2:
         vertical_candidates = [float(columns[0].get("x", left))] + [
             (float(columns[index].get("right", 0)) + float(columns[index + 1].get("x", 0))) * 0.5
             for index in range(len(columns) - 1)] + [float(columns[-1].get("right", right))]
@@ -749,24 +854,24 @@ def measure_table(table, reference, mask, options, scene):
             0.75 * confidence + 0.25 * max(vertical_confidence, vertical_baseline), 0.0, 1.0))
     else:
         vertical_boundaries = []
-    if frame and frame.get('horizontal') and frame.get('vertical'):
-        boundaries=frame['horizontal'];vertical_boundaries=frame['vertical'];confidence=.95
     # Resolve spacing before colour sampling and cell anchors. Never straighten
     # only the output bands while retaining the old irregular sampling slots.
     from table_spacing import regularize_axis
     spacing_strokes=measure_grid_strokes(reference,boundaries,vertical_boundaries)
     raw_boundaries=list(boundaries);raw_vertical=list(vertical_boundaries)
-    boundaries,row_spacing=regularize_axis(boundaries,'hline',spacing_strokes)
-    vertical_boundaries,column_spacing=regularize_axis(vertical_boundaries,'vline',spacing_strokes)
+    boundaries,row_spacing=regularize_axis(boundaries,'hline',spacing_strokes,visible_y[1] if visible_y else 0)
+    vertical_boundaries,column_spacing=regularize_axis(vertical_boundaries,'vline',spacing_strokes,visible_x[1] if visible_x else 0)
     grid_strokes=spacing_strokes if boundaries==raw_boundaries and vertical_boundaries==raw_vertical else measure_grid_strokes(reference,boundaries,vertical_boundaries)
     inset = float(options.get("sampleInset", 0.12))
-    # Sample inside the cell columns when they are known: this keeps the frame stroke/glow and the
-    # side gutters (row icons, edge bloom) out of the row colour, which the full outer width includes.
-    if len(columns) >= 2:
-        sample_x0 = int(round(max(0, float(columns[0].get("x", left)) - left + 2)))
-        sample_x1 = int(round(min(right - left, float(columns[-1].get("right", right)) - left - 2)))
+    if visible_x:
+        band_left, band_right = vertical_boundaries[0],vertical_boundaries[-1]
+    elif frame:
+        band_left, band_right = frame['x'],frame['right']
     else:
-        sample_x0, sample_x1 = int(round((right - left) * 0.01)), int(round((right - left) * 0.99))
+        band = table.get('band') or {}
+        band_left, band_right = band.get('x',left),band.get('right',right)
+    sample_x0 = max(0,math.ceil(band_left-left+3))
+    sample_x1 = min(right-left,math.floor(band_right-left-3))
     if sample_x1 - sample_x0 < 8:
         sample_x0, sample_x1 = int(round((right - left) * 0.01)), int(round((right - left) * 0.99))
     measured_rows = []
@@ -779,8 +884,9 @@ def measure_table(table, reference, mask, options, scene):
         y1 = int(round(row_bottom - max(2,slot_height * row_inset))) - top
         x0, x1 = sample_x0, sample_x1
         y_bins = int(max(4, min(10, round(slot_height / 7.0))))
+        band = (band_left-left,row_top-top,band_right-left,row_bottom-top)
         bins, valid_pixels, coverage = sample_grid(local_image, table_mask,
-                                                   (x0, y0, x1, y1), y_bins, 12)
+                                                   (x0, y0, x1, y1), y_bins, 12, band)
         paint = row_paint(bins, options)
         if row.get('kind')=='header' and paint['solidError'] is not None and paint['solidError']>2:
             # A header can have a genuine two-dimensional glow/ramp. Fit its measured ink-free
@@ -793,7 +899,7 @@ def measure_table(table, reference, mask, options, scene):
                 current={'type':'linear','angle':90,'stops':[{'position':0,'color':paint['fill']},
                                                            {'position':1,'color':paint['fill']}]}
                 rich=fit_native_paint(local_image[yy,xx],xx.astype(float),yy.astype(float),
-                    {'x':0,'y':float(row_top-top),'w':float(right-left),'h':float(slot_height)},current,
+                    {'x':band[0],'y':band[1],'w':band[2]-band[0],'h':float(slot_height)},current,
                     budget={'maxCandidates':1800,'seconds':5})
                 if rich and rich['afterError']<paint['error']*.7:
                     paint.update(gradient=rich['gradient'],fill=rich['gradient']['stops'][0]['color'],
@@ -842,11 +948,13 @@ def measure_table(table, reference, mask, options, scene):
                  "verticalBoundaries": [round(value, 1) for value in vertical_boundaries],
                  "confidence": round(confidence, 4),
                  "spacingEvidence": {"rows":row_spacing,"columns":column_spacing},
-                 "source": "cells+colour-steps" if confidence >= 0.5 else "cell-constraints"},
+                 "band": {"x":band_left,"right":band_right},
+                 "source": "complete-visible-grid" if visible_x and visible_y else
+                           "cells+colour-steps" if confidence >= 0.5 else "cell-constraints"},
         "rows": measured_rows,
         "colorGroups": color_groups,
         "strokes":grid_strokes,
-        "alignment":measure_alignment(reference,cells,rows,boundaries,vertical_boundaries,options),
+        "alignment":measure_alignment(reference,cells,rows,boundaries,vertical_boundaries,options,icon_boxes),
         "diagnostics": {"elapsedMs": round((time.perf_counter() - started) * 1000.0, 1)},
     }
 

@@ -95,21 +95,27 @@ def outline_profile(ref,contour,mask,valid):
     if len(points)<8:return None,None
     widths=[];colors=[];peak_offsets=[];clear_edges=0;tested_edges=0;eligible_edges=0
     ridge_mask=np.zeros(mask.shape,np.uint8)
-    limit=mask.shape
-    for i in np.linspace(0,len(points)-1,min(900,len(points)),dtype=int):
-        tangent=points[(i+2)%len(points)]-points[(i-2)%len(points)]
-        length=np.linalg.norm(tangent)
-        if length<1:continue
-        normal=np.array([-tangent[1],tangent[0]])/length;p=points[i]
-        def sample(q):
-            x,y=np.rint(q).astype(int)
-            return (x,y) if 0<=x<limit[1] and 0<=y<limit[0] else None
-        probe=sample(p+normal*3)
-        if probe is None or not mask[probe[1],probe[0]]:normal=-normal
-        sample_offsets=np.arange(-8,14.01,.5)
-        positions=[sample(p+normal*d) for d in sample_offsets]
-        if any(q is None or not valid[q[1],q[0]] for q in positions):continue
-        values=np.array([ref[y,x] for x,y in positions],float)
+    height,width_px=mask.shape
+    indices=np.linspace(0,len(points)-1,min(900,len(points)),dtype=int)
+    tangents=points[(indices+2)%len(points)]-points[(indices-2)%len(points)]
+    lengths=np.linalg.norm(tangents,axis=1)
+    usable=lengths>=1
+    centers=points[indices[usable]]
+    normals=np.column_stack((-tangents[usable,1],tangents[usable,0]))/lengths[usable,None]
+    probe_x,probe_y=np.rint(centers+normals*3).astype(int).T
+    in_bounds=(probe_x>=0)&(probe_x<width_px)&(probe_y>=0)&(probe_y<height)
+    inward=in_bounds.copy()
+    inward[in_bounds]=mask[probe_y[in_bounds],probe_x[in_bounds]]!=0
+    normals[~inward]*=-1
+    sample_offsets=np.arange(-8,14.01,.5)
+    # Batch the same half-pixel probes; keep boundary order and reject an entire
+    # profile when any probe falls outside the image or behind an occluder.
+    coordinates=np.rint(centers[:,None,:]+normals[:,None,:]*sample_offsets[None,:,None]).astype(int)
+    xs,ys=coordinates[:,:,0],coordinates[:,:,1]
+    inside_image=((xs>=0)&(xs<width_px)&(ys>=0)&(ys<height)).all(axis=1)
+    for x,y in zip(xs[inside_image],ys[inside_image]):
+        if not valid[y,x].all():continue
+        values=ref[y,x].astype(float)
         outside=values[sample_offsets<=-4];inside=values[sample_offsets>=10]
         if np.mean(np.std(outside,axis=0))>13 or np.mean(np.std(inside,axis=0))>13:continue
         a=np.median(outside,axis=0);b=np.median(inside,axis=0);direction=b-a
@@ -128,8 +134,7 @@ def outline_profile(ref,contour,mask,valid):
         width=(right-left+1)*.5
         if not .75<=width<=12:continue
         widths.append(width);colors.append(np.median(values[left:right+1],axis=0));peak_offsets.append(float(sample_offsets[peak]))
-        for x,y in positions[left:right+1]:
-            if 0<=x<limit[1] and 0<=y<limit[0]:ridge_mask[y,x]=1
+        ridge_mask[y[left:right+1],x[left:right+1]]=1
     if tested_edges>=24 and clear_edges/tested_edges>=.95:
         return {'width':0,'presence':'absent','confidence':clear_edges/tested_edges,'samples':tested_edges,'method':'boundary-normal-no-colour-ridge'},None
     if len(widths)<12:return None,None

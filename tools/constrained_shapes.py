@@ -153,24 +153,26 @@ def _round_controls(entry, vertex, exit_):
     return np.asarray(entry)-before*k,np.asarray(exit_)-after*k
 
 
-def _bezier(a, control, b, count=11):
-    t = np.linspace(.08, .92, count)[:, None]
-    c1,c2=_round_controls(a,control,b)
-    return (1-t)**3*np.asarray(a,float)+3*(1-t)**2*t*c1+3*(1-t)*t**2*c2+t**3*np.asarray(b,float)
-
-
 def _corner_points(vertex, before_dir, after_dir, span, kind, size):
-    vertex = np.asarray(vertex, float)
-    start = vertex + before_dir * span
-    end = vertex + after_dir * span
-    if kind in ('round', 'cut') and size >= 1:
-        entry = vertex + before_dir * size
-        exit_ = vertex + after_dir * size
-        left = np.linspace(start, entry, 4)[:-1]
-        middle = _bezier(entry, vertex, exit_) if kind == 'round' else np.linspace(entry, exit_, 6)[1:-1]
-        right = np.linspace(exit_, end, 4)
-        return np.vstack([left, middle, right])
-    return np.vstack([np.linspace(start, vertex, 4)[:-1], np.linspace(vertex, end, 4)])
+    # Compare all three contours on identical cross-sections of the bisector.
+    t = np.linspace(-span, span, 2 * min(36, math.ceil(span)) + 1)
+    reach = np.abs(t)
+    points = vertex + np.where(t[:, None] < 0, before_dir, after_dir) * reach[:, None]
+    inside = reach < size
+    if kind == 'sharp' or not np.any(inside):
+        return points
+    bisector = before_dir + after_dir
+    cosine = np.linalg.norm(bisector) / 2
+    if cosine < 1e-5:
+        return points
+    u = reach[inside]
+    rise = (size - u) * cosine
+    if kind == 'round':
+        sine_sq = max(0., 1. - cosine**2)
+        radius_sq = size**2 * sine_sq / cosine**2
+        rise = size / cosine - np.sqrt(np.maximum(0., radius_sq - u**2 * sine_sq)) - u * cosine
+    points[inside] += rise[:, None] * (bisector / (2 * cosine))
+    return points
 
 
 def _boundary_metric(points, distance, valid):
@@ -179,7 +181,15 @@ def _boundary_metric(points, distance, valid):
     mask = valid[ys, xs]
     if mask.sum() < max(6, len(points) * .4):
         return None
-    values = distance[ys[mask], xs[mask]]
+    # Interpolate the distance field so a half-pixel shift cannot select a bevel
+    # solely because its sampled coordinates rounded to the nearest edge pixel.
+    positions = np.clip(points[mask], [0, 0], [WIDTH-1, HEIGHT-1])
+    x, y = positions.T
+    ix, iy = positions.astype(int).T
+    jx, jy = np.minimum(ix+1, WIDTH-1), np.minimum(iy+1, HEIGHT-1)
+    dx, dy = x-ix, y-iy
+    values = ((1-dy)*((1-dx)*distance[iy, ix] + dx*distance[iy, jx])
+              + dy*((1-dx)*distance[jy, ix] + dx*distance[jy, jx]))
     return {'cost': float(np.mean(np.minimum(values, 6))),
             'p95': float(np.percentile(values, 90)), 'support': float(mask.mean())}
 
@@ -194,7 +204,9 @@ def declared_corner_radius(element, width, height):
         if command.get('op') == 'Q' and len(points) == 2:
             radius = max(radius, float(np.linalg.norm((np.asarray(points[1])-points[0])*[width, height])))
     if not radius and element.get('shape') == 'roundRect':
-        radius = .035 * min(width, height)
+        adj = (element.get('adjustments') or {}).get('adj')
+        fraction = max(0., adj/100000) if isinstance(adj, (int, float)) else .035
+        radius = fraction * min(width, height)
     return min(.5 * min(width, height), radius)
 
 
@@ -226,9 +238,12 @@ def measure_corner(vertex, before_dir, after_dir, distance, valid, min_side, dec
         prior_type=(declared or {}).get('type') or 'sharp'
         return {'type':prior_type,'size':float((declared or {}).get('value') or 0)*min_side,'confidence':0.0}
     candidates = {}
-    for step in CORNER_STEPS:
-        size = step * min_side
-        for kind in ('round', 'cut'):
+    for kind in ('round', 'cut'):
+        for step in (*CORNER_STEPS, .17, .22, .28):
+            # Extend only when the minimum is still on the search boundary.
+            if step > CORNER_STEPS[-1] and (kind not in candidates or candidates[kind]['size'] != previous_size):
+                break
+            size = previous_size = step * min_side
             metric = _boundary_metric(_corner_points(vertex, before_dir, after_dir, span, kind, size),
                                       distance, valid)
             if not metric or metric['support'] < .45:
@@ -271,6 +286,11 @@ def measure_corner(vertex, before_dir, after_dir, distance, valid, min_side, dec
             chosen = dict(candidates['cut'])
     rivals=[base['cost']]+[c['cost'] for k,c in candidates.items() if k!=chosen['type']]
     margin=min(rivals)-chosen['cost']
+    # A compatible observed curve can corroborate the declared family when two
+    # rasterised corner models differ by less than a pixel. A fallback prior
+    # alone has no measured improvement and must not become a group reference.
+    if chosen['type']==declared_type and chosen['p95']<=1.5 and chosen['cost']<=.5:
+        margin=max(margin, min(.19, base['cost']-chosen['cost']))
     confidence=min(.95,float(base['support']))*min(1.,max(0.,margin)/.25) if chosen['p95']<=6 else 0.
     return {'type': chosen['type'], 'size': chosen['size'],
             'confidence': round(confidence, 3)}

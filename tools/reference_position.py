@@ -3,6 +3,7 @@ import json,sys
 from pathlib import Path
 import cv2
 import numpy as np
+from repeated_panel_position import locate_panels, panel_markers, source
 cv2.setNumThreads(1)
 
 
@@ -62,6 +63,17 @@ def locate_circle_columns(elements, reference, background):
             contour=max(contours,key=cv2.contourArea);perimeter=cv2.arcLength(contour,True)
             if not perimeter or 4*np.pi*cv2.contourArea(contour)/perimeter**2<.72:continue
             candidates.append((float(centres[i][0]+left),float(centres[i][1]+top)))
+        if len(candidates)<len(group) and diameter>=20:
+            # A disc attached to a banner may have no isolated fill component.
+            # Count closed circular rims, coalescing both faces of the same edge.
+            edges=cv2.Canny(crop,40,120)
+            for contour in cv2.findContours(edges,cv2.RETR_LIST,cv2.CHAIN_APPROX_SIMPLE)[0]:
+                x,y,w,h=cv2.boundingRect(contour)
+                if not .78*diameter<=min(w,h)<=max(w,h)<=1.23*diameter or max(w,h)>min(w,h)*1.12:continue
+                perimeter=cv2.arcLength(contour,True)
+                if 4*np.pi*cv2.contourArea(contour)/max(1,perimeter**2)<.75 or len(cv2.approxPolyDP(contour,.025*perimeter,True))<7:continue
+                point=(left+x+(w-1)/2,top+y+(h-1)/2)
+                if all(np.hypot(point[0]-px,point[1]-py)>diameter*.15 for px,py in candidates):candidates.append(point)
         # Exact cardinality and preserved order avoid guessing missing dots or
         # assigning one visible component to two registered instances.
         if len(candidates)!=len(group):continue
@@ -78,7 +90,7 @@ def locate_circle_columns(elements, reference, background):
     return output
 
 
-def locate(element,mask_file,reference):
+def locate(element,mask_file,reference,panel=None):
     key=element['key'];row={'key':key,'accepted':False}
     rendered=cv2.imread(str(mask_file),cv2.IMREAD_UNCHANGED)
     if rendered is None or rendered.ndim!=3 or rendered.shape[2]!=4:return {**row,'reason':'no-object-alpha'}
@@ -118,6 +130,10 @@ def locate(element,mask_file,reference):
     sx=float(seed.get('x',element['x']));sy=float(seed.get('y',element['y']))
     dx0=max(-radius_x,sx-radius_x-element['x']);dx1=min(radius_x,sx+radius_x-element['x'])
     dy0=max(-radius_y,sy-radius_y-element['y']);dy1=min(radius_y,sy+radius_y-element['y'])
+    if panel and text:
+        px,py,pw,ph=panel['referenceBox'];cx=sx+panel['shift'][0]-element['x'];cy=sy+panel['shift'][1]-element['y']
+        dx0=max(px-left,cx-radius_x);dx1=min(px+pw-right,cx+radius_x)
+        dy0=max(py-top,cy-radius_y);dy1=min(py+ph-bottom,cy+radius_y)
     tolerance_x=int(template.shape[1]*.11)+1 if text else 0
     tolerance_y=int(template.shape[0]*.11)+1 if text else 0
     x0=max(0,int(left+dx0));x1=min(1600,int(right+dx1+1)+tolerance_x);y0=max(0,int(top+dy0));y1=min(900,int(bottom+dy1+1)+tolerance_y)
@@ -160,7 +176,8 @@ def locate(element,mask_file,reference):
     scores=np.nan_to_num(scores,nan=0,posinf=0,neginf=0)
     _,best,_,at=cv2.minMaxLoc(scores);bx,by=at
     ix,iy=int(np.clip(left-x0,0,scores.shape[1]-1)),int(np.clip(top-y0,0,scores.shape[0]-1))
-    baseline=float(scores[iy,ix]);dx=float(x0+bx-left);dy=float(y0+by-top)
+    baseline=float(scores[iy,ix]) if x0<=left<x0+scores.shape[1] and y0<=top<y0+scores.shape[0] else 0.
+    dx=float(x0+bx-left);dy=float(y0+by-top)
     competing=scores.copy();competing[max(0,by-8):by+9,max(0,bx-8):bx+9]=0
     margin=float(best-competing.max())
     row.update(beforeScore=round(baseline,5),afterScore=round(best,5),margin=round(margin,5),dx=dx,dy=dy)
@@ -175,16 +192,74 @@ def locate(element,mask_file,reference):
     return {**row,'accepted':True,'x':round(element['x']+dx,3),'y':round(element['y']+dy,3),'confidence':round(min(.95,best)*min(1,margin/.04),4)}
 
 
+def badge_positions(relation, grouped, reference, masks):
+    circle,number,band,heading=(relation[k] for k in ('circle','number','band','heading'))
+    center=grouped.get(circle['key'],{}).get('referenceCenter')
+    def bgr(value):
+        try:return np.frombuffer(bytes.fromhex(value.lstrip('#')),dtype=np.uint8).reshape(3)[::-1].astype(float)
+        except (AttributeError,ValueError):return None
+    fill=bgr(band.get('fill'))
+    if not center or fill is None or band['w']<band['h']*2:return {}
+    cx,cy=center;radius=circle['w']/2
+    right=heading['x']+heading['w']/2>number['x']+number['w']/2
+    reach=band['w']*1.35+radius
+    x0=max(0,int(cx-(radius if right else reach)));x1=min(1600,int(cx+(reach if right else radius))+1)
+    y0=max(0,int(cy-band['h']));y1=min(900,int(cy+band['h'])+1)
+    crop=reference[y0:y1,x0:x1].astype(np.float32)
+    if not crop.size:return {}
+    region=(np.linalg.norm(crop-fill,axis=2)<90).astype(np.uint8)
+    _,_,stats,_=cv2.connectedComponentsWithStats(region,8)
+    candidates=[]
+    for x,y,w,h,area in stats[1:]:
+        left,top=x+x0,y+y0
+        near=left if right else left+w
+        if (.65*band['w']<=w<=1.3*band['w'] and .65*band['h']<=h<=1.35*band['h']
+                and area>w*h*.55 and abs(near-cx)<=radius*1.4 and abs(top+h/2-cy)<radius*.5):
+            candidates.append((left,top,w,h))
+    if len(candidates)!=1:return {}
+    left,top,w,h=candidates[0]
+    def position(e,x,y):
+        x,y=float(x),float(y)
+        return {'key':e['key'],'accepted':True,'x':round(x,3),'y':round(y,3),'dx':round(x-e['x'],3),
+                'dy':round(y-e['y'],3),'confidence':.9,'method':'registered-badge-and-banner-ink'}
+    rows={band['key']:position(band,left,top)}
+    for text in (number,heading):
+        ink=bgr(text.get('color'));file=masks.get(text['key'])
+        if ink is None or file is None or np.linalg.norm(ink-fill)<110:continue
+        if text is number:
+            yy,xx=np.ogrid[y0:y1,x0:x1];inner=(xx-cx)**2+(yy-cy)**2<(radius*.76)**2
+        else:
+            yy,xx=np.ogrid[y0:y1,x0:x1];inner=(xx>=left+4)&(xx<left+w-4)&(yy>=top+h*.16)&(yy<top+h*.84)
+            inner &= (xx>cx+radius+3) if right else (xx<cx-radius-3)
+        foreground=inner&(np.linalg.norm(crop-ink,axis=2)<70)
+        iy,ix=np.where(foreground)
+        if len(ix)<12:continue
+        rendered=cv2.imread(file,cv2.IMREAD_UNCHANGED)
+        if rendered is None or rendered.ndim!=3 or rendered.shape[2]!=4:continue
+        alpha=cv2.resize(rendered[:,:,3],(1600,900));sy,sx=np.where(alpha>max(24,float(alpha.max())*.45))
+        if not len(sx) or not .60<=(np.ptp(ix)+1)/(np.ptp(sx)+1)<=1.5 or not .55<=(np.ptp(iy)+1)/(np.ptp(sy)+1)<=1.7:continue
+        dx=x0+(ix.min()+ix.max()-sx.min()-sx.max())/2
+        dy=y0+(iy.min()+iy.max()-sy.min()-sy.max())/2
+        rows[text['key']]=position(text,text['x']+dx,text['y']+dy)
+    return rows
+
+
 def main():
     spec=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'));reference=cv2.resize(cv2.imread(spec['reference']),(1600,900))
     background=cv2.imread(spec['background']) if spec.get('background') else None
     if background is not None:background=cv2.resize(background,(1600,900))
     grouped=locate_circle_columns(spec.get('circleElements',spec['elements']),reference,background)
+    panels=spec.get('panels',[]);panel_rows=locate_panels(panels,reference)
+    grouped.update(panel_rows)
+    grouped.update(panel_markers(panels,panel_rows,spec.get('circleElements',[]),reference))
+    hints={e['key']:{**panel_rows[e['key']],'shift':[panel_rows[e['key']][k]-source(e)[k] for k in ('x','y')]} for e in panels if e['key'] in panel_rows}
     masks={m['key']:m.get('file') for m in spec.get('objectMasks',[])};results=[]
+    for relation in spec.get('badges',[]):
+        grouped.update(badge_positions(relation,grouped,reference,masks))
     for e in spec['elements']:
         if e['key'] in grouped:
             results.append(grouped[e['key']]);continue
-        try:row=locate(e,masks.get(e['key']),reference) if masks.get(e['key']) else {'key':e['key'],'accepted':False,'reason':'no-object-mask'}
+        try:row=locate(e,masks.get(e['key']),reference,hints.get(e.get('carrierId'))) if masks.get(e['key']) else {'key':e['key'],'accepted':False,'reason':'no-object-mask'}
         except Exception as error:row={'key':e['key'],'accepted':False,'reason':str(error)[:200]}
         results.append(row)
     Path(sys.argv[2]).write_text(json.dumps({'results':results},indent=1),encoding='utf-8')
