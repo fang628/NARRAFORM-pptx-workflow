@@ -7,6 +7,7 @@ import {syncPageDesignText} from './lib/page-design-text.mjs';
 import {savePageContentAction,savePipelinePageContentAction} from './lib/page-content-save.mjs';
 import {contentEditorView} from './lib/content-editor-view.mjs';
 import {prepareChapterPages} from './lib/chapter-workflow.mjs';
+import {indexMaterialFacts} from './lib/material-facts.mjs';
 import {materialStructureContext} from './lib/content-evidence-scope.mjs';
 import {designEditingActive,designOutputBusy,concurrentDesignEditActions} from './public/design-editing.js';
 import {regenerateProgressSections} from './lib/progress-regeneration.mjs';
@@ -155,8 +156,8 @@ function context(p,withEvidence=false) { return JSON.stringify({用户补充文�
 async function understandMaterials(p,signal,includeImages,options={}){
       const sources=sourceMaterials(p),stamp=materialStamp(p),readings=[],reviewNotes=options.reviewNotes??(analysisCurrent(p)?p.analysis.reviewNotes||'':'');
       const previous=p.analysisDraft,reusable=previous?.stamp===stamp&&previous.includeImages===includeImages&&previous.reviewNotes===reviewNotes?previous.readings:options.reuseReadings||[];
-      p.analysisDraft={stamp,includeImages,reviewNotes,readings,...(previous?.stamp===stamp&&previous.reviewNotes===reviewNotes?{relations:previous.relations}:{})};save(p);
-      const remember=reading=>{p.analysisDraft.stamp=materialStamp(p);readings.push(reading);readings.sort((a,b)=>sources.findIndex(m=>m.id===a.id)-sources.findIndex(m=>m.id===b.id));save(p);};
+      p.analysisDraft={stamp,includeImages,reviewNotes,readings,...(previous?.stamp===stamp&&previous.includeImages===includeImages&&previous.reviewNotes===reviewNotes?{relations:previous.relations,relationDraft:previous.relationDraft}:{})};save(p);
+      const remember=reading=>{p.analysisDraft.stamp=materialStamp(p);readings.push(indexMaterialFacts(reading));readings.sort((a,b)=>sources.findIndex(m=>m.id===a.id)-sources.findIndex(m=>m.id===b.id));save(p);};
       await runConcurrent(sources,async(m,i)=>{
         if(signal.aborted)throw Error('已取消');
         if(m.excludedFromContent||m.extracted&&m.documentFigure?.kind==='table')return;
@@ -378,7 +379,7 @@ async function performAction(p,b,res,fromQueue=false) {
       if(originalSlides){p.brief.pages=originalSlides.length;p.brief.cover=originalSlides[0].kind==='cover';p.brief.toc=originalSlides.some(s=>s.kind==='toc');if(!/增加.{0,6}进度条/.test(p.brief.purpose))p.brief.progress=false;if(p.analysis)p.analysis.stamp=materialStamp(p);}
       else await prepareImageReadability(p,{root,data,run,save},signal);
       if(!originalSlides){
-        const instructions=`只生成当前规划指定的一页，输出 {slide:{kind:"cover|toc|content|section|thanks",progressSectionId:"沿用规划的章节编号",title:"沿用规划标题",subtitle:"不超过40字",body:[],notes:"讲稿",sources:["实际材料id"],${sourceSchema},imageId:null,${elementSchema}}}。完整文案以elements为准，不用body段数约束合并正文。标题role=title且为唯一最高根项，其他顶层内容parentId指向标题；副标题role=subtitle，正文role=body。并列节点使用相同parentId，附属说明及配图指向所解释的节点，同组并排用group.layout=row。确需小标题时使用group.label统领子项，text.label仅作内部标签，不因标签增加标题。每个独立正文信息分别建节点。仅插入本页规划的登记图片，image.materialId为真实材料id，节点id只用于树结构；图注与图片标题二选一并从属于图片。每条材料文本与表格在sourceLinks绑定element:节点id及该材料真实excerptId，quote留空由程序回填，不能把材料摘要当原文；图片来源由程序建立，不另写sourceLinks。封面、目录等源于制作要求的文字可不引用材料。只依据本页范围和证据写作，不虚构缺失事实。`;
+        const instructions=`只生成当前规划指定的一页，输出 {slide:{kind:"cover|toc|content|section|thanks",progressSectionId:"沿用规划的章节编号",title:"沿用规划的简洁标题",subtitle:"没有独立新增信息时为空字符串；必要时不超过40字",body:[],notes:"讲稿",sources:["实际材料id"],${sourceSchema},imageId:null,${elementSchema}}}。完整文案以elements为准，不用body段数约束合并正文。标题role=title且为唯一最高根项，其他顶层内容parentId指向标题；仅有必要副标题时建立role=subtitle节点，留空时不生成该节点，正文role=body。并列节点使用相同parentId，附属说明及配图指向所解释的节点，同组并排用group.layout=row。确需小标题时使用group.label统领子项，text.label仅作内部标签，不因标签增加标题。每个独立正文信息分别建节点。仅插入本页规划的登记图片，image.materialId为真实材料id，节点id只用于树结构；图注与图片标题二选一并从属于图片。每条材料文本与表格在sourceLinks绑定element:节点id及该材料真实excerptId，quote留空由程序回填，不能把材料摘要当原文；图片来源由程序建立，不另写sourceLinks。封面、目录等源于制作要求的文字可不引用材料。只依据本页范围和证据写作，内部表达目的和材料用途说明不直接抄到页面，不虚构缺失事实。`;
         const validatePage=(raw,spec,references=true)=>{
           const [slide]=validateSlides([raw],p.brief);
           if(slide.kind!==spec.kind||slide.title!==spec.title)throw Error('单页内容须保持全篇规划的页型与标题，只生成指定页');
