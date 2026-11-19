@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 
 GRADIENT_KINDS = ('linear', 'radial', 'rectangular')
-VERSION=9
+VERSION=10
 HOLDOUT_MIN_TRAIN=24
 HOLDOUT_MIN_TEST=12
 HOLDOUT_MIN_RANGE=.8
@@ -187,6 +187,27 @@ def colour_range_violation(colors,observed,minimum_span=96.0,scale=5.0):
             'observedMedian':[round(float(value),1) for value in median],
             'allowedSpan':[round(float(value),1) for value in allowed]}
 
+def unsupported_gradient_stops(candidate,observed,holdout):
+    violation=colour_range_violation(candidate['colors'],observed)
+    if violation is None:return None
+    residual=np.mean(np.abs(candidate['predicted']-observed),axis=1)
+    unsupported=[]
+    for index,colour in zip(violation['outsideStops'],violation['stopColours']):
+        distance=np.abs(candidate['t']-candidate['knots'][index])
+        closest=distance<=.05
+        held=np.flatnonzero(holdout)
+        nearby=held[distance[held]<=.22]
+        local=nearby[np.argsort(distance[nearby])[:12]]
+        # A narrow, real endpoint may be far from the slide-wide median. Require
+        # nearby independent pixels that the fitted colour ramp actually explains.
+        if closest.sum()<3 or len(local)<3 or np.percentile(residual[closest],80)>4 or np.percentile(residual[local],80)>4:
+            unsupported.append((index,colour))
+    if unsupported:
+        violation['outsideStops']=[index for index,_ in unsupported]
+        violation['stopColours']=[colour for _,colour in unsupported]
+        return violation
+    return None
+
 def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=None,budget=None):
     """Fit one native fill model under a bounded candidate/time budget.
 
@@ -247,7 +268,7 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
     if before<2:return reject('already-close',beforeError=round(before,3))
     if variance<12:return reject('uniform-fill-use-solid-model')
     if max(np.ptp(xx)/max(1,element['w']),np.ptp(yy)/max(1,element['h']))<.35:return reject('insufficient-spatial-coverage')
-    train,test,holdout_layout=spatial_holdout(xx,yy);candidates=[]
+    train,test,holdout_layout=spatial_holdout(xx,yy);candidates=[];evaluated={}
     observed_train=observed[train]
     # Stop-count freedom must be supported by the object's actual pixel size: a 34 px icon
     # cannot resolve five independently measured stops, and per-instance noise then produces
@@ -257,16 +278,19 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
     if int(limit.get('sharedInstances',1))>=2 and len(pixels)>=1000:
         max_knots=min(5,max(max_knots,int(limit.get('maxStops',max_knots))))
     def evaluate(kind,angle=0,center=(.5,.5),knots=None):
-        if over_budget():return None
-        state['evaluated']+=1
-        t=np.asarray(paint_coordinate(kind,xx,yy,element,angle,center),float)
-        if np.ptp(t)<.24:return None
         knots=np.array([0.,1.] if knots is None else knots)
         if len(knots)>max_knots:return None
         # Stop freedom follows physical support, rather than the residual at a
         # few polluted pixels. Narrow real highlights need their own samples.
         physical=max(1.,min_dimension)
         if len(knots)>2 and np.min(np.diff(knots))*physical<5:return None
+        key=(kind,round(angle,5),tuple(round(v,5) for v in center),tuple(np.round(knots,5)))
+        if key in evaluated:return evaluated[key]
+        if over_budget():return None
+        evaluated[key]=None
+        state['evaluated']+=1
+        t=np.asarray(paint_coordinate(kind,xx,yy,element,angle,center),float)
+        if np.ptp(t)<.24:return None
         matrix=_spline(t,knots)
         training_design=matrix[train]
         if np.linalg.matrix_rank(training_design)<len(knots):return None
@@ -290,15 +314,28 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
         slopes=np.diff(colors,axis=0)/np.diff(knots)[:,None]/physical
         bending=float(np.mean(np.linalg.norm(np.diff(slopes,axis=0),axis=1))) if len(slopes)>1 else 0.
         reversals=max(0.,float(np.sum(np.linalg.norm(np.diff(colors,axis=0),axis=1))-np.linalg.norm(colors[-1]-colors[0])))
-        smoothness=.25*bending+.012*reversals
+        smoothness=min(.65,.12*bending)+min(.65,.005*reversals)
         item=dict(kind=kind,angle=angle,center=center,colors=colors,knots=knots,error=error,robust=robust,r2=r2,score=robust*.65+error*.35+.5*(len(knots)-2)+smoothness+(0 if kind=='linear' else .25),predicted=predicted,t=t)
+        evaluated[key]=item
         candidates.append(item);return item
     def coarse(kind,angle=0,center=(.5,.5)):
         options=[[0.,1.],[0.,.3,1.],[0.,.5,1.],[0.,.7,1.],[0.,.25,.5,.75,1.]]
-        if isinstance(current,dict) and current.get('type')==kind:
-            positions=[stop['position'] for stop in current.get('stops') or [] if isinstance(stop,dict)]
+        # The audited paint's stop positions are coordinate evidence of where the colour and
+        # alpha breakpoints sit, independent of the gradient family being tried. Offering them
+        # only to the matching family hid a real kink from the alternatives: a rectangular truth
+        # whose colour breakpoint sat at 0.4 could only approximate it with a synthetic 0.5 stop.
+        if isinstance(current,dict) and current.get('type') in GRADIENT_KINDS:
+            try:
+                positions=_unique_sorted([float(stop['position']) for stop in current.get('stops') or [] if isinstance(stop,dict)])
+            except (KeyError,TypeError,ValueError):
+                positions=[]
+            positions=[value for value in positions if 0<=value<=1]
             if len(positions)>=2:options.append(positions)
-        for knots in options:evaluate(kind,angle,center,knots)
+        seen=set()
+        for knots in options:
+            key=tuple(round(float(value),6) for value in knots)
+            if key in seen:continue
+            seen.add(key);evaluate(kind,angle,center,list(key))
     def geometry_seeds(paint_kind,limit=3):
         seeds=[]
         for c in sorted((c for c in candidates if c['kind']==paint_kind),key=lambda c:c['score']):
@@ -344,8 +381,11 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
                 else:
                     for a in np.arange(first['angle']-12,first['angle']+13,3):evaluate(paint_kind,float(a)%angle_period,knots=first['knots'])
             elif fine:
-                for dx in (-.03,-.01,0,.01,.03):
-                    for dy in (-.03,-.01,0,.01,.03):
+                # Keep 0.02 in the fine focus grid: the previous set skipped it, so a focus such
+                # as x=.32 could not be reached from a .30 seed and rectangular/radial gradients
+                # retained a visible crease residual at the centre line.
+                for dx in (-.03,-.02,-.01,0,.01,.02,.03):
+                    for dy in (-.03,-.02,-.01,0,.01,.02,.03):
                         trial=(first['center'][0]+dx,first['center'][1]+dy)
                         if min(trial)>=.01 and max(trial)<=.99:evaluate(paint_kind,center=trial,knots=first['knots'])
             else:
@@ -371,12 +411,47 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
                 q=min(choices,key=lambda c:c['score'])
                 if q['score']>=best['score']-.15:break
                 best=q;knots=list(q['knots'])
-            for i in range(1,len(knots)-1):
-                for delta in np.arange(-.15,.151,.025):
-                    trial=knots.copy();trial[i]+=delta
-                    if trial[i-1]+.025<trial[i]<trial[i+1]-.025:
-                        q=evaluate(seed['kind'],seed['angle'],seed['center'],trial)
-                        if q and q['score']<best['score']:best=q;knots=trial
+            refine_stops(best,np.arange(-.125,.126,.025))
+
+    def refine_stops(best,offsets):
+        for i in range(1,len(best['knots'])-1):
+            anchor=best['knots']
+            for offset in offsets:
+                if abs(offset)<1e-6:continue
+                trial=anchor.copy();trial[i]+=offset
+                if trial[i-1]+.025<trial[i]<trial[i+1]-.025:
+                    candidate=evaluate(best['kind'],best['angle'],best['center'],trial)
+                    if candidate and candidate['score']<best['score']:best=candidate
+        return best
+
+    def polish(kind):
+        seeds=[c for c in candidates if c['kind']==kind]
+        if not seeds:return
+        best=min(seeds,key=lambda item:item['score'])
+        if alpha_stops is not None:
+            evaluate(kind,best['angle'],best['center'],alpha_stops[0])
+        for count in (3,4):
+            simpler=[c for c in seeds if len(c['knots'])==count]
+            if simpler:
+                seed=min(simpler,key=lambda item:item['score'])
+                refine_stops(seed,np.arange(-.12,.121,.01))
+        best=min((c for c in candidates if c['kind']==kind),key=lambda item:item['score'])
+        if kind=='linear':
+            for delta in (-2,-1.5,-1,-.5,.5,1,1.5,2):
+                evaluate(kind,(best['angle']+delta)%angle_period,knots=best['knots'])
+        else:
+            for dx in (-.01,0,.01):
+                for dy in (-.01,0,.01):
+                    if dx==dy==0:continue
+                    center=(best['center'][0]+dx,best['center'][1]+dy)
+                    if min(center)>=.01 and max(center)<=.99:evaluate(kind,center=center,knots=best['knots'])
+        best=min((c for c in candidates if c['kind']==kind),key=lambda item:item['score'])
+        if alpha_stops is not None:
+            evaluate(kind,best['angle'],best['center'],alpha_stops[0])
+        for middle in (.3,.4,.5,.6,.7):
+            evaluate(kind,best['angle'],best['center'],[0.,middle,1.])
+        best=min((c for c in candidates if c['kind']==kind),key=lambda item:item['score'])
+        refine_stops(best,np.arange(-.03,.031,.005))
 
     def strong(item):
         # Near-exact only. Wrong direction/type can be fitted to a low residual when the stop
@@ -390,6 +465,7 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
         refine(kinds)
         greedy_stops(kinds)
         refine(kinds,fine=True)
+        for paint_kind in kinds:polish(paint_kind)
 
     # Priority 1: keep the audited paint type and direction range only when that family fits
     # essentially exactly there. A merely low residual is not enough: 3+ flexible stops can
@@ -431,13 +507,13 @@ def fit_native_paint(pixels,xx,yy,element,current,diagnostics=None,background=No
                       holdoutSplit=holdout_layout,trainSamples=int(train.sum()),holdoutSamples=int(test.sum()))
     # Foreground pollution guard: a fitted stop must stay inside the visible colour range.
     if not composited:
-        violation=colour_range_violation(best['colors'],observed)
+        violation=unsupported_gradient_stops(best,observed,test)
         if violation:
             replacement=None
             for candidate in sorted(candidates,key=lambda item:item['score']):
                 if candidate is best:continue
                 if candidate['error']>max(12.0,best['error']*1.5+1.0):continue
-                if colour_range_violation(candidate['colors'],observed):continue
+                if unsupported_gradient_stops(candidate,observed,test):continue
                 replacement=candidate;break
             if replacement is None:return report('colour-outside-visible-range',**violation)
             best=replacement

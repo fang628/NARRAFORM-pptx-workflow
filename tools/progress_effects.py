@@ -42,21 +42,30 @@ def gradient_fit(pixels):
         return None, evidence
     if error > 3.5 or agreement < .99:
         return None, {**evidence, 'status': 'unobservable', 'reason': 'nonlinear-or-horizontal-surface'}
+    # A traced contour may include a few pixels of shadow, stroke or halo.
+    # Anchor the extrapolated paint at the nearest rows that support the fit.
+    edge = min(4, max(1, round(h*.05)))
+    limits = np.r_[0:edge+1, h-edge-1:h]
+    fractions = limits/(h-1)
+    predicted = coef[0] + fractions[:, None]*coef[1]
+    matches = np.max(np.abs(np.median(pixels[limits], axis=1)-predicted), axis=1) <= max(3, error*2.5)
+    top = next(iter(fractions[:edge+1][matches[:edge+1]]), 0)
+    bottom = next(iter(fractions[edge+1:][matches[edge+1:]][::-1]), 1)
     return {'type': 'linear', 'angle': 90, 'stops': [
-        {'position': 0, 'color': hexa(coef[0]), 'opacity': 1},
-        {'position': 1, 'color': hexa(coef.sum(axis=0)), 'opacity': 1}]}, {**evidence, 'status': 'present'}
+        {'position': 0, 'color': hexa(coef[0]+top*coef[1]), 'opacity': 1},
+        {'position': 1, 'color': hexa(coef[0]+bottom*coef[1]), 'opacity': 1}]}, {**evidence, 'status': 'present'}
 
 
-def exterior_fit(image, x0, x1, y, h, scale):
+def exterior_fit(image, x0, x1, y, h, scale, background=None):
     """Estimate symmetric light tails and vertically offset dark tails.
 
     A hard stroke is excluded by a three-pixel guard. Texture, clipped overscan,
     mixed light/dark tails and unsupported horizontal offsets are not guessed.
     """
-    radius = max(12, round(30*scale))
     guard = max(2, round(3*scale))
+    radius = min(max(12, round(30*scale)), y, image.shape[0]-y-h)
     evidence = {'Shadow': {'status': 'unobservable', 'reason': 'clipped-overscan'}}
-    if y-radius < 0 or y+h+radius >= image.shape[0]:
+    if radius < max(guard+6, round(14*scale)):
         return {}, evidence
     distances = np.arange(guard, radius+1, dtype=float)
     strips = [image[np.round(y-distances).astype(int), x0:x1],
@@ -66,21 +75,32 @@ def exterior_fit(image, x0, x1, y, h, scale):
     far = distances >= radius*.73
     design = np.column_stack((np.ones(len(distances)), distances))
     baselines = []; noise = []; support = []
-    for strip, profile in zip(strips, profiles):
-        coef = np.linalg.lstsq(design[far], profile[far], rcond=None)[0]
-        baseline = design@coef
+    background_strips = None if background is None else [
+        background[np.round(y-distances).astype(int), x0:x1],
+        background[np.round(y+h-1+distances).astype(int), x0:x1]]
+    for index, (strip, profile) in enumerate(zip(strips, profiles)):
+        if background_strips is None:
+            coef = np.linalg.lstsq(design[far], profile[far], rcond=None)[0]
+            baseline = design@coef
+            if np.max(np.abs(coef[1])) > .45/scale:
+                return {}, {k: {'status': 'unobservable', 'reason': 'background-trend'} for k in evidence}
+        else:
+            baseline = np.median(background_strips[index], axis=1)
+            if np.max(np.abs(np.median(profile[far]-baseline[far], axis=0))) > 6:
+                return {}, {'Shadow': {'status': 'unobservable', 'reason': 'background-mismatch'}}
         baselines.append(baseline)
         noise.append(float(np.sqrt(np.mean((profile[far]-baseline[far])**2))))
-        support.append(float(np.median(np.std(strip[far], axis=1))))
-        if np.max(np.abs(coef[1])) > .45/scale:
-            return {}, {k: {'status': 'unobservable', 'reason': 'background-trend'} for k in evidence}
+        residual_strip = strip if background_strips is None else strip-background_strips[index]
+        support.append(float(np.median(np.std(residual_strip[far], axis=1))))
     if max(noise) > 2 or max(support) > 6:
         return {}, {k: {'status': 'unobservable', 'reason': 'background-texture'} for k in evidence}
     baseline = np.array(baselines)
     residual = profiles-baseline
     # Separate horizontal bands must see the same exterior tail.
-    bands = [np.array([np.median(b, axis=1) for b in np.array_split(strip, 3, axis=1)]) for strip in strips]
-    disagreement = max(float(np.median(np.abs(b-profile))) for b, profile in zip(bands, profiles))
+    residual_strips = [strip-baseline[:, None] if background_strips is None else strip-background_strips[i]
+                       for i, (strip, baseline) in enumerate(zip(strips, baselines))]
+    bands = [np.array([np.median(b, axis=1) for b in np.array_split(strip, 3, axis=1)]) for strip in residual_strips]
+    disagreement = max(float(np.median(np.abs(b-profile))) for b, profile in zip(bands, residual))
     if disagreement > 3:
         return {}, {k: {'status': 'unobservable', 'reason': 'exterior-obstructed'} for k in evidence}
     luma = residual@np.array([.2126, .7152, .0722])

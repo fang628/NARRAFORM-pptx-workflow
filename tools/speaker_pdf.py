@@ -34,12 +34,13 @@ def build(source, output):
     def para(text, style=body):
         return Paragraph(escape(str(text)).replace("\n", "<br/>"), style)
     pages = data["pages"]
-    story = [para(f'共 {len(pages)} 个PPT页 · 建议总时长约 {data["totalSeconds"] / 60:.1f} 分钟（按文字量估算）', meta)]
+    story = [para(f'共 {len(pages)} 页讲稿 · 建议总时长约 {data["totalSeconds"] / 60:.1f} 分钟（按文字量估算）', meta)]
     material_names = {m["id"]: m["name"] for m in data.get("materials", [])}
     for i, page in enumerate(pages):
+        number = page.get("pageNumber", i + 1)
         seconds = page["seconds"]
-        story += [para(f'{i+1:02d}. {page["title"]}', title),
-                  para(f'对应PPT第{i+1}页 · 建议讲述 {seconds // 60}分{seconds % 60:02d}秒（按文字量估算）', timing)]
+        story += [para(f'{number:02d}. {page["title"]}', title),
+                  para(f'对应PPT第{number}页 · 建议讲述 {seconds // 60}分{seconds % 60:02d}秒（按文字量估算）', timing)]
         if page["opening"]:
             story += [para("开场 / 本页观点", label), para(page["opening"])]
         story += [para("讲述正文", label)]

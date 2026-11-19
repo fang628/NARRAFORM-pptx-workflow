@@ -85,6 +85,11 @@ def reference_cutout(image, background, artistic=False, isolation=None):
         big = result.resize((result.width * 2, result.height * 2), Image.Resampling.LANCZOS)
         sharpened = big.convert('RGB').filter(ImageFilter.UnsharpMask(radius=1.0, percent=45, threshold=2))
         big = Image.merge('RGBA', (*sharpened.split(), big.getchannel('A')))
-        report.update(width=big.width, height=big.height, upscale=2, sourceWidth=result.width, sourceHeight=result.height)
+        # trimBox and sourceWidth/sourceHeight describe the *input canvas* (the expanded crop):
+        # callers normalise trimBox by them to place the asset back on the page. Overwriting them
+        # with the cropped result size made localCutoutTrim divide by the wrong frame, so every
+        # upscaled local cutout landed at the wrong position/scale. Keep the canvas contract and
+        # report the upscaled output size through width/height plus the explicit upscale factor.
+        report.update(width=big.width, height=big.height, upscale=2)
         result = big
     return result, report

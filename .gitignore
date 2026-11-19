@@ -22,7 +22,6 @@
 /tools/replay-step05.mjs
 /tools/crop_zoom.py
 /tools/paint_quality.py
-/lib/rebuild-pipeline.mjs
 /docs/step05-*.md
 
 # Dependencies and Python environments

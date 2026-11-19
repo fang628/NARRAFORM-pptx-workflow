@@ -50,7 +50,7 @@ import {isDeepStrictEqual} from 'node:util';
 import {themes,validateSlides,svg} from './lib/scene.mjs';
 import {chat,parseJSON,generatedImage} from './lib/provider.mjs';
 import {observeTask,recordProgress} from './lib/task-progress.mjs';
-import {sourceMaterials,materialStamp,analysisCurrent,evidenceCatalog,editedOutline} from './lib/materials.mjs';
+import {sourceMaterials,materialStamp,analysisCurrent,editedOutline} from './lib/materials.mjs';
 import {synthesizeMaterials} from './lib/material-synthesis.mjs';
 import {readMaterialWithEvidence} from './lib/material-reading.mjs';
 import {readMaterialChunks,publicMaterialRecord} from './lib/material-chunks.mjs';
@@ -71,7 +71,7 @@ import {initialElements,validateElements,validateImageAnnotations,syncLegacy,ele
 import {imagePromptSuffix,checkedPrompt,promptDraftKey} from './lib/image-prompts.mjs';
 import {workspaceAction} from './lib/workspace-actions.mjs';
 import {pageDesignStamp,pageDesignState,draftPageDesigns,draftOnePageDesign} from './lib/page-design.mjs';
-import {reconstructionCurrent,validateReconstruction,originalPrimitives} from './lib/reconstruction.mjs';
+import {reconstructionCurrent} from './lib/reconstruction.mjs';
 import {visualAction,visualPublic,visualRoute,reuseConceptPreviews,verifyCandidate} from './lib/visual-pipeline.mjs';
 import {workflowFile,workflowLibrarySummary} from './lib/workflow-library.mjs';
 import {speakerScriptAction,speakerScriptPublic,speakerScriptRoute} from './lib/speaker-script.mjs';
@@ -150,7 +150,7 @@ function clean(p) {
     apiPersistence:credentialVault.mode,apiPersistenceWarning:credentials.warning,apiConfigurationScope:'shared',provider:Object.fromEntries(['text','image','elementImage'].map(type=>[type,c[type]?{baseURL:c[type].baseURL,model:c[type].model}:null])),
     downstreamReuse:downstreamReuseState(p),contentRestore:contentRestoreState(p),imageTaskQueue:publicImageTasks(p),imageTaskQueueEnabled:true,designTaskQueueEnabled:true,imageTaskReorderEnabled:true,executionConcurrency:concurrencyLimit(p.executionConcurrency),...visualPublic(p,{data,getImage,save}),...styleFavoritesPublic(p,data),...speakerScriptPublic(p),
     analysisResumeCount:p.analysisDraft?.stamp===materialStamp(p)?p.analysisDraft.readings.filter(r=>r.status==='read'&&readingCoversMaterial(r,p.materials.find(m=>m.id===r.id))).length:0,
-    slides:editorView.slides,pageDesigns:Object.fromEntries(editorView.slides.map((s,i)=>[i,pageDesignState(editorView,i)]).filter(([,d])=>d)),reconstructionCurrent:reconstructionCurrent(p),analysisCurrent:analysisCurrent(p),apiReady:!!c.text?.key,imageReady:!!c.image?.key,elementImageReady:!!(c.elementImage?.key||c.image?.key),ocrReady:!!c.text?.key,rebuildReady:!!c.text?.key,rebuildModel:c.text?.model||null};
+    slides:editorView.slides,pageDesigns:Object.fromEntries(editorView.slides.map((s,i)=>[i,pageDesignState(editorView,i)]).filter(([,d])=>d)),analysisCurrent:analysisCurrent(p),apiReady:!!c.text?.key,imageReady:!!c.image?.key,elementImageReady:!!(c.elementImage?.key||c.image?.key),ocrReady:!!c.text?.key,rebuildReady:!!c.text?.key};
 }
 function ensure(p,test,message) { if(!test) throw Error(message); }
 function unlocked(p) { ensure(p,projects.get(p.id)===p,'项目不存在');ensure(p,!tasks.has(p.id)&&!uploads.has(p.id),'当前任务或材料发送中，请等待完成或先取消');ensure(p,!credentialWrites.has(p.id),'API 配置正在保存，请稍后重试'); }
@@ -308,7 +308,7 @@ async function performAction(p,b,res,fromQueue=false) {
   }
   if(b.action==='restoreContentCheckpoint'){const result=restoreContentCheckpoint(p);event(p,'已撤回02误改，恢复 '+result.pages+' 页内容、预览与重建结果');return json(res,200,clean(p));}
   if(b.action==='reuseDownstream'){const result=reuseDownstream(p);event(p,`已跳过重生成，沿用 ${result.designs} 页设计与 ${result.previews} 页布局参考；文案以当前内容树为准`);return json(res,200,clean(p));}
-  if(['cropMaterialImages','requirements','removeMaterial','approveAnalysis','saveContent','savePageContent','syncPageDesignText','revise','recognizeRelations','content','acceptOCR','image','designPage','revisePageDesign','savePageDesign','approvePageDesign','draftPageDesigns','regenerateThemeDirection','changeThemeDirection','generateThemeAssets','generateThemeAsset','setThemeBackgroundUse'].includes(b.action)&&(!['designPage','revisePageDesign','savePageDesign','approvePageDesign','draftPageDesigns','regenerateThemeDirection','changeThemeDirection','generateThemeAssets','generateThemeAsset','setThemeBackgroundUse'].includes(b.action)||p.concepts.some(c=>c.mode==='ai'&&c.representatives?.length)))captureReusableResults(p);
+  if(['cropMaterialImages','requirements','removeMaterial','approveAnalysis','saveContent','savePageContent','syncPageDesignText','revise','recognizeRelations','content','acceptOCR','image','designPage','revisePageDesign','savePageDesign','approvePageDesign','draftPageDesigns','regenerateThemeDirection','changeThemeDirection','generateThemeAssets','generateThemeAsset'].includes(b.action)&&(!['designPage','revisePageDesign','savePageDesign','approvePageDesign','draftPageDesigns','regenerateThemeDirection','changeThemeDirection','generateThemeAssets','generateThemeAsset'].includes(b.action)||p.concepts.some(c=>c.mode==='ai'&&c.representatives?.length)))captureReusableResults(p);
   if(await speakerScriptAction(p,b,{credentials,launch,ensure,event,save,run,root,data,system})){save(p);return json(res,200,clean(p));}
   if(await visualAction(p,b,{credentials,launch,ensure,event,save,run,root,data,getImage,system})){save(p);return json(res,200,clean(p));}
   if(await materialImageAction(p,b,{credentials,launch,ensure,event,save,run,root,data,system,materialsChanged,reunderstand:async(signal,ids,previous)=>understandMaterials(p,signal,true,{imageIds:ids,reuseReadings:previous?.readings,reviewNotes:previous?.reviewNotes||''})})){save(p);return json(res,200,clean(p));}
@@ -347,7 +347,9 @@ async function performAction(p,b,res,fromQueue=false) {
     launch(p,'测试文字 API',async signal=>{const r=await chat(credentials.get(p.id)?.text,'Reply briefly.','请回复：连接成功',signal); if(signal.aborted) throw Error('已取消'); p.lastUsage=r.usage; p.apiTest={at:new Date().toISOString(),ok:true};});
   } else if(b.action==='requirements') {
     const next=briefOf(b.brief),sections=b.progressSections===undefined?null:validateProgressSections(b.progressSections);
-    const changed=Object.keys(next).filter(k=>next[k]!== (k==='cover'?p.brief.cover!==false:p.brief[k]));
+    if(b.brief.speaker===undefined)next.speaker=p.brief.speaker;
+    const previous={...p.brief,cover:p.brief.cover!==false,chapterPages:p.brief.chapterPages===true};
+    const changed=Object.keys(next).filter(k=>next[k]!==previous[k]);
     const footerChanged=b.brief.pageNumbers!==undefined&&(p.pageNumbers===true)!==b.brief.pageNumbers;
     if(footerChanged&&!changed.length&&sections===null){p.pageNumbers=b.brief.pageNumbers;event(p,'已更新页脚页码选项，05重新构建时应用；内容与预览保留');return json(res,200,clean(p));}
     if(b.brief.pageNumbers!==undefined)p.pageNumbers=b.brief.pageNumbers;
@@ -608,7 +610,7 @@ const server=http.createServer(async(req,res)=>{
         } finally {uploads.delete(p.id);}
       }
       if(req.method==='GET'&&speakerScriptRoute(p,parts,url,res,{sendFile,ensure,data}))return;
-      if(req.method==='GET'&&visualRoute(p,parts,url,res,{sendFile,ensure,root,data,getImage}))return;
+      if(req.method==='GET'&&await visualRoute(p,parts,url,res,{sendFile,ensure,root,data,getImage}))return;
       if(parts[3]==='assets'&&parts[4]&&req.method==='GET') {const file=getImage(p,parts[4]);if(!file) throw Error('图片不存在');return sendFile(res,file,path.extname(file)==='.svg'?'image/svg+xml':path.extname(file)==='.png'?'image/png':'image/jpeg');}
       if(parts[3]==='preview'&&req.method==='GET') {
         const i=Number(url.searchParams.get('slide')||0),theme=p.concepts.find(c=>c.id===url.searchParams.get('theme'))||p.concepts.find(c=>c.id===p.selectedTheme)||themes[0];if(!p.slides[i]) throw Error('页面不存在');

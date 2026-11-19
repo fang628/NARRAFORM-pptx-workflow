@@ -23,7 +23,7 @@ from parallel_candidates import measured_parallel_candidates
 from parameter_confidence import weighted_median,provenance
 from structural_edges import match_panel
 from object_masks import object_alpha,mask_entries
-from arrow_geometry_fit import arrow_kind,fit_arrow_parameters
+from arrow_geometry_fit import arrow_kind,arrow_points,fit_arrow_parameters,pair_score
 
 cv2.setNumThreads(1)
 WIDTH, HEIGHT = 1600, 900
@@ -801,6 +801,44 @@ def fit_capsule(e,ref,distance,valid):
         {'type':'shape','shape':'roundRect','shapeGeometry':{'version':2,'cornerRadius':fraction,'corners':[{'type':'round','radius':fraction} for _ in range(4)]},'customGeometry':None,'adjustments':None,'flipH':False,'flipV':False},'metrics':metric}
 
 
+def fit_notched_alternative(element, box, ref, distance, valid, hex_metric):
+    if min(box[2:]) < 16 or element.get('arrowRole') == 'connector' or set(element.get('keepParameters') or []).intersection(
+            ('geometry', 'shape', 'slant', 'headDepth', 'notchDepth', 'rotation')):
+        return None
+    directions = ('left', 'right') if box[2] >= box[3] else ('up', 'down')
+    candidates = []
+    for direction in directions:
+        seed = {**element, 'shape': 'chevron', 'arrowTail': 'notched', 'arrowDirection': direction,
+                'shapeGeometry': None, 'customGeometry': None, 'adjustments': None}
+        trial = fit_arrow_parameters(seed, ref, distance, valid, score)
+        metric = trial.get('metrics')
+        if (not metric or metric['support'] < .85 or metric['p95'] > 3
+                or metric['cost'] >= hex_metric['cost']*.65):
+            continue
+        evidence = trial['parameterEvidence']
+        if any(evidence[name]['confidence'] < .68 for name in ('headDepth', 'notchDepth')):
+            continue
+        props = trial['properties']
+        geometry = props['shapeGeometry']
+        fitted_box = [props[k] for k in ('x', 'y', 'w', 'h')]
+        length = fitted_box[3] if direction in ('up', 'down') else fitted_box[2]
+        if min(geometry['headDepth'], geometry['notchDepth'])*length < 4:
+            continue
+        points = arrow_points(seed, fitted_box, geometry['headDepth'], geometry['notchDepth'])
+        rails = pair_score(points, (0, 3), distance, valid)
+        if not rails or rails['support'] < .8 or rails['p95'] > 3:
+            continue
+        props.update(type='shape', shape='chevron', contourKind='arrow', arrowRole='carrier',
+                     arrowTail='notched', arrowDirection=direction, customGeometry=None,
+                     adjustments=None, flipH=False, flipV=False)
+        trial.update(method='hexagon-to-notched-arrow', before=hex_metric)
+        candidates.append(trial)
+    candidates.sort(key=lambda row: row['metrics']['cost'])
+    if len(candidates) == 1 or len(candidates) == 2 and candidates[1]['metrics']['cost'] > candidates[0]['metrics']['cost']+.35:
+        return candidates[0]
+    return None
+
+
 def fit(e, ref, distance, edge, valid):
     started = time.perf_counter()
     g=e.get('shapeGeometry') or {};corners=g.get('corners') or []
@@ -938,7 +976,7 @@ def fit(e, ref, distance, edge, valid):
                 properties['customGeometry']={'points':((p-[x,y])/[w,h]).tolist(),'closed':True}
         # Measure the four slanted sides independently of the horizontal span.
         # Keep the six-edge symmetry, but do not fix every hexagon at depth .25.
-        if accepted and not any(p in e.get('keepParameters',[]) for p in ('geometry','shape','slant','headDepth')):
+        if not any(p in e.get('keepParameters',[]) for p in ('geometry','shape','slant','headDepth')):
             vertical=bool(e.get('_hexVertical'));winner=None
             for values in (np.linspace(.04,.46,43),None):
                 if values is None:
@@ -950,8 +988,12 @@ def fit(e, ref, distance, edge, valid):
                     points=normalized*[w,h]+[x,y];observed=score(points,distance,valid)
                     if observed and (winner is None or observed['cost']<winner[0]):winner=(observed['cost'],float(depth),observed,normalized)
             if winner and winner[2]['support']>=.7 and winner[2]['p95']<=3 and winner[2]['cost']<=metric['cost']+.1:
-                metric=winner[2];properties['shapeGeometry']={'headDepth':round(winner[1],6)}
+                accepted=True;metric=winner[2];properties['shapeGeometry']={'headDepth':round(winner[1],6)}
                 if vertical:properties['customGeometry']={'points':winner[3].tolist(),'closed':True}
+        if not accepted and metric['p95'] > 6:
+            alternative = fit_notched_alternative(e, box, ref, distance, valid, metric)
+            if alternative:
+                return alternative
     elif kind == 'ellipse':
         properties = {'x': round(float(x), 3), 'y': round(float(y), 3),
                       'w': round(float(w), 3), 'h': round(float(h), 3),
@@ -1413,7 +1455,9 @@ def main():
     dy = cv2.Sobel(lab.astype(np.float32), cv2.CV_32F, 0, 1, ksize=3)
     strength = np.sqrt(np.sum(dx*dx + dy*dy, axis=2))
     edge = (strength > 70).astype(np.uint8)*255
-    distance = cv2.distanceTransform(255-edge, cv2.DIST_L2, 3)
+    # OpenCV returns FLT_MAX for an empty edge map, which overflows float32 reductions.
+    distance = (cv2.distanceTransform(255-edge, cv2.DIST_L2, 3) if edge.any()
+                else np.full(edge.shape, WIDTH + HEIGHT, dtype=np.float32))
     valid = np.ones((HEIGHT, WIDTH), bool)
     masks=mask_entries(spec)
     for e in spec.get('elements', []):
