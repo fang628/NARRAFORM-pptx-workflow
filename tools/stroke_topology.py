@@ -3,6 +3,7 @@ import heapq
 import math
 import cv2
 import numpy as np
+from fit_window import touches_window
 
 
 def thin(mask):
@@ -89,6 +90,35 @@ def round_nodes(mask,path,width):
         if any(np.linalg.norm(center-n['point'])<radius+n['radius'] for n in result):continue
         result.append({'point':center,'radius':radius,'sample':nearest})
     return result
+
+
+def terminal_has_wings(mask, path, node, end):
+    inward = path if end == 'begin' else path[::-1]
+    radius = node['radius']
+    distance_to_tip = node['sample'] if end == 'begin' else len(path) - 1 - node['sample']
+    start = distance_to_tip + max(5, math.ceil(2 * radius))
+    samples = inward[start:start + max(6, math.ceil(2 * radius))]
+    if len(samples) < 4:
+        return False
+    direction = samples[-1] - node['point']
+    length = np.linalg.norm(direction)
+    if length < 1:
+        return False
+    direction /= length
+    normal = np.array([-direction[1], direction[0]])
+    offsets = np.arange(-math.ceil(radius * 2), math.ceil(radius * 2) + 1)
+
+    def widths(centers):
+        points = np.rint(centers[:, None, :] + offsets[None, :, None] * normal).astype(int)
+        xx, yy = points[:, :, 0], points[:, :, 1]
+        valid = (xx >= 0) & (xx < mask.shape[1]) & (yy >= 0) & (yy < mask.shape[0])
+        return np.sum(valid & mask[yy.clip(0, mask.shape[0] - 1), xx.clip(0, mask.shape[1] - 1)].astype(bool), axis=1)
+
+    shaft = float(np.percentile(widths(samples), 60))
+    center = node['point']
+    bulb, tip, beyond = widths(center - np.array([0., .72, 1.65])[:, None] * radius * direction)
+    # A square-ended widening has shoulders but no rounding toward the tip.
+    return shaft > 0 and bulb >= shaft + max(2, shaft * .35) and 0 < tip < bulb and beyond <= shaft
 
 
 def simplify_polyline(path,width):
@@ -179,7 +209,7 @@ def recover_stroke(ref,bg,e,controls,hidden,expansion=1):
         support=float((d[yy,xx]<max(10,width*3)).mean())
         if support<.55:continue
         diagnostic={'box':[int(x+lo[0]),int(y+lo[1]),int(w),int(h)],'seedSupport':support};diagnostics.append(diagnostic)
-        if x<=1 or y<=1 or x+w>=ink.shape[1]-1 or y+h>=ink.shape[0]-1:clipped=True;continue
+        if touches_window((x,y,w,h),ink.shape):clipped=True;continue
         skeleton=thin(component);adj=prune(graph(skeleton),max(5,width*2.5))
         ends=[p for p in adj if len(adj[p])==1]
         diagnostic.update(endpoints=len(ends),skeleton=len(adj))
@@ -197,8 +227,11 @@ def recover_stroke(ref,bg,e,controls,hidden,expansion=1):
         measured=max(1.,float(np.percentile(radii,35))*2-1)
         nodes=round_nodes(component,path,measured)
         for n in nodes:
-            if n['sample']<max(5,n['radius']*2):n['end']='begin'
-            elif n['sample']>len(path)-max(6,n['radius']*2):n['end']='end'
+            reach = min(18, max(8, 3 * n['radius'], 3 * measured))
+            distance = np.linalg.norm(path[[0, -1]]-n['point'], axis=1)
+            closest = int(np.argmin(distance))
+            if distance[closest] <= reach:n['end'] = ('begin', 'end')[closest]
+        nodes = [n for n in nodes if not n.get('end') or terminal_has_wings(component, path, n, n['end'])]
         terminals={n['end']:n for n in nodes if n.get('end')}
         first=terminals.get('begin',{}).get('sample',0);last=terminals.get('end',{}).get('sample',len(path)-1)
         path=path[first:last+1].copy()

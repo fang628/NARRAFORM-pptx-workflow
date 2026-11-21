@@ -1,6 +1,7 @@
 """Geometry evidence for compact flat SVG symbols, independent of badge paint."""
 import cv2
 import numpy as np
+from fit_window import touches_window
 
 
 def symbol_mask(image, valid, spec, size):
@@ -24,7 +25,7 @@ def symbol_mask(image, valid, spec, size):
         if distance[labels==i].max()<max(1.4,min(ew,eh)*.018):continue
         if not .13*ink.shape[1]<cx<.87*ink.shape[1]:continue
         if not .30*eh<cy<1.55*eh:continue
-        if x<=1 or y<=1 or x+w>=ink.shape[1]-1 or y+h>=ink.shape[0]-1:
+        if touches_window((x,y,w,h),ink.shape):
             if area/max(1,w*h)>.18:partial=True
             continue
         kept.append(i)
@@ -113,18 +114,21 @@ def whole_geometry(spec,ctx,size):
     for threshold in (90,130):
         colored=((hsv[:,:,1]>65)&(hsv[:,:,2]>threshold)&ctx['valid']).astype(np.uint8)
         contours.extend(cv2.findContours(colored,cv2.RETR_LIST,cv2.CHAIN_APPROX_SIMPLE)[0])
-    choices=[]
+    choices=[];clipped=False
     for contour in contours:
         hull=cv2.convexHull(contour);x,y,w,h=cv2.boundingRect(hull)
         if not (.65*box['w']*sx<w<1.4*box['w']*sx and .7*box['h']*sy<h<1.5*box['h']*sy):continue
         if not (x<=xs.min() and y<=ys.min() and x+w>=xs.max() and y+h>=ys.max()):continue
         if abs(x+w/2-cx)>w*.25 or abs(y+h/2-cy)>h*.3:continue
+        if touches_window((x,y,w,h),ctx['valid'].shape):
+            clipped=True
+            continue
         polygon=cv2.approxPolyDP(hull,cv2.arcLength(hull,True)*.018,True)[:,0,:]
         if not 4<=len(polygon)<=10:continue
         normalized=(polygon-[x,y])/[w,h]
         symmetry=max(min(np.linalg.norm(p+q-[1,1]) for q in normalized) for p in normalized)
         choices.append((abs(w-box['w']*sx)+abs(h-box['h']*sy)+symmetry*max(w,h)*2,polygon,(x,y,w,h)))
-    if not choices:return None
+    if not choices:return {'clipped':True} if clipped else None
     _,polygon,(x,y,w,h)=min(choices,key=lambda a:a[0])
     if len(polygon)==6:
         # Fit the complete convex shell as one symmetric polygon; a local

@@ -19,7 +19,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 from shape_reference import seed_polygon
-from parallel_candidates import measured_parallel_candidates
+from fit_window import complete_components, supported_thin_ends, thin_fill_box, touches_window
+from parallel_candidates import measured_parallel_candidates, parallel_side_hypotheses
 from parameter_confidence import weighted_median,provenance
 from structural_edges import match_panel
 from object_masks import object_alpha,mask_entries
@@ -575,6 +576,83 @@ def top_bottom_evidence(edge, valid, x, y, w, h):
     return horizontal[0], horizontal[1]
 
 
+def filled_quad_candidates(e, reference, distance, valid, box):
+    x, y, w, h = box
+    hints = []
+    for color in [e.get('fill')] + [stop.get('color') for stop in (e.get('gradient') or {}).get('stops', [])]:
+        try:
+            value = str(color).lstrip('#')
+            bgr = np.array([[[int(value[i:i+2],16) for i in (4,2,0)]]], np.uint8)
+            hue, saturation, brightness = map(float, cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)[0,0])
+            if saturation > 80 and brightness > 100:
+                hints.append((hue, saturation))
+        except (ValueError, TypeError):
+            continue
+    if not hints:
+        return []
+
+    for pad_x, pad_y in ((60, 40), (120, 80), (220, 130)):
+        left, top = max(0, int(x-pad_x)), max(0, int(y-pad_y))
+        right, bottom = min(WIDTH, math.ceil(x+w+pad_x)), min(HEIGHT, math.ceil(y+h+pad_y))
+        hsv = cv2.cvtColor(reference[top:bottom,left:right], cv2.COLOR_BGR2HSV).astype(float)
+        ink = np.zeros(hsv.shape[:2], bool)
+        for hue, saturation in hints:
+            gap = abs(hsv[:,:,0] - hue)
+            ink |= ((np.minimum(gap, 180-gap) < 16)
+                    & (abs(hsv[:,:,1]-saturation) < max(45, saturation*.32)) & (hsv[:,:,2] > 100))
+        ink = cv2.morphologyEx(ink.astype(np.uint8), cv2.MORPH_OPEN, np.ones((3,3),np.uint8))
+        clipped = False
+        candidates = []
+        contours = cv2.findContours(ink, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
+        for contour in contours:
+            if cv2.contourArea(contour) < max(25, w*h*.12):
+                continue
+            bx, by, bw, bh = cv2.boundingRect(contour)
+            overlap_x = min(x+w,left+bx+bw) - max(x,left+bx)
+            overlap_y = min(y+h,top+by+bh) - max(y,top+by)
+            if overlap_x < min(w,bw)*.33 or overlap_y < min(h,bh)*.6:
+                continue
+            if touches_window((bx, by, bw, bh), ink.shape):
+                # A crop boundary cannot supply a side. Expand only for an intersecting component.
+                clipped = True
+                continue
+            if not (.45*w <= bw <= 2*w and .6*h <= bh <= 1.5*h):
+                continue
+            polygon = cv2.approxPolyDP(cv2.convexHull(contour), .035*cv2.arcLength(contour,True), True)[:,0,:].astype(float)
+            if len(polygon) == 4:
+                order = np.argsort(polygon[:,1])
+                upper, lower = (polygon[ids][np.argsort(polygon[ids,0])] for ids in (order[:2], order[2:]))
+                candidates.append(np.array([upper[0],upper[1],lower[1],lower[0]]) + [left,top])
+
+            # Measure the straight middle of the two sides, away from rounded corners.
+            envelope = []
+            for row in range(by+max(2,round(bh*.22)), by+round(bh*.78)):
+                columns = np.flatnonzero(ink[row,bx:bx+bw])
+                if len(columns) > bw*.5:
+                    envelope.append([row, columns[0]+bx, columns[-1]+bx])
+            if len(envelope) >= 12:
+                bounds = np.asarray(envelope,float)
+                slopes = [np.polyfit(bounds[:,0],bounds[:,i],1) for i in (1,2)]
+                hi = by+bh-1
+                quad = np.array([[np.polyval(slopes[0],by),by],[np.polyval(slopes[1],by),by],
+                                [np.polyval(slopes[1],hi),hi],[np.polyval(slopes[0],hi),hi]]) + [left,top]
+                candidates.extend(parallel_side_hypotheses(quad))
+
+        if clipped and pad_x != 220:
+            continue
+        fitted = []
+        for points in candidates:
+            metric = score(points,distance,valid)
+            if not metric or metric['support'] < .6:
+                continue
+            sides = [a+(b-a)*np.linspace(.16,.84,24)[:,None] for a,b in zip(points,np.roll(points,-1,axis=0))]
+            # Long cap edges must not compensate for a missing short side.
+            if all((observed := _boundary_metric(side,distance,valid)) and observed['p95'] <= 3
+                   for side in sides):
+                fitted.append((metric,points))
+        return fitted
+
+
 def quad_side_candidates(e, reference, distance, valid, edge, box, baseline):
     x, y, w, h = box
     top, bottom = top_bottom_evidence(edge, valid, x, y, w, h)
@@ -598,48 +676,7 @@ def quad_side_candidates(e, reference, distance, valid, edge, box, baseline):
         variants = [preferred, -preferred]
     candidates = [(baseline, prototype(e, box, 'quad'))]  # declared geometry remains a candidate
     if str(e.get('shape') or '').lower() in ('parallelogram','freeform') and min(w,h)<=80:
-        colors=[e.get('fill')]+[stop.get('color') for stop in (e.get('gradient') or {}).get('stops',[])]
-        hues=[]
-        for color in colors:
-            try:
-                value=str(color).lstrip('#')
-                hsv=cv2.cvtColor(np.array([[[int(value[i:i+2],16) for i in (4,2,0)]]],np.uint8),cv2.COLOR_BGR2HSV)[0,0]
-                if hsv[1]>80 and hsv[2]>100:hues.append(float(hsv[0]))
-            except (ValueError,TypeError):pass
-        if hues:
-            left,top_roi=max(0,int(x-60)),max(0,int(y-40))
-            right,bottom_roi=min(WIDTH,int(x+w+60)),min(HEIGHT,int(y+h+40))
-            hsv=cv2.cvtColor(reference[top_roi:bottom_roi,left:right],cv2.COLOR_BGR2HSV).astype(float)
-            hue_distance=np.minimum.reduce([np.minimum(abs(hsv[:,:,0]-hue),180-abs(hsv[:,:,0]-hue)) for hue in hues])
-            ink=((hue_distance<16)&(hsv[:,:,1]>80)&(hsv[:,:,2]>100)).astype(np.uint8)*255
-            ink=cv2.morphologyEx(ink,cv2.MORPH_OPEN,np.ones((3,3),np.uint8))
-            contours=cv2.findContours(ink,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)[0]
-            for contour in contours:
-                if cv2.contourArea(contour)<max(25,w*h*.12):continue
-                bx,by,bw,bh=cv2.boundingRect(contour)
-                if .55*w<bw<1.5*w and .65*h<bh<1.4*h:
-                    envelope=[]
-                    for row in range(by+max(2,round(bh*.18)),by+round(bh*.82)):
-                        columns=np.flatnonzero(ink[row,bx:bx+bw])
-                        if len(columns)>bw*.5:envelope.append([row,columns[0]+bx,columns[-1]+bx])
-                    if len(envelope)>=12:
-                        edge=np.asarray(envelope,float);slopes=[np.polyfit(edge[:,0],edge[:,i],1) for i in (1,2)]
-                        if slopes[0][0]*slopes[1][0]>0 and abs(slopes[0][0]-slopes[1][0])*bh<4:
-                            lo_y,hi_y=float(by),float(by+bh-1)
-                            measured=np.array([[np.polyval(slopes[0],lo_y),lo_y],[np.polyval(slopes[1],lo_y),lo_y],
-                                [np.polyval(slopes[1],hi_y),hi_y],[np.polyval(slopes[0],hi_y),hi_y]])+[left,top_roi]
-                            for poly in measured_parallel_candidates(measured):
-                                pm=score(poly,distance,valid)
-                                if pm and pm['support']>=.85 and pm['p95']<=3:candidates.append(({**pm,'cost':pm['cost']-.3},poly))
-                polygon=cv2.approxPolyDP(cv2.convexHull(contour),.035*cv2.arcLength(contour,True),True)[:,0,:].astype(float)+[left,top_roi]
-                if len(polygon)!=4:continue
-                order=np.argsort(polygon[:,1]);upper=polygon[order[:2]][np.argsort(polygon[order[:2],0])]
-                lower=polygon[order[2:]][np.argsort(polygon[order[2:],0])]
-                candidate=np.array([upper[0],upper[1],lower[1],lower[0]])
-                candidate_size=candidate.max(0)-candidate.min(0)
-                if not (.45<=candidate_size[0]/w<=2 and .6<=candidate_size[1]/h<=1.5):continue
-                observed=score(candidate,distance,valid)
-                if observed and observed['support']>=.6:candidates.append((observed,candidate))
+        candidates.extend(filled_quad_candidates(e, reference, distance, valid, box))
     for sign in variants:
         variant = {**e}
         if sign != 1 or declared_sign in (1, -1):
@@ -703,27 +740,29 @@ def quad_side_candidates(e, reference, distance, valid, edge, box, baseline):
 
 def locate_thin_fill(element,reference,box):
     x,y,w,h=box
-    if min(w,h)>14 or max(w,h)/max(1,min(w,h))<3:return None
+    if not thin_fill_box(box):return None
     colors=[element.get('fill')]+[s.get('color') for s in (element.get('gradient') or {}).get('stops',[])]
     palette=[]
     for color in colors:
         try:palette.append([int(str(color).lstrip('#')[i:i+2],16) for i in (4,2,0)])
         except (ValueError,TypeError):pass
     if not palette:return None
-    pad=min(32,max(12,max(w,h)*.5));left,top=max(0,int(x-pad)),max(0,int(y-pad));right,bottom=min(WIDTH,int(x+w+pad)),min(HEIGHT,int(y+h+pad))
-    patch=reference[top:bottom,left:right]
-    hsv=cv2.cvtColor(patch,cv2.COLOR_BGR2HSV).astype(float)
+    pad=min(32,max(12,max(w,h)*.5))
     hints=cv2.cvtColor(np.array([palette],np.uint8),cv2.COLOR_BGR2HSV)[0].astype(float)
     hints=hints[hints[:,1]>65]
     if not len(hints):return None
-    d=np.minimum.reduce([np.minimum(abs(hsv[:,:,0]-v[0]),180-abs(hsv[:,:,0]-v[0])) for v in hints])
-    mask=((d<12)&(hsv[:,:,1]>70)&(hsv[:,:,2]>90)).astype(np.uint8)
-    count,labels,stats,centers=cv2.connectedComponentsWithStats(mask);candidates=[]
-    for i in range(1,count):
-        a,b,c,d,pixels=stats[i];cx,cy=centers[i]+[left,top]
-        if not (.4*w<=c<=2.5*w and .4*h<=d<=2*h and pixels>=max(8,w*h*.2)):continue
-        if (w<h)!=(c<d):continue
-        candidates.append((math.hypot(cx-x-w/2,cy-y-h/2),np.array([a+left,b+top,c,d],float)))
+    def mask_for(patch):
+        hsv=cv2.cvtColor(patch,cv2.COLOR_BGR2HSV).astype(float)
+        d=np.minimum.reduce([np.minimum(abs(hsv[:,:,0]-v[0]),180-abs(hsv[:,:,0]-v[0])) for v in hints])
+        return ((d<12)&(hsv[:,:,1]>70)&(hsv[:,:,2]>90)).astype(np.uint8)
+
+    def eligible(bounds, center, area):
+        a,b,c,d=bounds
+        return (.4*w<=c<=2.5*w and .4*h<=d<=2*h and area>=max(8,w*h*.2)
+                and (w<h)==(c<d) and min(a+c,x+w)-max(a,x)>0 and min(b+d,y+h)-max(b,y)>0)
+
+    candidates=[(math.hypot(cx-x-w/2,cy-y-h/2),np.array(bounds,float))
+                for bounds,(cx,cy) in complete_components(reference,box,(pad,pad),mask_for,eligible,min(100,max(24,max(w,h)*.65)))]
     return min(candidates,key=lambda item:item[0])[1] if candidates else None
 
 
@@ -746,25 +785,24 @@ def locate_coloured_dot(element, reference, box):
     if not hues:
         return None
     pad_x, pad_y = min(24, max(6, width*.75)), min(24,max(6,height*.75))
-    left, right = max(0, int(x-pad_x)), min(WIDTH, int(x+width+pad_x))
-    top, bottom = max(0, int(y-pad_y)), min(HEIGHT, int(y+height+pad_y))
-    hsv = cv2.cvtColor(reference[top:bottom, left:right], cv2.COLOR_BGR2HSV).astype(float)
-    hue_distance = np.minimum.reduce([np.minimum(abs(hsv[:, :, 0]-h), 180-abs(hsv[:, :, 0]-h)) for h in hues])
-    mask = ((hue_distance < 16) & (hsv[:, :, 1] > 65) & (hsv[:, :, 2] > 130)).astype(np.uint8)
-    count, labels, stats, centers = cv2.connectedComponentsWithStats(mask)
+    def mask_for(patch):
+        hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV).astype(float)
+        hue_distance = np.minimum.reduce([np.minimum(abs(hsv[:, :, 0]-h), 180-abs(hsv[:, :, 0]-h)) for h in hues])
+        return ((hue_distance < 16) & (hsv[:, :, 1] > 65) & (hsv[:, :, 2] > 130)).astype(np.uint8)
+
+    def eligible(bounds, center, area):
+        _, _, cw, ch = bounds
+        cx, cy = center
+        return (.1*width*height <= area <= 3*width*height and .5 <= cw/ch <= 2
+                and abs(cx-x-width/2) <= pad_x+2 and abs(cy-y-height/2) <= pad_y+2)
+
     candidates = []
-    for i in range(1, count):
-        lx, ly, cw, ch, pixels = stats[i]
-        cx, cy = centers[i] + [left, top]
-        if not (.1*width*height <= pixels <= 3*width*height and .5 <= cw/max(1,ch) <= 2):
-            continue
+    for (_, _, cw, ch), (cx, cy) in complete_components(reference, box, (pad_x,pad_y), mask_for, eligible, min(40,max(width,height))):
         if family(element)=='ellipse' and element.get('_circle'):
             if max(cw,ch)/max(1,min(cw,ch))>1.18:continue
             diameter=(cw+ch)/2
             if not .7*((width+height)/2)<=diameter<=1.35*((width+height)/2):continue
             cw=ch=diameter
-        if abs(cx-(x+width/2)) > pad_x or abs(cy-(y+height/2)) > pad_y:
-            continue
         cost = math.hypot(cx-(x+width/2),cy-(y+height/2)) + abs(cw-ch)
         candidates.append((cost, [cx-cw/2, cy-ch/2, float(cw), float(ch)]))
     return np.asarray(min(candidates, key=lambda item: item[0])[1]) if candidates else None
@@ -776,14 +814,19 @@ def fit_capsule(e,ref,distance,valid):
     try:
         color=str(e.get('fill','')).lstrip('#');bgr=np.array([[[int(color[i:i+2],16) for i in (4,2,0)]]],np.uint8)
         hint=cv2.cvtColor(bgr,cv2.COLOR_BGR2HSV)[0,0].astype(float)
-        pad=min(28,max(10,min(w,h)*.5));left,top=max(0,int(x-pad)),max(0,int(y-pad));right,bottom=min(WIDTH,int(x+w+pad)),min(HEIGHT,int(y+h+pad))
-        hsv=cv2.cvtColor(ref[top:bottom,left:right],cv2.COLOR_BGR2HSV).astype(float)
-        hue=np.minimum(abs(hsv[:,:,0]-hint[0]),180-abs(hsv[:,:,0]-hint[0]))
-        mask=((hue<16)&(hsv[:,:,1]>max(30,hint[1]*.45))&(hsv[:,:,2]>70)).astype(np.uint8)
-        count,labels,stats,centers=cv2.connectedComponentsWithStats(mask)
-        for i in range(1,count):
-            a,b,c,d,area=map(int,stats[i])
-            if .7*w<c<1.4*w and .65*h<d<1.4*h and area>w*h*.35:boxes.append(np.array([left+a,top+b,c,d],float))
+        pad=min(28,max(10,min(w,h)*.5))
+        def mask_for(patch):
+            hsv=cv2.cvtColor(patch,cv2.COLOR_BGR2HSV).astype(float)
+            hue=np.minimum(abs(hsv[:,:,0]-hint[0]),180-abs(hsv[:,:,0]-hint[0]))
+            return ((hue<16)&(hsv[:,:,1]>max(30,hint[1]*.45))&(hsv[:,:,2]>70)).astype(np.uint8)
+
+        def eligible(bounds, center, area):
+            a,b,c,d=bounds
+            return (.7*w<c<1.4*w and .65*h<d<1.4*h and area>w*h*.35
+                    and min(a+c,x+w)-max(a,x)>.4*w and min(b+d,y+h)-max(b,y)>.4*h)
+
+        boxes.extend(np.array(bounds,float) for bounds,_ in complete_components(
+            ref,(x,y,w,h),(pad,pad),mask_for,eligible,min(80,max(24,max(w,h)*.45))))
     except (ValueError,TypeError):pass
     candidates=[]
     for box in boxes:
@@ -793,7 +836,10 @@ def fit_capsule(e,ref,distance,valid):
             for cx,cy,start in [(a+radius,b+radius,180),(a+c-radius,b+radius,270),(a+c-radius,b+d-radius,0),(a+radius,b+d-radius,90)]:
                 angles=np.deg2rad(np.linspace(start,start+90,18));points.extend(np.column_stack([cx+radius*np.cos(angles),cy+radius*np.sin(angles)]))
             metric=score(np.array(points),distance,valid)
-            if metric and metric['support']>=.7 and metric['p95']<=4:
+            contour=np.asarray(points)
+            caps=(np.vstack([contour[:18], contour[54:]]),contour[18:54]) if c>=d else (contour[:36],contour[36:])
+            if metric and metric['support']>=.7 and metric['p95']<=4 and all(
+                    (cap := _boundary_metric(arc,distance,valid)) and cap['p95']<=3.5 for arc in caps):
                 candidates.append((metric['cost']+.01*np.sum(abs(box-[x,y,w,h])),box,fraction,metric))
     if not candidates:return {'key':e['key'],'status':'retained','family':'capsule','properties':{},'reason':'capsule-boundary-unresolved'}
     _,box,fraction,metric=min(candidates,key=lambda item:item[0])
@@ -935,6 +981,9 @@ def fit(e, ref, distance, edge, valid):
             search = max(1, search / 4)
     else:
         best, metric = quad_side_candidates(e, ref, distance, valid, edge, box, baseline)
+    if kind=='quad' and thin_fill_box(box) and not supported_thin_ends(best,box,distance,valid):
+        return {'key':e['key'],'status':'retained','family':kind,'properties':{},
+                'reason':'thin-fill-ends-unresolved','metrics':metric}
     if kind == 'quad' and metric is baseline:
         # The outer quad edges do not beat the declared geometry (straight panel edges are already
         # visible), but CORNER evidence is independent: a scalar/round declared preset with a cut
@@ -1038,7 +1087,7 @@ def coloured_frame_candidate(e,ref,distance,valid):
         a,b,c,d,area=map(int,stats[i])
         if not (.8*w<=c<=1.2*w and .85*h<=d<=1.3*h and area/max(1,c*d)<.15):continue
         # Components clipped by the search window are incomplete evidence.
-        if a<=1 or b<=1 or a+c>=ink.shape[1]-1 or b+d>=ink.shape[0]-1:continue
+        if touches_window((a,b,c,d),ink.shape):continue
         ring=np.array([[left+a,top+b],[left+a+c-1,top+b],[left+a+c-1,top+b+d-1],[left+a,top+b+d-1]],float)
         contours=cv2.findContours((labels==i).astype(np.uint8),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)[0]
         outline=max(contours,key=cv2.contourArea)[:,0,:].astype(float)+[left,top] if contours else ring

@@ -1,6 +1,7 @@
 """Independent symmetric head/notch fitting from visible paired boundaries."""
 import cv2
 import numpy as np
+from fit_window import complete_components
 
 
 def arrow_kind(element):
@@ -79,22 +80,19 @@ def candidate_boxes(element, ref, box):
         return
     x, y, w, h = box
     pad = min(35, max(8, min(w, h)*.2))
-    left, top = max(0, int(x-pad)), max(0, int(y-pad))
-    right, bottom = min(ref.shape[1], int(x+w+pad+1)), min(ref.shape[0], int(y+h+pad+1))
-    patch = ref[top:bottom, left:right].astype(float)
-    if patch.size == 0:
-        return
-    delta = np.min(np.linalg.norm(patch[:, :, None]-np.asarray(colors)[None, None], axis=3), axis=2)
-    mask = cv2.morphologyEx((delta < 50).astype(np.uint8), cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
-    count, _, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
-    for i in range(1, count):
-        a, b, cw, ch, area = stats[i]
-        if area < w*h*.25 or not (.75*w <= cw <= 1.25*w and .75*h <= ch <= 1.25*h):
-            continue
+    palette = np.asarray(colors)
+    def mask_for(patch):
+        delta = np.min(np.linalg.norm(patch.astype(float)[:, :, None]-palette[None, None], axis=3), axis=2)
+        return cv2.morphologyEx((delta < 50).astype(np.uint8), cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+
+    def eligible(bounds, center, area):
+        a, b, cw, ch = bounds
+        return (area >= w*h*.25 and .75*w <= cw <= 1.25*w+1 and .75*h <= ch <= 1.25*h+1
+                and abs(a-x) <= pad and abs(b-y) <= pad)
+
+    for (a, b, cw, ch), _ in complete_components(ref, box, (pad+1,pad+1), mask_for, eligible, min(80,max(20,max(w,h)*.32))):
         # Integer filled contours include both edge pixels; bounds use their centres.
-        trial = np.array([a+left, b+top, cw-1, ch-1], float)
-        if abs(trial[0]-x) <= pad and abs(trial[1]-y) <= pad:
-            yield trial
+        yield np.array([a, b, cw-1, ch-1], float)
 
 
 def fit_arrow_parameters(element, ref, distance, valid, score):

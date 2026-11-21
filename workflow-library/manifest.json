@@ -1,7 +1,7 @@
 {
   "source": "pptx-workflow",
   "agentPolicyVersion": "agent-visual-v4",
-  "version": "310a7a4cf61baa4a",
+  "version": "94347616749219b3",
   "previousVersions": [
     "bae5344c81b0a105",
     "f1849671466acc58",
@@ -18,9 +18,10 @@
     "3b830e8f885ee2b0",
     "a1fad553ad89d0b9",
     "5d70d854968ab93a",
-    "5a762e181abbb0c1"
+    "5a762e181abbb0c1",
+    "310a7a4cf61baa4a"
   ],
-  "copiedAt": "2026-11-09T00:05:41.036Z",
+  "copiedAt": "2026-11-21T04:28:16.929Z",
   "files": [
     {
       "file": "README.md",
@@ -39,8 +40,8 @@
     },
     {
       "file": "shared/design-principles.md",
-      "sha256": "eb3b2b501c14a25e7ff4466dcf76acfee24131e381b3faecc4ae38b7e5eaa363",
-      "bytes": 9955
+      "sha256": "26bc7e5199b44303dba0f198f0d961db238d00bb7a68017e3407dc6ef20fd3cc",
+      "bytes": 9934
     },
     {
       "file": "shared/incremental-rework.md",
@@ -154,13 +155,13 @@
     },
     {
       "file": "stages/13-design/references/gen-prompt-scope.md",
-      "sha256": "6abbbcdbac31bf3133c807dccd0820775c493c702bdcfdc4b980dc2d45ee8360",
-      "bytes": 8454
+      "sha256": "f59bbddef40c7e91ebe13b55e224baa1057192b53303c1ac7432d84d91f0d0bf",
+      "bytes": 8418
     },
     {
       "file": "stages/13-design/references/layout-intent.md",
-      "sha256": "d9a5254b5c70d4f1bb6778905cd40d632a74678f189c17c9ce941fc177b93b62",
-      "bytes": 2690
+      "sha256": "9f5b97913dcc5d93be7b86d08bbd372bc411a4fea789e3074b6b1da95bf6e4f6",
+      "bytes": 2669
     },
     {
       "file": "stages/13-design/references/layout-splits.md",
@@ -184,8 +185,8 @@
     },
     {
       "file": "stages/13-design/references/style-guide.md",
-      "sha256": "3041b1bb630565076719f9689e1fbec14579dddcf3dfd732c9a518b53ed50472",
-      "bytes": 6625
+      "sha256": "03cb632cc37a369e96efdce7b983c3c977067efcf413c9bf66fe3badfef9fd11",
+      "bytes": 6547
     },
     {
       "file": "stages/13-design/references/style-tokens.json",

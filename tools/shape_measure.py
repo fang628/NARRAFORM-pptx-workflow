@@ -23,6 +23,7 @@ import numpy as np
 from PIL import Image
 
 from native_frame_fit import long_edges
+from fit_window import supported_thin_ends, thin_fill_box, touches_window
 
 cv2.setNumThreads(1)
 VERSION = 1
@@ -1218,12 +1219,14 @@ def estimate_appearance(e, ref, front, box, dist):
     }
 
 
-def fit_fill_contour(e, front, dist, box):
+def fit_fill_contour(e, front, dist, box, expanded=False):
     """Fill-contrast boundary lane: model the interior vs surrounding colours, segment the
     element region, then fit a polygon/ellipse to the region contour. Works for borderless
     / translucent / gradient panels where edge maps are too weak for line fitting."""
     x, y, w, h = box
     pad = max(8.0, 0.18 * max(w, h))
+    if expanded:
+        pad += min(100, max(24, .45 * max(w, h)))
     x0 = max(0, int(x - pad))
     y0 = max(0, int(y - pad))
     x1 = min(WIDTH, int(math.ceil(x + w + pad)))
@@ -1280,6 +1283,8 @@ def fit_fill_contour(e, front, dist, box):
             break
     if chosen is None:
         chosen = max(contours, key=cv2.contourArea)
+    if touches_window(cv2.boundingRect(chosen), fg.shape):
+        return None if expanded else fit_fill_contour(e, front, dist, box, expanded=True)
     area = abs(cv2.contourArea(chosen))
     if area < w * h * 0.35:
         return None
@@ -3657,7 +3662,7 @@ def four_edge_quad_candidate(e, box, lines, dist, front, elements=None):
 
 
 
-def image_contour_points(e, box, front=None):
+def image_contour_points(e, box, front=None, expanded=False):
     """Real image contour of the element (fill/gradient mask) for curvature classification:
     never use the hypothesised candidate polygon for capsule/roundRect decisions."""
     if _REF is None:
@@ -3666,6 +3671,8 @@ def image_contour_points(e, box, front=None):
     if w < 12 or h < 12:
         return None
     pad = max(12.0, 0.22 * max(w, h))
+    if expanded:
+        pad += min(100, max(24, .45 * max(w, h)))
     x0 = max(0, int(round(x - pad))); y0 = max(0, int(round(y - pad)))
     x1 = min(WIDTH, int(round(x + w + pad))); y1 = min(HEIGHT, int(round(y + h + pad)))
     if x1 - x0 < 16 or y1 - y0 < 16:
@@ -3694,6 +3701,8 @@ def image_contour_points(e, box, front=None):
         centre = np.array(cv2.mean(contour)[:2], float)
         return area - 3.0 * float(np.linalg.norm(centre - center))
     best = max(contours, key=score)
+    if touches_window(cv2.boundingRect(best), mask.shape):
+        return None if expanded else image_contour_points(e, box, front, expanded=True)
     if cv2.contourArea(best) < 0.12 * w * h:
         return None
     points = best[:, 0, :].astype(float) + np.array([x0, y0], float)
@@ -5350,6 +5359,8 @@ def fit_element(e, index, elements, families, lines, edge, dist, front):
                     'extra': {'native': roi_native, 'from': 'low-confidence-roi-shape',
                               'fallback': 'low-confidence'}}
             low_confidence = True
+    if thin_fill_box(box) and not supported_thin_ends(best['points'], box, dist, ~front if front is not None else None):
+        low_confidence = True
     chosen_native = best['extra'].get('native') or native_geometry(best['kind'], best['points'], best['extra'].get('corners'), box)
     chosen_kind = best['kind']
     native_deviation = (best.get('extra') or {}).get('nativeSnap')
@@ -5447,9 +5458,9 @@ def fit_element(e, index, elements, families, lines, edge, dist, front):
     }
 
 
-def freeform_contour(edge, box, front):
+def freeform_contour(edge, box, front, expanded=False):
     x, y, w, h = box
-    pad = 6
+    pad = 6 if not expanded else min(100, max(24, math.ceil(max(w, h)*.6)))
     x0, y0 = max(0, int(x) - pad), max(0, int(y) - pad)
     x1, y1 = min(WIDTH, int(math.ceil(x + w)) + pad), min(HEIGHT, int(math.ceil(y + h)) + pad)
     if x1 - x0 < 8 or y1 - y0 < 8:
@@ -5461,6 +5472,8 @@ def freeform_contour(edge, box, front):
     if not contours:
         return None
     contour = max(contours, key=cv2.contourArea)
+    if touches_window(cv2.boundingRect(contour), roi.shape):
+        return None if expanded else freeform_contour(edge, box, front, expanded=True)
     if cv2.contourArea(contour) < w * h * .35:
         return None
     approx = cv2.approxPolyDP(contour, 2.5, True)[:, 0, :].astype(np.float64) + np.array([x0, y0])
